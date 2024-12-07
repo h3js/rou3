@@ -10,11 +10,9 @@ export type MethodData<T = unknown> = { data: T; paramsMap?: ParamsIndexMap };
 
 export interface Node<T = unknown> {
   key: string;
-
   static?: Record<string, Node<T>>;
   param?: Node<T>;
   wildcard?: Node<T>;
-
   methods?: Record<string, MethodData<T>[] | undefined>;
 }
 
