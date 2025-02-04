@@ -50,7 +50,7 @@
     "jiti": "^2.0.0-rc.1",
     "koa-tree-router": "^0.12.1",
     "listhen": "^1.7.2",
-    "mitata": "^0.1.14",
+    "mitata": "^1.0.34",
     "prettier": "^3.3.3",
     "radix3": "^1.1.2",
     "rou3-release": "npm:rou3@0.5.1",
