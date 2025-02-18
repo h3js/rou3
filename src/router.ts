@@ -76,7 +76,7 @@ function lookup<T extends RadixNodeData = RadixNodeData>(
         break;
       }
       if (node.paramName) {
-        params[node.paramName] = section;
+        params[node.paramName] = node.paramOffset ? section.slice(node.paramOffset) : section;
       }
       paramsFound = true;
     } else {
@@ -129,8 +129,13 @@ function insert(ctx: RadixRouterContext, path: string, data: any) {
       node.children.set(section, childNode);
 
       if (type === NODE_TYPES.PLACEHOLDER) {
-        childNode.paramName =
-          section === "*" ? `_${_unnamedPlaceholderCtr++}` : section.slice(1);
+        if(section === "*")
+          childNode.paramName = `_${_unnamedPlaceholderCtr++}`
+				else
+				{
+					childNode.paramOffset = section.indexOf(':'); //allow parameter to have a prefix "path/prefix-:name"
+					childNode.paramName = section.slice(childNode.paramOffset + 1);
+				}
         node.placeholderChildren.push(childNode);
         isStaticRoute = false;
       } else if (type === NODE_TYPES.WILDCARD) {
@@ -194,6 +199,7 @@ function createRadixNode(options: Partial<RadixNode> = {}): RadixNode {
     children: new Map(),
     data: options.data || null,
     paramName: options.paramName || null,
+		paramOffset: 0,
     wildcardChildNode: null,
     placeholderChildren: [],
   };
@@ -203,7 +209,7 @@ function getNodeType(str: string) {
   if (str.startsWith("**")) {
     return NODE_TYPES.WILDCARD;
   }
-  if (str[0] === ":" || str === "*") {
+  if (str.includes(":") || str === "*") {
     return NODE_TYPES.PLACEHOLDER;
   }
   return NODE_TYPES.NORMAL;
