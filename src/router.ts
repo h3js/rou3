@@ -69,10 +69,10 @@ function lookup<T extends RadixNodeData = RadixNodeData>(
         node =
           node.placeholderChildren.find((c) => c.maxDepth === remaining) ||
           null;
-          if(node && node.paramPrefix && section.startsWith(node.paramPrefix) == false)
-					  node = null;
       } else {
         node = node.placeholderChildren[0] || null;
+        if(node && node.paramPrefix && section.startsWith(node.paramPrefix) == false)
+	  node = null;
       }
       if (!node) {
         break;
@@ -134,13 +134,13 @@ function insert(ctx: RadixRouterContext, path: string, data: any) {
       if (type === NODE_TYPES.PLACEHOLDER) {
         if(section === "*")
           childNode.paramName = `_${_unnamedPlaceholderCtr++}`
-				else
-				{
+	else
+	{
           //allow parameter to have a prefix "path/prefix-:name"
-					let ix = section.indexOf(':');
+	  let ix = section.indexOf(':');
           childNode.paramPrefix = section.slice(0, ix); 
-					childNode.paramName = section.slice(ix+1);
-				}
+	  childNode.paramName = section.slice(ix + 1);
+	}
         node.placeholderChildren.push(childNode);
         isStaticRoute = false;
       } else if (type === NODE_TYPES.WILDCARD) {
@@ -204,7 +204,7 @@ function createRadixNode(options: Partial<RadixNode> = {}): RadixNode {
     children: new Map(),
     data: options.data || null,
     paramName: options.paramName || null,
-		paramPrefix: null,
+    paramPrefix: null,
     wildcardChildNode: null,
     placeholderChildren: [],
   };
