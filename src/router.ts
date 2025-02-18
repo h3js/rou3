@@ -69,6 +69,8 @@ function lookup<T extends RadixNodeData = RadixNodeData>(
         node =
           node.placeholderChildren.find((c) => c.maxDepth === remaining) ||
           null;
+          if(node && node.paramPrefix && section.startsWith(node.paramPrefix) == false)
+					  node = null;
       } else {
         node = node.placeholderChildren[0] || null;
       }
@@ -76,7 +78,8 @@ function lookup<T extends RadixNodeData = RadixNodeData>(
         break;
       }
       if (node.paramName) {
-        params[node.paramName] = node.paramOffset ? section.slice(node.paramOffset) : section;
+        params[node.paramName] = 
+          node.paramPrefix ? section.slice(node.paramPrefix.length) : section;
       }
       paramsFound = true;
     } else {
@@ -133,8 +136,10 @@ function insert(ctx: RadixRouterContext, path: string, data: any) {
           childNode.paramName = `_${_unnamedPlaceholderCtr++}`
 				else
 				{
-					childNode.paramOffset = section.indexOf(':'); //allow parameter to have a prefix "path/prefix-:name"
-					childNode.paramName = section.slice(childNode.paramOffset + 1);
+          //allow parameter to have a prefix "path/prefix-:name"
+					let ix = section.indexOf(':');
+          childNode.paramPrefix = section.slice(0, ix); 
+					childNode.paramName = section.slice(ix+1);
 				}
         node.placeholderChildren.push(childNode);
         isStaticRoute = false;
@@ -199,7 +204,7 @@ function createRadixNode(options: Partial<RadixNode> = {}): RadixNode {
     children: new Map(),
     data: options.data || null,
     paramName: options.paramName || null,
-		paramOffset: 0,
+		paramPrefix: null,
     wildcardChildNode: null,
     placeholderChildren: [],
   };
