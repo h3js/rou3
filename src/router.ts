@@ -67,12 +67,16 @@ function lookup<T extends RadixNodeData = RadixNodeData>(
         // https://github.com/unjs/radix3/issues/95
         const remaining = sections.length - i;
         node =
-          node.placeholderChildren.find((c) => c.maxDepth === remaining) ||
-          null;
+          node.placeholderChildren.find((c) => {
+            let ok = c.maxDepth === remaining;
+            if(ok && c.paramPrefix)
+              ok = section.startsWith(c.paramPrefix);
+            return ok;
+          }) || null;
       } else {
         node = node.placeholderChildren[0] || null;
         if(node && node.paramPrefix && section.startsWith(node.paramPrefix) == false)
-	  node = null;
+          node = null;
       }
       if (!node) {
         break;
