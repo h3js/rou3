@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.6.0
+
+[compare changes](https://github.com/unjs/rou3/compare/v0.5.1...v0.6.0)
+
+### 🩹 Fixes
+
+- **findAll:** Last named segment is required ([#128](https://github.com/unjs/rou3/pull/128))
+- **removeRoute:** Remove named wildcard routes ([#137](https://github.com/unjs/rou3/pull/137))
+
+### 💅 Refactors
+
+- Improve null proto obj ([5899c44](https://github.com/unjs/rou3/commit/5899c44))
+
+### 📦 Build
+
+- ⚠️  Esm-only dist ([c7d3025](https://github.com/unjs/rou3/commit/c7d3025))
+
+### 🏡 Chore
+
+- Update deps ([9a60d24](https://github.com/unjs/rou3/commit/9a60d24))
+- Apply automated updates ([8cfb1bf](https://github.com/unjs/rou3/commit/8cfb1bf))
+- Update dev deps ([cbf4a8a](https://github.com/unjs/rou3/commit/cbf4a8a))
+
+#### ⚠️ Breaking Changes
+
+- ⚠️  Esm-only dist ([c7d3025](https://github.com/unjs/rou3/commit/c7d3025))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+- Vlad Sirenko ([@sirenkovladd](https://github.com/sirenkovladd))
+- Estéban ([@Barbapapazes](https://github.com/Barbapapazes))
+
 ## v0.5.1
 
 [compare changes](https://github.com/unjs/rou3/compare/v0.5.0...v0.5.1)
