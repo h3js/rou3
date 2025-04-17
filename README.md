@@ -18,33 +18,14 @@ Lightweight and fast router for JavaScript.
 
 **Install:**
 
-<!-- automd:pm-install -->
-
 ```sh
 # ✨ Auto-detect
 npx nypm install rou3
-
-# npm
-npm install rou3
-
-# yarn
-yarn add rou3
-
-# pnpm
-pnpm install rou3
-
-# bun
-bun install rou3
-
-# deno
-deno install rou3
 ```
-
-<!-- /automd -->
 
 **Import:**
 
-<!-- automd:jsimport cdn cjs src="./src/index.ts"-->
+<!-- automd:jsimport cdn src="./src/index.ts"-->
 
 **ESM** (Node.js, Bun, Deno)
 
@@ -56,18 +37,6 @@ import {
   removeRoute,
   findAllRoutes,
 } from "rou3";
-```
-
-**CommonJS** (Legacy Node.js)
-
-```js
-const {
-  createRouter,
-  addRoute,
-  findRoute,
-  removeRoute,
-  findAllRoutes,
-} = require("rou3");
 ```
 
 **CDN** (Deno, Bun and Browsers)
