@@ -1,4 +1,4 @@
-import { EmptyObject } from "./_utils";
+import { NullProtoObj } from "./_utils";
 import type { RouterContext } from "./types";
 
 /**
@@ -7,7 +7,7 @@ import type { RouterContext } from "./types";
 export function createRouter<T = unknown>(): RouterContext<T> {
   const ctx: RouterContext<T> = {
     root: { key: "" },
-    static: new EmptyObject(),
+    static: new NullProtoObj(),
   };
   return ctx;
 }

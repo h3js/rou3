@@ -1,4 +1,4 @@
-import { EmptyObject } from "../_utils";
+import { NullProtoObj } from "../_utils";
 import type { RouterContext, ParamsIndexMap } from "../types";
 import { splitPath } from "./_utils";
 
@@ -60,7 +60,7 @@ export function addRoute<T>(
     } else {
       const staticNode = { key: segment };
       if (!node.static) {
-        node.static = new EmptyObject();
+        node.static = new NullProtoObj();
       }
       node.static![segment] = staticNode;
       node = staticNode;
@@ -70,7 +70,7 @@ export function addRoute<T>(
   // Assign index, params and data to the node
   const hasParams = paramsMap.length > 0;
   if (!node.methods) {
-    node.methods = new EmptyObject();
+    node.methods = new NullProtoObj();
   }
   if (!node.methods![method]) {
     node.methods![method] = [];

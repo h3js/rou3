@@ -1,4 +1,4 @@
-import { EmptyObject } from "../_utils";
+import { NullProtoObj } from "../_utils";
 import type { MatchedRoute, ParamsIndexMap } from "../types";
 
 export function splitPath(path: string) {
@@ -9,7 +9,7 @@ export function getMatchParams(
   segments: string[],
   paramsMap: ParamsIndexMap,
 ): MatchedRoute["params"] {
-  const params = new EmptyObject();
+  const params = new NullProtoObj();
   for (const [index, name] of paramsMap) {
     const segment =
       index < 0 ? segments.slice(-1 * index).join("/") : segments[index];
