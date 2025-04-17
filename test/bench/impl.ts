@@ -1,16 +1,16 @@
 import * as rou3Src from "../../src";
-// import * as rou3Release from "rou3-release";
+import * as rou3Release from "rou3-release";
 import { requests, routes } from "./input";
 
 export function createInstances() {
   return [
     ["rou3", createRouter(rou3Src)],
     ["rou3-find-all", createRouter(rou3Src, true)],
-    // ["rou3-release", createRouter(rou3Release as unknown as typeof rou3Src)],
-    // [
-    //   "rou3-release-find-all",
-    //   createRouter(rou3Release as unknown as typeof rou3Src, true),
-    // ],
+    ["rou3-release", createRouter(rou3Release as unknown as typeof rou3Src)],
+    [
+      "rou3-release-find-all",
+      createRouter(rou3Release as unknown as typeof rou3Src, true),
+    ],
     process.argv.includes("--max")
       ? ["maximum", createFastestRouter()]
       : undefined,
