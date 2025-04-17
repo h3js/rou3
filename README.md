@@ -3,7 +3,7 @@
 <!-- automd:badges codecov bundlejs -->
 
 [![npm version](https://img.shields.io/npm/v/rou3)](https://npmjs.com/package/rou3)
-[![npm downloads](https://img.shields.io/npm/dm/rou3)](https://npmjs.com/package/rou3)
+[![npm downloads](https://img.shields.io/npm/dm/rou3)](https://npm.chart.dev/rou3)
 [![bundle size](https://img.shields.io/bundlejs/size/rou3)](https://bundlejs.com/?q=rou3)
 [![codecov](https://img.shields.io/codecov/c/gh/unjs/rou3)](https://codecov.io/gh/unjs/rou3)
 
@@ -35,6 +35,9 @@ pnpm install rou3
 
 # bun
 bun install rou3
+
+# deno
+deno install rou3
 ```
 
 <!-- /automd -->
@@ -43,7 +46,7 @@ bun install rou3
 
 <!-- automd:jsimport cdn cjs src="./src/index.ts"-->
 
-**ESM** (Node.js, Bun)
+**ESM** (Node.js, Bun, Deno)
 
 ```js
 import {
