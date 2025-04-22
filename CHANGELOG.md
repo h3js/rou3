@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.6.1
+
+[compare changes](https://github.com/unjs/rou3/compare/v0.6.0...v0.6.1)
+
+### 💅 Refactors
+
+- Explicit extensions and types ([2043cca](https://github.com/unjs/rou3/commit/2043cca))
+
+### 📦 Build
+
+- Use obuild ([e209f3b](https://github.com/unjs/rou3/commit/e209f3b))
+
+### 🏡 Chore
+
+- Update readme ([6cf82d7](https://github.com/unjs/rou3/commit/6cf82d7))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.6.0
 
 [compare changes](https://github.com/unjs/rou3/compare/v0.5.1...v0.6.0)

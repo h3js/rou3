@@ -1,6 +1,6 @@
 {
   "name": "rou3",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Lightweight and fast router for JavaScript based on Radix Tree",
   "repository": "unjs/rou3",
   "license": "MIT",
