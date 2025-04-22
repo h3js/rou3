@@ -16,7 +16,7 @@
   "scripts": {
     "bench:bun": "bun ./test/bench",
     "bench:node": "node --import jiti/register ./test/bench",
-    "build": "unbuild",
+    "build": "obuild src/index.ts",
     "dev": "vitest",
     "lint": "eslint . && prettier -c src test",
     "lint:fix": "automd && eslint --fix . && prettier -w src test",
@@ -37,10 +37,10 @@
     "jiti": "^2.4.2",
     "listhen": "^1.9.0",
     "mitata": "^1.0.34",
+    "obuild": "^0.0.3",
     "prettier": "^3.5.3",
     "rou3-release": "npm:rou3@0.5.1",
     "typescript": "^5.8.3",
-    "unbuild": "^3.5.0",
     "vitest": "^3.1.1"
   },
   "packageManager": "pnpm@10.8.1"
