@@ -14,7 +14,10 @@ export const routes = [
   { method: "GET", path: "/status" },
   { method: "GET", path: "/very/deeply/nested/route/hello/there" },
   { method: "GET", path: "/static/:path" },
-];
+] as Array<{
+  method: string;
+  path: string;
+}>;
 
 export const requests = [
   {
@@ -63,4 +66,10 @@ export const requests = [
     params: { path: "index.html" },
     data: "[GET] /static/:path",
   },
-];
+] as Array<{
+  name: string;
+  method: string;
+  path: string;
+  params?: Record<string, string>;
+  data: string;
+}>;

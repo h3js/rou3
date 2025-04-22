@@ -1,7 +1,7 @@
-import type { RouterContext } from "../src/types";
 import { describe, it, expect } from "vitest";
-import { createRouter, formatTree } from "./_utils";
-import { addRoute, findRoute, removeRoute } from "../src";
+import type { RouterContext } from "../src/types.ts";
+import { createRouter, formatTree } from "./_utils.ts";
+import { addRoute, findRoute, removeRoute } from "../src/index.ts";
 
 type TestRoute = {
   data: { path: string };

@@ -1,6 +1,6 @@
 import { bench, group, summary, compact, run } from "mitata";
-import { requests } from "./input";
-import { createInstances } from "./impl";
+import { requests } from "./input.ts";
+import { createInstances } from "./impl.ts";
 
 const instances = createInstances();
 

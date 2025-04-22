@@ -1,6 +1,6 @@
-import { NullProtoObj } from "../_utils";
-import type { RouterContext, ParamsIndexMap } from "../types";
-import { splitPath } from "./_utils";
+import { NullProtoObj } from "../_utils.ts";
+import type { RouterContext, ParamsIndexMap } from "../types.ts";
+import { splitPath } from "./_utils.ts";
 
 /**
  * Add a route to the router context.
@@ -10,7 +10,7 @@ export function addRoute<T>(
   method: string = "",
   path: string,
   data?: T,
-) {
+): void {
   const segments = splitPath(path);
 
   let node = ctx.root;

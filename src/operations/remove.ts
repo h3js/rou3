@@ -1,5 +1,5 @@
-import type { RouterContext, Node } from "../types";
-import { splitPath } from "./_utils";
+import type { RouterContext, Node } from "../types.ts";
+import { splitPath } from "./_utils.ts";
 
 /**
  * Remove a route from the router context.
@@ -8,7 +8,7 @@ export function removeRoute<T>(
   ctx: RouterContext<T>,
   method: string,
   path: string,
-) {
+): void {
   const segments = splitPath(path);
   return _remove(ctx.root, method || "", segments, 0);
 }

@@ -1,6 +1,6 @@
-import * as rou3Src from "../../src";
 import * as rou3Release from "rou3-release";
-import { requests, routes } from "./input";
+import * as rou3Src from "../../src/index.ts";
+import { requests, routes } from "./input.ts";
 
 export function createInstances() {
   return [
@@ -17,7 +17,10 @@ export function createInstances() {
   ].filter(Boolean) as [string, (method: string, path: string) => any][];
 }
 
-export function createRouter(rou3: typeof rou3Src, withAll: boolean = false) {
+export function createRouter(
+  rou3: typeof rou3Src,
+  withAll: boolean = false,
+): (method: string, path: string) => any {
   const router = rou3.createRouter();
   for (const route of routes) {
     rou3.addRoute(
@@ -37,7 +40,7 @@ export function createRouter(rou3: typeof rou3Src, withAll: boolean = false) {
   };
 }
 
-export function createFastestRouter() {
+export function createFastestRouter(): (method: string, path: string) => any {
   const staticMap = Object.create(null);
   for (const req of requests) {
     staticMap[req.method] = staticMap[req.method] || Object.create(null);

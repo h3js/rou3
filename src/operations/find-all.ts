@@ -1,5 +1,10 @@
-import type { RouterContext, Node, MatchedRoute, MethodData } from "../types";
-import { getMatchParams, splitPath } from "./_utils";
+import type {
+  RouterContext,
+  Node,
+  MatchedRoute,
+  MethodData,
+} from "../types.ts";
+import { getMatchParams, splitPath } from "./_utils.ts";
 
 /**
  * Find all route patterns that match the given path.

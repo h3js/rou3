@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { createRouter, formatTree } from "./_utils";
-import { findAllRoutes, type RouterContext } from "../src";
+import { createRouter, formatTree } from "./_utils.ts";
+import { findAllRoutes, type RouterContext } from "../src/index.ts";
 
 // Helper to make snapsots more readable
 const _findAllRoutes = (

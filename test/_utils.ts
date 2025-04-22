@@ -1,5 +1,5 @@
-import type { Node, RouterContext } from "../src/types";
-import { createRouter as _createRouter, addRoute } from "../src";
+import type { Node, RouterContext } from "../src/types.ts";
+import { createRouter as _createRouter, addRoute } from "../src/index.ts";
 
 export function createRouter<
   T extends Record<string, string> = Record<string, string>,
@@ -22,7 +22,7 @@ export function formatTree(
   depth = 0,
   result = [] as string[],
   prefix = "",
-) {
+): string | string[] {
   result.push(
     // prettier-ignore
     `${prefix}${depth === 0 ? "" : "├── "}${node.key ? `/${node.key}` : (depth === 0 ? "<root>" : "<?>")}${_formatMethods(node)}`,

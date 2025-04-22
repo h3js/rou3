@@ -1,5 +1,10 @@
-import type { RouterContext, MatchedRoute, Node, MethodData } from "../types";
-import { getMatchParams, splitPath } from "./_utils";
+import type {
+  RouterContext,
+  MatchedRoute,
+  Node,
+  MethodData,
+} from "../types.ts";
+import { getMatchParams, splitPath } from "./_utils.ts";
 
 /**
  * Find a route by path.

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { createRouter, formatTree } from "./_utils";
-import { findRoute, removeRoute } from "../src";
+import { createRouter, formatTree } from "./_utils.ts";
+import { findRoute, removeRoute } from "../src/index.ts";
 
 describe("Basic router", () => {
   const router = createRouter([

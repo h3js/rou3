@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { requests } from "./input";
-import { createInstances } from "./impl";
+import { requests } from "./input.ts";
+import { createInstances } from "./impl.ts";
 
 describe("benchmark", () => {
   const instances = createInstances();

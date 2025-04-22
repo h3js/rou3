@@ -1,7 +1,7 @@
-import { NullProtoObj } from "../_utils";
-import type { MatchedRoute, ParamsIndexMap } from "../types";
+import { NullProtoObj } from "../_utils.ts";
+import type { MatchedRoute, ParamsIndexMap } from "../types.ts";
 
-export function splitPath(path: string) {
+export function splitPath(path: string): string[] {
   return path.split("/").filter(Boolean);
 }
 

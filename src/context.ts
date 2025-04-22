@@ -1,5 +1,5 @@
-import { NullProtoObj } from "./_utils";
-import type { RouterContext } from "./types";
+import { NullProtoObj } from "./_utils.ts";
+import type { RouterContext } from "./types.ts";
 
 /**
  * Create a new router context.
