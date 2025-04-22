@@ -37,7 +37,7 @@
     "jiti": "^2.4.2",
     "listhen": "^1.9.0",
     "mitata": "^1.0.34",
-    "obuild": "^0.0.3",
+    "obuild": "^0.0.4",
     "prettier": "^3.5.3",
     "rou3-release": "npm:rou3@0.5.1",
     "typescript": "^5.8.3",

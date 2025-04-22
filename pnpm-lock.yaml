@@ -45,8 +45,8 @@ importers:
         specifier: ^1.0.34
         version: 1.0.34
       obuild:
-        specifier: ^0.0.3
-        version: 0.0.3(typescript@5.8.3)
+        specifier: ^0.0.4
+        version: 0.0.4(typescript@5.8.3)
       prettier:
         specifier: ^3.5.3
         version: 3.5.3
@@ -2197,8 +2197,8 @@ packages:
     resolution: {integrity: sha512-nK28WOo+QIjBkDduTINE4JkF/UJJKyf2EJxvJKfblDpyg0Q+pkOHNTL0Qwy6NP6FhE/EnzV73BxxqcJaXY9anw==}
     engines: {node: '>= 0.4'}
 
-  obuild@0.0.3:
-    resolution: {integrity: sha512-+pOnv19W0FNHT0LeSsUBpkNVbbkdsHVSUM02UEMyGI0mv6gT77E32P5KlxFoTTRdTz22fIG2ijWL8CubPDe4kQ==}
+  obuild@0.0.4:
+    resolution: {integrity: sha512-ZP+uvmOl70br/M4svOugaBkhwbzdIMllIcAcLYj4RVQfNP+O1vpfENU632uxx+tD4r6Mqm/d0EUJ5A1x+Crp/w==}
     hasBin: true
 
   ofetch@1.4.1:
@@ -5232,7 +5232,7 @@ snapshots:
       has-symbols: 1.1.0
       object-keys: 1.1.1
 
-  obuild@0.0.3(typescript@5.8.3):
+  obuild@0.0.4(typescript@5.8.3):
     dependencies:
       consola: 3.4.2
       exsolve: 1.0.5
