@@ -5,14 +5,11 @@
 [![npm version](https://img.shields.io/npm/v/rou3)](https://npmjs.com/package/rou3)
 [![npm downloads](https://img.shields.io/npm/dm/rou3)](https://npm.chart.dev/rou3)
 [![bundle size](https://img.shields.io/bundlejs/size/rou3)](https://bundlejs.com/?q=rou3)
-[![codecov](https://img.shields.io/codecov/c/gh/unjs/rou3)](https://codecov.io/gh/unjs/rou3)
+[![codecov](https://img.shields.io/codecov/c/gh/h3js/rou3)](https://codecov.io/gh/h3js/rou3)
 
 <!-- /automd -->
 
 Lightweight and fast router for JavaScript.
-
-> [!NOTE]
-> Radix3 migrated to Rou3! See [#108](https://github.com/unjs/radix3/issues/108) for notes and [radix3 branch](https://github.com/unjs/rou3/tree/radix3) for legacy codebase.
 
 ## Usage
 
@@ -88,11 +85,11 @@ findRoute(router, "GET", "/");
 
 <!-- automd:contributors license=MIT author="pi0" -->
 
-Published under the [MIT](https://github.com/unjs/rou3/blob/main/LICENSE) license.
-Made by [@pi0](https://github.com/pi0) and [community](https://github.com/unjs/rou3/graphs/contributors) 💛
+Published under the [MIT](https://github.com/h3js/rou3/blob/main/LICENSE) license.
+Made by [@pi0](https://github.com/pi0) and [community](https://github.com/h3js/rou3/graphs/contributors) 💛
 <br><br>
-<a href="https://github.com/unjs/rou3/graphs/contributors">
-<img src="https://contrib.rocks/image?repo=unjs/rou3" />
+<a href="https://github.com/h3js/rou3/graphs/contributors">
+<img src="https://contrib.rocks/image?repo=h3js/rou3" />
 </a>
 
 <!-- /automd -->
