@@ -33,6 +33,7 @@ import {
   findRoute,
   removeRoute,
   findAllRoutes,
+  routeToRegExp,
 } from "rou3";
 ```
 
@@ -45,6 +46,7 @@ import {
   findRoute,
   removeRoute,
   findAllRoutes,
+  routeToRegExp,
 } from "https://esm.sh/rou3";
 ```
 
