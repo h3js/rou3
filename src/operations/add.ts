@@ -91,6 +91,8 @@ function _getParamMatcher(segment: string): string | RegExp {
     // Single param
     return segment.slice(1);
   }
-  const regex = segment.replace(/:(\w+)/g, (_, id) => `(?<${id}>\\w+)`);
+  const regex = segment
+    .replace(/:(\w+)/g, (_, id) => `(?<${id}>[^/]+)`)
+    .replace(/\./g, "\\.");
   return new RegExp(`^${regex}$`);
 }

@@ -13,5 +13,6 @@ export default unjs({
     "unicorn/no-array-callback-reference": 0,
     "unicorn/no-array-method-this-argument": 0,
     "unicorn/prefer-at": 0,
+    "unicorn/prefer-string-raw": 0,
   },
 });
