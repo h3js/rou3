@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.6.2
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.6.1...v0.6.2)
+
+### 🚀 Enhancements
+
+- `routeToRegExp` util ([#153](https://github.com/h3js/rou3/pull/153))
+
+### 📦 Build
+
+- Export `MatchedRoute` type ([#152](https://github.com/h3js/rou3/pull/152))
+
+### 🏡 Chore
+
+- Update obuild ([4c39178](https://github.com/h3js/rou3/commit/4c39178))
+- Move to h3js ([f0dc20a](https://github.com/h3js/rou3/commit/f0dc20a))
+- Update readme for cdn usage ([#151](https://github.com/h3js/rou3/pull/151))
+- Apply automated updates ([1f8fcb7](https://github.com/h3js/rou3/commit/1f8fcb7))
+- Update deps ([df16f13](https://github.com/h3js/rou3/commit/df16f13))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+- Wind <hi@productdevbook.com>
+- Huseeiin ([@huseeiin](https://github.com/huseeiin))
+
 ## v0.6.1
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.6.0...v0.6.1)
