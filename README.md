@@ -34,6 +34,7 @@ import {
   removeRoute,
   findAllRoutes,
   routeToRegExp,
+  NullProtoObj,
 } from "rou3";
 ```
 
@@ -47,6 +48,7 @@ import {
   removeRoute,
   findAllRoutes,
   routeToRegExp,
+  NullProtoObj,
 } from "https://esm.sh/rou3";
 ```
 
