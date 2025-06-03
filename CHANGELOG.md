@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.6.3
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.6.2...v0.6.3)
+
+### 📦 Build
+
+- Export `NullProtoObj` ([4cf5502](https://github.com/h3js/rou3/commit/4cf5502))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.6.2
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.6.1...v0.6.2)
