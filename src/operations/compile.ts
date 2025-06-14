@@ -135,7 +135,7 @@ export const _compileNode = (
 
     // Declare a variable to save previous param index
     if (paramCnt > 0) {
-      str += `${paramCnt > 1 ? "" : "let "}v=${currentIdx};`;
+      str += `let v=${currentIdx};`;
       currentIdx = "v";
     }
 
