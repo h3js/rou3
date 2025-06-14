@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "bench:bun": "bun ./test/bench",
-    "bench:node": "node --import jiti/register ./test/bench",
+    "bench:node": "node --expose-gc --allow-natives-syntax --disable-warning=ExperimentalWarning --experimental-strip-types ./test/bench/index.ts",
     "build": "obuild src/index.ts",
     "dev": "vitest",
     "lint": "eslint . && prettier -c src test",

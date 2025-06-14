@@ -1,25 +1,19 @@
-import * as rou3Release from "rou3-release";
+// import * as rou3Release from "rou3-release";
 import * as rou3Src from "../../src/index.ts";
 import { requests, routes } from "./input.ts";
 
 export function createInstances() {
   return [
     ["rou3", createRouter(rou3Src)],
-    ["rou3-find-all", createRouter(rou3Src, true)],
-    ["rou3-release", createRouter(rou3Release as unknown as typeof rou3Src)],
-    [
-      "rou3-release-find-all",
-      createRouter(rou3Release as unknown as typeof rou3Src, true),
-    ],
-    process.argv.includes("--max")
-      ? ["maximum", createFastestRouter()]
-      : undefined,
+    ["rou3-compiled", createRouter(rou3Src, "compiled")],
+    ["rou3-findAll", createRouter(rou3Src, "findAll")],
+    ["maximum", createFastestRouter()],
   ].filter(Boolean) as [string, (method: string, path: string) => any][];
 }
 
 export function createRouter(
   rou3: typeof rou3Src,
-  withAll: boolean = false,
+  variant?: "findAll" | "compiled",
 ): (method: string, path: string) => any {
   const router = rou3.createRouter();
   for (const route of routes) {
@@ -30,9 +24,16 @@ export function createRouter(
       `[${route.method}] ${route.path}`,
     );
   }
-  if (withAll) {
+  if (variant === "findAll") {
     return (method: string, path: string) => {
       return rou3.findAllRoutes(router, method, path).pop();
+    };
+  }
+  if (variant === "compiled") {
+    const matchCompiled = rou3.compileRoute(router);
+    console.log(matchCompiled.toString());
+    return (method: string, path: string) => {
+      return matchCompiled(path, method);
     };
   }
   return (method: string, path: string) => {
