@@ -206,6 +206,6 @@ export const compileRoute = <T>(
 
   return new Function(
     ...deps.map((_, i) => "d" + (i + 1)),
-    `return(p,m)=>{let l=path.length;${compiled}}`,
+    `return(p,m)=>{let l=p.length;${compiled}}`,
   )(...deps);
 };
