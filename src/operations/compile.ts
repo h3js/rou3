@@ -88,21 +88,19 @@ export const _compileNode = (
 
   if (node.static != null)
     for (const key in node.static)
-      str += `if(s[${startIdx}]===${JSON.stringify(key)}){${
-        _compileNode(
-          node.static[key],
-          params,
-          startIdx + 1,
-          deps,
-        )
-      }}`;
+      str += `if(s[${startIdx}]===${JSON.stringify(key)}){${_compileNode(
+        node.static[key],
+        params,
+        startIdx + 1,
+        deps,
+      )}}`;
 
   if (node.param != null)
     str += `if(l>${startIdx})if(s[${startIdx}]!==''){${_compileNode(
       node.param,
       [...params, `s[${startIdx}]`],
       startIdx + 1,
-      deps
+      deps,
     )}}`;
 
   if (node.wildcard != null) {
@@ -111,7 +109,11 @@ export const _compileNode = (
       throw new Error("Compiler mode does not support patterns after wildcard");
 
     if (wildcard.methods != null)
-      str += _compileMethodMatch(wildcard.methods, [...params, `'/'+s.slice(${startIdx}).join('/')`], deps);
+      str += _compileMethodMatch(
+        wildcard.methods,
+        [...params, `'/'+s.slice(${startIdx}).join('/')`],
+        deps,
+      );
   }
 
   return str;
@@ -131,7 +133,7 @@ export const _compileRouteMatch = (
   for (const key in router.static) {
     const node = router.static[key];
     if (node != null) {
-      const keyPaths = key.split('/');
+      const keyPaths = key.split("/");
       for (let i = 1; i < keyPaths.length; i++)
         str += `if(s[${i}]===${JSON.stringify(keyPaths[i])})`;
       str += _compileNode(node, [], keyPaths.length, deps);
