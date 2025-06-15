@@ -111,7 +111,7 @@ export const _compileNode = (
     if (wildcard.methods != null)
       str += _compileMethodMatch(
         wildcard.methods,
-        [...params, `'/'+s.slice(${startIdx}).join('/')`],
+        [...params, `s.slice(${startIdx}).join('/')`],
         deps,
       );
   }
