@@ -32,9 +32,7 @@ export function createRouter(
   if (variant === "compiled") {
     const matchCompiled = rou3.compileRoute(router);
     console.log(matchCompiled.toString());
-    return (method: string, path: string) => {
-      return matchCompiled(path, method);
-    };
+    return matchCompiled;
   }
   return (method: string, path: string) => {
     return rou3.findRoute(router, method, path);

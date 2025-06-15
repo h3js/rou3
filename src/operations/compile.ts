@@ -10,8 +10,10 @@ import type {
  */
 
 // p: path
-// l: path length
+// s: path parts
+// l: path parts length
 // m: method
+
 /**
  * Whether the current node has children nodes
  * @param n
@@ -34,6 +36,7 @@ const _fastMethodStringify = (m: string) =>
 
 export const _compileMethodMatch = (
   methods: Record<string, MethodData<any>[] | undefined>,
+  params: string[],
   deps: any[],
 ): string => {
   let str = "";
@@ -58,113 +61,57 @@ export const _compileMethodMatch = (
             throw new Error("Compiler does not handle regexp parameter name");
 
           // Select proper parameter
-          str += `${JSON.stringify(map[1])}:p${i},`;
+          str += `${JSON.stringify(map[1])}:${params[i]},`;
         }
         str += "}";
       }
 
-      str += "};";
+      str += "}";
     }
   }
   return str;
 };
 
-export const _compileKeyMatch = (
-  key: string,
-  startIdx: string,
-  ifBody: string,
-): string =>
-  `if(p.startsWith(${JSON.stringify(key)}${
-    startIdx === "0" ? "" : "," + startIdx
-  })){${ifBody}}`;
-
 /**
  * Compile a node to matcher logic
- *
- * Local variables:
- * - `p`: input path
- * - `l`: input path length
- * - `m`: input request method
- * - `p{i}`: parsed parameter
- * - `u`, `v`: Temporary index store
- *
- * Dependencies:
- * - `d{i}`: Dependency index i (index starts at 1)
- *
- * @param notParamNode - Whether the current node is a parameter node
- * @param param0 - Target node to compile
- * @param idxPrefix - Set to `u+` or `v+` to track parameter index
- * @param startIdx - The start index of the input string to start matching
- * @param paramCnt - Count previous path parameters
- * @param deps - Dependencies of the function scope
  */
 export const _compileNode = (
-  notParamNode: boolean,
   node: Node<any>,
-  idxPrefix: string,
+  params: string[],
   startIdx: number,
-  paramCnt: number,
   deps: any[],
 ): string => {
   let str = "";
 
-  let currentIdx = idxPrefix + startIdx;
-  if (notParamNode && node.methods != null)
-    str += `if(l===${currentIdx}){${_compileMethodMatch(node.methods, deps)}}`;
+  if (node.methods != null)
+    str += `if(l===${startIdx}){${_compileMethodMatch(node.methods, params, deps)}}`;
 
   if (node.static != null)
     for (const key in node.static)
-      str += _compileKeyMatch(
-        "/" + key,
-        currentIdx,
+      str += `if(s[${startIdx}]===${JSON.stringify(key)}){${
         _compileNode(
-          true,
           node.static[key],
-          idxPrefix,
-          startIdx + key.length + 1,
-          paramCnt,
+          params,
+          startIdx + 1,
           deps,
-        ),
-      );
+        )
+      }}`;
 
-  if (node.param != null) {
-    const { param } = node;
-
-    const hasMethods = param.methods != null;
-    const hasChildNodes = _hasChild(param);
-
-    // Declare a variable to save previous param index
-    if (paramCnt > 0) {
-      str += `let v=${currentIdx};`;
-      currentIdx = "v";
-    }
-
-    const slashIndex = `p.indexOf("/"${currentIdx === "0" ? "" : "," + currentIdx})`;
-
-    // Need to save the current parameter index if the parameter node is not a leaf node
-    if (hasChildNodes || !hasMethods)
-      str += `${paramCnt > 0 ? "" : "let "}u=${slashIndex};`;
-
-    // End of parameter
-    if (hasMethods)
-      str += `if(${hasChildNodes ? "u" : slashIndex}===-1){let p${paramCnt}=p.slice(${currentIdx});${_compileMethodMatch(param.methods!, deps)}}`;
-
-    // Compile other nodes
-    if (hasChildNodes)
-      str += `if(u>${currentIdx}){${_compileNode(false, param, "u+", 1, paramCnt + 1, deps)}}`;
-  }
+  if (node.param != null)
+    str += `if(l>${startIdx})if(s[${startIdx}]!==''){${_compileNode(
+      node.param,
+      [...params, `s[${startIdx}]`],
+      startIdx + 1,
+      deps
+    )}}`;
 
   if (node.wildcard != null) {
     const { wildcard } = node;
     if (_hasChild(wildcard))
       throw new Error("Compiler mode does not support patterns after wildcard");
 
-    const wildcardMethods = wildcard.methods;
-    if (wildcardMethods != null) {
-      const compiled = _compileMethodMatch(wildcardMethods, deps);
-      str +=
-        node.methods == null ? `if(l>${currentIdx}){${compiled}}` : compiled;
-    }
+    if (wildcard.methods != null)
+      str += _compileMethodMatch(wildcard.methods, [...params, `'/'+s.slice(${startIdx}).join('/')`], deps);
   }
 
   return str;
@@ -179,19 +126,19 @@ export const _compileRouteMatch = (
   router: RouterContext<any>,
   deps: any[],
 ): string => {
-  let str = "";
+  let str = "let s=p.split('/'),l=s.length;";
 
   for (const key in router.static) {
     const node = router.static[key];
-    if (node != null)
-      str += _compileKeyMatch(
-        key,
-        "0",
-        _compileNode(true, node, "", key.length, 0, deps),
-      );
+    if (node != null) {
+      const keyPaths = key.split('/');
+      for (let i = 1; i < keyPaths.length; i++)
+        str += `if(s[${i}]===${JSON.stringify(keyPaths[i])})`;
+      str += _compileNode(node, [], keyPaths.length, deps);
+    }
   }
 
-  return str + _compileNode(true, router.root, "", 1, 0, deps);
+  return str + _compileNode(router.root, [], 1, deps);
 };
 
 /**
@@ -200,12 +147,12 @@ export const _compileRouteMatch = (
  */
 export const compileRoute = <T>(
   router: RouterContext<T>,
-): ((path: string, method: string) => MatchedRoute<T> | undefined) => {
+): ((method: string, path: string) => MatchedRoute<T> | undefined) => {
   const deps: any[] = [];
   const compiled = _compileRouteMatch(router, deps);
 
   return new Function(
     ...deps.map((_, i) => "d" + (i + 1)),
-    `return(p,m)=>{let l=p.length;${compiled}}`,
+    `return(m,p)=>{${compiled}}`,
   )(...deps);
 };
