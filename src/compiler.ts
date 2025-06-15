@@ -1,9 +1,4 @@
-import type {
-  MatchedRoute,
-  MethodData,
-  Node,
-  RouterContext,
-} from "../types.ts";
+import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 
 /**
  * TODO: Support optional parameters and correct handling for wildcard
@@ -34,7 +29,7 @@ const _fastMethodStringify = (m: string) =>
           ? '"DELETE"'
           : JSON.stringify(m);
 
-export const _compileMethodMatch = (
+const _compileMethodMatch = (
   methods: Record<string, MethodData<any>[] | undefined>,
   params: string[],
   deps: any[],
@@ -75,7 +70,7 @@ export const _compileMethodMatch = (
 /**
  * Compile a node to matcher logic
  */
-export const _compileNode = (
+const _compileNode = (
   node: Node<any>,
   params: string[],
   startIdx: number,
@@ -124,7 +119,7 @@ export const _compileNode = (
  * @param router
  * @param deps - Dependencies of the function scope
  */
-export const _compileRouteMatch = (
+const _compileRouteMatch = (
   router: RouterContext<any>,
   deps: any[],
 ): string => {
@@ -144,15 +139,28 @@ export const _compileRouteMatch = (
 };
 
 /**
- * Compile the router to a pattern matching function
- * @param router
+ * Compiles the router instance into a faster route-matching function.
+ *
+ * **IMPORTANT:** Compiler is an experimental feature, may contain issues and the API may change between versions.
+ *
+ * **IMPORTANT:** This function requires eval (`new Function`) support in the runtime environment for JIT (Just-In-Time)
+ * compilation.
+ *
+ * @example
+ * import { createRouter, addRoute } from "rou3";
+ * import { compileRouter } from "rou3/experimental-compiler";
+ * const router = createRouter();
+ * // [add some routes]
+ * const findRoute = compileRouter(router);
+ * findRoute("GET", "/path/foo/bar");
+ *
+ * @param router - The router context to compile.
  */
 export const compileRouter = <T>(
   router: RouterContext<T>,
 ): ((method: string, path: string) => MatchedRoute<T> | undefined) => {
   const deps: any[] = [];
   const compiled = _compileRouteMatch(router, deps);
-
   return new Function(
     ...deps.map((_, i) => "d" + (i + 1)),
     `return(m,p)=>{${compiled}}`,
