@@ -147,7 +147,7 @@ export const _compileRouteMatch = (
  * Compile the router to a pattern matching function
  * @param router
  */
-export const compileRoute = <T>(
+export const compileRouter = <T>(
   router: RouterContext<T>,
 ): ((method: string, path: string) => MatchedRoute<T> | undefined) => {
   const deps: any[] = [];

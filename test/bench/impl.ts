@@ -30,7 +30,7 @@ export function createRouter(
     };
   }
   if (variant === "compiled") {
-    const matchCompiled = rou3.compileRoute(router);
+    const matchCompiled = rou3.compileRouter(router);
     console.log(matchCompiled.toString());
     return matchCompiled;
   }

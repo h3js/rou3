@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createRouter, formatTree } from "./_utils.ts";
-import { compileRoute } from "../src/index.ts";
+import { compileRouter } from "../src/index.ts";
 
 describe("Compiled router", () => {
   const router = createRouter([
@@ -40,7 +40,7 @@ describe("Compiled router", () => {
   });
 
   it("lookup works", () => {
-    const compiledLookup = compileRoute(router);
+    const compiledLookup = compileRouter(router);
 
     // Static
     expect(compiledLookup("GET", "/test")).toEqual({
