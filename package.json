@@ -7,7 +7,8 @@
   "sideEffects": false,
   "type": "module",
   "exports": {
-    ".": "./dist/index.mjs"
+    ".": "./dist/index.mjs",
+    "./experimental-compiler": "./dist/compiler.mjs"
   },
   "types": "./dist/index.d.mts",
   "files": [
@@ -15,8 +16,9 @@
   ],
   "scripts": {
     "bench:bun": "bun ./test/bench",
-    "bench:node": "node --import jiti/register ./test/bench",
-    "build": "obuild src/index.ts",
+    "bench:deno": "deno run -A ./test/bench/index.ts",
+    "bench:node": "node --expose-gc --allow-natives-syntax --disable-warning=ExperimentalWarning --experimental-strip-types ./test/bench/index.ts",
+    "build": "obuild",
     "dev": "vitest",
     "lint": "eslint . && prettier -c src test",
     "lint:fix": "automd && eslint --fix . && prettier -w src test",

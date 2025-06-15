@@ -85,6 +85,31 @@ findRoute(router, "GET", "/path/foo/bar/baz");
 findRoute(router, "GET", "/");
 ```
 
+## Experimental Compiler
+
+<!-- automd:jsdocs src="./src/compiler.ts" -->
+
+### `compileRouter(router)`
+
+Compiles the router instance into a faster route-matching function.
+
+**IMPORTANT:** Compiler is an experimental feature, may contain issues and the API may change between versions.
+
+**IMPORTANT:** This function requires eval (`new Function`) support in the runtime environment for JIT (Just-In-Time) compilation.
+
+**Example:**
+
+```ts
+import { createRouter, addRoute } from "rou3";
+import { compileRouter } from "rou3/experimental-compiler";
+const router = createRouter();
+// [add some routes]
+const findRoute = compileRouter(router);
+findRoute("GET", "/path/foo/bar");
+```
+
+<!--/automd -->
+
 ## License
 
 <!-- automd:contributors license=MIT author="pi0" -->

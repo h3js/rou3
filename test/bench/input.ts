@@ -1,5 +1,4 @@
-// https://github.com/pi0/web-framework-benchmarks
-// (based on hono router benchmarks)
+// Samples based on https://github.com/honojs/hono/blob/main/benchmarks/routers
 
 export const routes = [
   { method: "GET", path: "/user" },
