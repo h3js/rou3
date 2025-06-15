@@ -10,8 +10,8 @@ const createCase = <T>(name: string, requests: T, fn: (requests: T) => any) =>
   bench(name, function* () {
     yield {
       [0]: () => requests,
-      bench: fn
-    }
+      bench: fn,
+    };
   });
 
 group("param routes", () => {

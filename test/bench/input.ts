@@ -67,7 +67,7 @@ export const requests = [
     path: "/static/index.html",
     params: { path: "index.html" },
     data: "[GET] /static/:path",
-  }
+  },
 ] as Array<{
   name: string;
   method: string;

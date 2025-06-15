@@ -136,7 +136,11 @@ export const _compileRouteMatch = (
       str += `if(p===${JSON.stringify(key)}){${_compileMethodMatch(node.methods, [], deps)}}`;
   }
 
-  return str + "let s=p.split('/'),l=s.length;" +  _compileNode(router.root, [], 1, deps);
+  return (
+    str +
+    "let s=p.split('/'),l=s.length;" +
+    _compileNode(router.root, [], 1, deps)
+  );
 };
 
 /**
