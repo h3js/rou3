@@ -1,9 +1,5 @@
 import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 
-/**
- * TODO: Support optional parameters and correct handling for wildcard
- */
-
 // p: path
 // s: path parts
 // l: path parts length
