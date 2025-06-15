@@ -128,19 +128,15 @@ export const _compileRouteMatch = (
   router: RouterContext<any>,
   deps: any[],
 ): string => {
-  let str = "let s=p.split('/'),l=s.length;";
+  let str = "";
 
   for (const key in router.static) {
     const node = router.static[key];
-    if (node != null) {
-      const keyPaths = key.split("/");
-      for (let i = 1; i < keyPaths.length; i++)
-        str += `if(s[${i}]===${JSON.stringify(keyPaths[i])})`;
-      str += _compileNode(node, [], keyPaths.length, deps);
-    }
+    if (node != null && node.methods != null)
+      str += `if(p===${JSON.stringify(key)}){${_compileMethodMatch(node.methods, [], deps)}}`;
   }
 
-  return str + _compileNode(router.root, [], 1, deps);
+  return str + "let s=p.split('/'),l=s.length;" +  _compileNode(router.root, [], 1, deps);
 };
 
 /**
