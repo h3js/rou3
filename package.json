@@ -16,8 +16,8 @@
   ],
   "scripts": {
     "bench:bun": "bun ./test/bench",
-    "bench:node": "node --expose-gc --allow-natives-syntax --disable-warning=ExperimentalWarning --experimental-strip-types ./test/bench/index.ts",
     "bench:deno": "deno run -A ./test/bench/index.ts",
+    "bench:node": "node --expose-gc --allow-natives-syntax --disable-warning=ExperimentalWarning --experimental-strip-types ./test/bench/index.ts",
     "build": "obuild",
     "dev": "vitest",
     "lint": "eslint . && prettier -c src test",
