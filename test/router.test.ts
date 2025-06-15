@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { RouterContext } from "../src/types.ts";
 import { createRouter, formatTree } from "./_utils.ts";
 import { addRoute, findRoute, removeRoute } from "../src/index.ts";
+import { compileRouter } from "../src/compiler.ts";
 
 type TestRoute = {
   data: { path: string };
@@ -21,6 +22,10 @@ function testRouter(
   tests?: TestRoutes,
 ) {
   const router = createRouter<{ path?: string }>(routes);
+
+  const compiledMatch = process.env.TEST_COMPILER
+    ? compileRouter(router)
+    : undefined;
 
   if (!tests) {
     tests = Array.isArray(routes)
@@ -51,7 +56,13 @@ function testRouter(
     it.skipIf(tests[path]?.skip)(
       `lookup ${path} should be ${JSON.stringify(tests[path])}`,
       () => {
-        expect(findRoute(router, "GET", path)).to.toMatchObject(tests[path]!);
+        if (process.env.TEST_COMPILER) {
+          expect(compiledMatch!("GET", path)).to.toMatchObject(
+            tests[path] || { data: { path } },
+          );
+        } else {
+          expect(findRoute(router, "GET", path)).to.toMatchObject(tests[path]!);
+        }
       },
     );
   }

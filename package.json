@@ -24,6 +24,7 @@
     "lint:fix": "automd && eslint --fix . && prettier -w src test",
     "release": "pnpm test && pnpm build && changelogen --release && git push --follow-tags && npm publish",
     "test": "pnpm lint && pnpm test:types && vitest run --coverage",
+    "test:compiler": "TEST_COMPILER=1 vitest",
     "test:types": "tsc --noEmit"
   },
   "devDependencies": {
