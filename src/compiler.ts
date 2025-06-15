@@ -48,8 +48,13 @@ const _compileMethodMatch = (
         for (let i = 0; i < paramsMap.length; i++) {
           const map = paramsMap[i];
 
-          if (typeof map[1] !== "string")
-            throw new Error("Compiler does not handle regexp parameter name");
+          if (typeof map[1] !== "string") {
+            console.warn(
+              `regexp route params are not supported in compiler mode yet, skipping`,
+              map[1],
+            );
+            continue; // TODO
+          }
 
           // Select proper parameter
           str += `${JSON.stringify(map[1])}:${params[i]},`;
