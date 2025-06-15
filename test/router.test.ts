@@ -57,9 +57,7 @@ function testRouter(
       `lookup ${path} should be ${JSON.stringify(tests[path])}`,
       () => {
         if (process.env.TEST_COMPILER) {
-          expect(compiledMatch!("GET", path)).to.toMatchObject(
-            tests[path] || { data: { path } },
-          );
+          expect(compiledMatch!("GET", path)).to.toMatchObject(tests[path]!);
         } else {
           expect(findRoute(router, "GET", path)).to.toMatchObject(tests[path]!);
         }

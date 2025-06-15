@@ -92,7 +92,7 @@ const _compileNode = (
       )}}`;
 
   if (node.param != null)
-    str += `if(l>${startIdx})if(s[${startIdx}]!==''){${_compileNode(
+    str += `if(l>${startIdx}){${_compileNode(
       node.param,
       [...params, `s[${startIdx}]`],
       startIdx + 1,
@@ -124,7 +124,8 @@ const _compileRouteMatch = (
   router: RouterContext<any>,
   deps: any[],
 ): string => {
-  let str = "";
+  // Support trailing slash
+  let str = "if(p[p.length-1]==='/')p=p.slice(0,-1);";
 
   for (const key in router.static) {
     const node = router.static[key];
@@ -134,8 +135,8 @@ const _compileRouteMatch = (
 
   return (
     str +
-    "let s=p.split('/'),l=s.length;" +
-    _compileNode(router.root, [], 1, deps)
+    "let s=p.split('/').filter(q=>q!==''),l=s.length;" +
+    _compileNode(router.root, [], 0, deps)
   );
 };
 
