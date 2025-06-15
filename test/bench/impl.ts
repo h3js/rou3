@@ -1,10 +1,5 @@
 import { compileRouter } from "../../src/compiler.ts";
-import {
-  createRouter,
-  addRoute,
-  findRoute,
-  findAllRoutes,
-} from "../../src/index.ts";
+import { createRouter, addRoute, findRoute } from "../../src/index.ts";
 import { requests, routes } from "./input.ts";
 
 export function createInstances() {
@@ -28,11 +23,6 @@ export function createInstances() {
     [
       "compileRouter",
       (method: string, path: string) => compiledLookup(method, path),
-    ],
-    process.argv.includes("--all") && [
-      "findAllRoutes",
-      (method: string, path: string) =>
-        findAllRoutes(router, method, path)?.[0],
     ],
     process.argv.includes("--max") && ["maximum", createFastestRouter()],
   ].filter(Boolean) as [string, (method: string, path: string) => any][];
