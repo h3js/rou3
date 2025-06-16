@@ -3,9 +3,7 @@ import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 /**
  * Compiles the router instance into a faster route-matching function.
  *
- *
- * **IMPORTANT:** This function requires eval (`new Function`) support in the runtime environment for JIT (Just-In-Time)
- * compilation.
+ * **IMPORTANT:** `compileRouter` requires eval support with `new Function()` in the runtime for JIT compilation.
  *
  * @example
  * import { createRouter, addRoute } from "rou3";
@@ -31,8 +29,7 @@ export function compileRouter<T>(
 /**
  * Compile the router instance into a compact runnable code.
  *
- * **IMPORTANT:** Route data must be serializable to JSON (i.e., no functions or classes) or implement the `toJSON` method to render custom code.
- *
+ * **IMPORTANT:** Route data must be serializable to JSON (i.e., no functions or classes) or implement the `toJSON()` method to render custom code.
  *
  * @example
  * import { createRouter, addRoute } from "rou3";
