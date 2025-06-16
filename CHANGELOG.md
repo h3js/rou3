@@ -2,6 +2,58 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.7.0
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.6.3...v0.7.0)
+
+### 🚀 Enhancements
+
+- Experimental compiler ([#155](https://github.com/h3js/rou3/pull/155))
+- **compiler:** Complete functionality to match `findRoute` ([#158](https://github.com/h3js/rou3/pull/158))
+- **compiler:** `compileRouterToString` ([#159](https://github.com/h3js/rou3/pull/159))
+- **compileRouterToString:** Support serializing custom code with `{ toJSON }` ([064ae0d](https://github.com/h3js/rou3/commit/064ae0d))
+
+### 🔥 Performance
+
+- **compiler:** Faster split ([8b2ea34](https://github.com/h3js/rou3/commit/8b2ea34))
+
+### 🩹 Fixes
+
+- **compiler:** Avoid duplicate static checks ([db9fcf2](https://github.com/h3js/rou3/commit/db9fcf2))
+- Preserve empty segments ([#160](https://github.com/h3js/rou3/pull/160))
+
+### 💅 Refactors
+
+- **compiler:** Only warn for not supported regexp ([012d8b9](https://github.com/h3js/rou3/commit/012d8b9))
+
+### 📦 Build
+
+- Use `/compiler` subpath ([8c8c12e](https://github.com/h3js/rou3/commit/8c8c12e))
+
+### 🏡 Chore
+
+- Apply automated updates ([3c7526d](https://github.com/h3js/rou3/commit/3c7526d))
+- Add codeowners file ([3693344](https://github.com/h3js/rou3/commit/3693344))
+- Update deps ([ba1eba0](https://github.com/h3js/rou3/commit/ba1eba0))
+- Remove duplicate test ([e370538](https://github.com/h3js/rou3/commit/e370538))
+- Refactor compiler fns ([ed4a95d](https://github.com/h3js/rou3/commit/ed4a95d))
+- Update jsdocs ([65bc888](https://github.com/h3js/rou3/commit/65bc888))
+- Typo ([302ef03](https://github.com/h3js/rou3/commit/302ef03))
+- Apply automated updates ([c22b957](https://github.com/h3js/rou3/commit/c22b957))
+
+### ✅ Tests
+
+- Add `test:compiler` for full tests ([636795f](https://github.com/h3js/rou3/commit/636795f))
+- Snapshot compiler result ([991e7d8](https://github.com/h3js/rou3/commit/991e7d8))
+- Merge compiler with main tests ([e5c7b50](https://github.com/h3js/rou3/commit/e5c7b50))
+- Add back compiler snapshot! ([e4d6287](https://github.com/h3js/rou3/commit/e4d6287))
+- Make sure all inputs have leading slash ([0aa1de3](https://github.com/h3js/rou3/commit/0aa1de3))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+- Reve ([@aquapi](https://github.com/aquapi))
+
 ## v0.6.3
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.6.2...v0.6.3)
