@@ -23,9 +23,7 @@ function testRouter(
 ) {
   const router = createRouter<{ path?: string }>(routes);
 
-  const compiledMatch = process.env.TEST_COMPILER
-    ? compileRouter(router)
-    : undefined;
+  const compiledMatch = compileRouter(router);
 
   if (!tests) {
     tests = Array.isArray(routes)
@@ -56,11 +54,15 @@ function testRouter(
     it.skipIf(tests[path]?.skip)(
       `lookup ${path} should be ${JSON.stringify(tests[path])}`,
       () => {
-        if (process.env.TEST_COMPILER) {
-          expect(compiledMatch!("GET", path)).to.toMatchObject(tests[path]!);
-        } else {
-          expect(findRoute(router, "GET", path)).to.toMatchObject(tests[path]!);
-        }
+        expect(
+          findRoute(router, "GET", path),
+          `findRoute(GET, ${path})`,
+        ).to.toMatchObject(tests[path]!);
+
+        expect(
+          compiledMatch("GET", path),
+          `compiledMatch(GET, ${path})`,
+        ).to.toMatchObject(tests[path]!);
       },
     );
   }
