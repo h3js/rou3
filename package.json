@@ -1,14 +1,14 @@
 {
   "name": "rou3",
   "version": "0.6.3",
-  "description": "Lightweight and fast router for JavaScript based on Radix Tree",
+  "description": "Lightweight and fast router for JavaScript.",
   "repository": "h3js/rou3",
   "license": "MIT",
   "sideEffects": false,
   "type": "module",
   "exports": {
     ".": "./dist/index.mjs",
-    "./experimental-compiler": "./dist/compiler.mjs"
+    "./compiler": "./dist/compiler.mjs"
   },
   "types": "./dist/index.d.mts",
   "files": [

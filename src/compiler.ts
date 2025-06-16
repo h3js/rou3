@@ -7,7 +7,7 @@ import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
  *
  * @example
  * import { createRouter, addRoute } from "rou3";
- * import { compileRouter } from "rou3/experimental-compiler";
+ * import { compileRouter } from "rou3/compiler";
  * const router = createRouter();
  * // [add some routes]
  * const findRoute = compileRouter(router);
@@ -33,7 +33,7 @@ export function compileRouter<T>(
  *
  * @example
  * import { createRouter, addRoute } from "rou3";
- * import { compileRouterToString } from "rou3/experimental-compiler";
+ * import { compileRouterToString } from "rou3/compiler";
  * const router = createRouter();
  * // [add some routes with serializable data]
  * const compilerCode = compileRouterToString(router, "findRoute");

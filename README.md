@@ -102,7 +102,7 @@ Compiles the router instance into a faster route-matching function.
 
 ```ts
 import { createRouter, addRoute } from "rou3";
-import { compileRouter } from "rou3/experimental-compiler";
+import { compileRouter } from "rou3/compiler";
 const router = createRouter();
 // [add some routes]
 const findRoute = compileRouter(router);
@@ -119,7 +119,7 @@ Compile the router instance into a compact runnable code.
 
 ```ts
 import { createRouter, addRoute } from "rou3";
-import { compileRouterToString } from "rou3/experimental-compiler";
+import { compileRouterToString } from "rou3/compiler";
 const router = createRouter();
 // [add some routes with serializable data]
 const compilerCode = compileRouterToString(router, "findRoute");
