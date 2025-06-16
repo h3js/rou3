@@ -25,7 +25,7 @@ export function formatTree(
 ): string | string[] {
   result.push(
     // prettier-ignore
-    `${prefix}${depth === 0 ? "" : "├── "}${node.key ? `/${node.key}` : (depth === 0 ? "<root>" : "<?>")}${_formatMethods(node)}`,
+    `${prefix}${depth === 0 ? "" : "├── "}${node.key ? `/${node.key}` : (depth === 0 ? "<root>" : "<empty>")}${_formatMethods(node)}`,
   );
 
   const childrenArray = [
