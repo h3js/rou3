@@ -123,7 +123,7 @@ import { compileRouterToString } from "rou3/experimental-compiler";
 const router = createRouter();
 // [add some routes with serializable data]
 const compilerCode = compileRouterToString(router, "findRoute");
-// "const findRoute=(m, m) => {}"
+// "const findRoute=(m, p) => {}"
 ```
 
 <!--/automd -->
