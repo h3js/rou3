@@ -48,9 +48,10 @@ const _compileMethodMatch = (
         str += ",params:{";
         for (let i = 0; i < paramsMap.length; i++) {
           const map = paramsMap[i];
-          str += typeof map[1] === "string"
-            ? `${JSON.stringify(map[1])}:${params[i]},`
-            : `...(${map[1].toString()}.exec(${params[i]})??e).groups,`
+          str +=
+            typeof map[1] === "string"
+              ? `${JSON.stringify(map[1])}:${params[i]},`
+              : `...(${map[1].toString()}.exec(${params[i]})??e).groups,`;
         }
         str += "}";
       }
