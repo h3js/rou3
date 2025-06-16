@@ -3,7 +3,6 @@ import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 /**
  * Compiles the router instance into a faster route-matching function.
  *
- * **IMPORTANT:** Compiler is an experimental feature, may contain issues and the API may change between versions.
  *
  * **IMPORTANT:** This function requires eval (`new Function`) support in the runtime environment for JIT (Just-In-Time)
  * compilation.
@@ -25,8 +24,30 @@ export function compileRouter<T>(
   const compiled = compileRouteMatch(router, deps);
   return new Function(
     ...deps.map((_, i) => "d" + (i + 1)),
-    `let e={groups:{}};return(m,p)=>{${compiled}}`,
+    `return(m,p)=>{${compiled}}`,
   )(...deps);
+}
+
+/**
+ * Compile the router instance into a compact runnable code.
+ *
+ * **IMPORTANT:** Route data must be serializable to JSON (i.e., no functions or classes).
+ *
+ *
+ * @example
+ * import { createRouter, addRoute } from "rou3";
+ * import { compileRouterToString } from "rou3/experimental-compiler";
+ * const router = createRouter();
+ * // [add some routes with serializable data]
+ * const compilerCode = compileRouterToString(router, "findRoute");
+ * // "const findRoute=(m, m) => {}"
+ */
+export function compileRouterToString(
+  router: RouterContext,
+  functionName?: string,
+): string {
+  const compiled = `(m,p)=>{${compileRouteMatch(router)}}`;
+  return functionName ? `const ${functionName}=${compiled};` : compiled;
 }
 
 // ------- internal functions -------
@@ -35,14 +56,13 @@ export function compileRouter<T>(
 // s: path parts
 // l: path parts length
 // m: method
-// e: Empty group
 
 /**
  * Compile a router to pattern matching statements
  * @param router
  * @param deps - Dependencies of the function scope
  */
-function compileRouteMatch(router: RouterContext<any>, deps: any[]): string {
+function compileRouteMatch(router: RouterContext<any>, deps?: any[]): string {
   // Ignore trailing slash
   let str = `if(p[p.length-1]==='/')p=p.slice(0,-1)||'/';`;
 
@@ -66,7 +86,7 @@ function compileRouteMatch(router: RouterContext<any>, deps: any[]): string {
 function compileMethodMatch(
   methods: Record<string, MethodData<any>[] | undefined>,
   params: string[],
-  deps: any[],
+  deps: any[] | undefined,
   currentIdx: number, // Set to -1 for non-param node
 ): string {
   let str = "";
@@ -75,7 +95,9 @@ function compileMethodMatch(
     if (data && data?.length > 0) {
       // Don't check for all method handler
       if (key !== "") str += `if(m==='${key}')`;
-      let returnData = `return{data:d${deps.push(data[0].data)}`;
+      let returnData = deps
+        ? `return{data:d${deps.push(data[0].data)}`
+        : `return{data:${JSON.stringify(data[0].data)}`;
 
       // Add param properties
       const { paramsMap } = data[0];
@@ -93,7 +115,7 @@ function compileMethodMatch(
           returnData +=
             typeof map[1] === "string"
               ? `${JSON.stringify(map[1])}:${params[i]},`
-              : `...(${map[1].toString()}.exec(${params[i]})||e).groups,`;
+              : `...(${map[1].toString()}.exec(${params[i]}))?.groups,`;
         }
         returnData += "}";
       }
@@ -111,7 +133,7 @@ function compileNode(
   node: Node<any>,
   params: string[],
   startIdx: number,
-  deps: any[],
+  deps: any[] | undefined,
   isParamNode: boolean,
   staticNodes: Set<Node>,
 ): string {
