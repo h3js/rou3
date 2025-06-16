@@ -31,7 +31,7 @@ export function compileRouter<T>(
 /**
  * Compile the router instance into a compact runnable code.
  *
- * **IMPORTANT:** Route data must be serializable to JSON (i.e., no functions or classes).
+ * **IMPORTANT:** Route data must be serializable to JSON (i.e., no functions or classes) or implement the `toJSON` method to render custom code.
  *
  *
  * @example
@@ -95,9 +95,10 @@ function compileMethodMatch(
     if (data && data?.length > 0) {
       // Don't check for all method handler
       if (key !== "") str += `if(m==='${key}')`;
+      const dataValue = data[0].data;
       let returnData = deps
-        ? `return{data:d${deps.push(data[0].data)}`
-        : `return{data:${JSON.stringify(data[0].data)}`;
+        ? `return{data:d${deps.push(dataValue)}`
+        : `return{data:${typeof dataValue?.toJSON === "function" ? dataValue.toJSON() : JSON.stringify(dataValue)}`;
 
       // Add param properties
       const { paramsMap } = data[0];

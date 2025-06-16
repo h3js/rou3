@@ -113,7 +113,7 @@ findRoute("GET", "/path/foo/bar");
 
 Compile the router instance into a compact runnable code.
 
-**IMPORTANT:** Route data must be serializable to JSON (i.e., no functions or classes).
+**IMPORTANT:** Route data must be serializable to JSON (i.e., no functions or classes) or implement the `toJSON` method to render custom code.
 
 **Example:**
 
