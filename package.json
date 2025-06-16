@@ -8,7 +8,7 @@
   "type": "module",
   "exports": {
     ".": "./dist/index.mjs",
-    "./experimental-compiler": "./dist/compiler.mjs"
+    "./compiler": "./dist/compiler.mjs"
   },
   "types": "./dist/index.d.mts",
   "files": [
