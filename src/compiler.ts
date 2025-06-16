@@ -30,6 +30,7 @@ const _compileMethodMatch = (
   methods: Record<string, MethodData<any>[] | undefined>,
   params: string[],
   deps: any[],
+  currentIdx: number, // Set to -1 for non-param node
 ): string => {
   let str = "";
   for (const key in methods) {
@@ -37,26 +38,30 @@ const _compileMethodMatch = (
     if (data != null && data.length > 0) {
       // Don't check for all method handler
       if (key !== "") str += `if(m===${_fastMethodStringify(key)})`;
+      let returnData = `return{data:d${deps.push(data[0].data)}`;
 
-      // Add new dependency to the function scope
-      str += `return{data:d${deps.push(data[0].data)}`;
-
-      // Add param property
+      // Add param properties
       const { paramsMap } = data[0];
       if (paramsMap != null && paramsMap.length > 0) {
+        // Check for optional end parameters
+        const required =
+          !paramsMap[paramsMap.length - 1][2] && currentIdx !== -1;
+        if (required) str += `if(l>=${currentIdx})`;
+
         // Create the param object based on previous parameters
-        str += ",params:{";
+        returnData += ",params:{";
         for (let i = 0; i < paramsMap.length; i++) {
           const map = paramsMap[i];
-          str +=
+
+          returnData +=
             typeof map[1] === "string"
               ? `${JSON.stringify(map[1])}:${params[i]},`
-              : `...(${map[1].toString()}.exec(${params[i]})??e).groups,`;
+              : `...(${map[1].toString()}.exec(${params[i]})||e).groups,`;
         }
-        str += "}";
+        returnData += "}";
       }
 
-      str += "}";
+      str += returnData + "}";
     }
   }
   return str;
@@ -70,11 +75,12 @@ const _compileNode = (
   params: string[],
   startIdx: number,
   deps: any[],
+  isParamNode: boolean,
 ): string => {
   let str = "";
 
   if (node.methods != null)
-    str += `if(l===${startIdx}){${_compileMethodMatch(node.methods, params, deps)}}`;
+    str += `if(l===${startIdx}${isParamNode ? `||l===${startIdx - 1}` : ""}){${_compileMethodMatch(node.methods, params, deps, isParamNode ? startIdx : -1)}}`;
 
   if (node.static != null)
     for (const key in node.static)
@@ -83,15 +89,17 @@ const _compileNode = (
         params,
         startIdx + 1,
         deps,
+        false,
       )}}`;
 
   if (node.param != null)
-    str += `if(l>${startIdx}){${_compileNode(
+    str += _compileNode(
       node.param,
       [...params, `s[${startIdx}]`],
       startIdx + 1,
       deps,
-    )}}`;
+      true,
+    );
 
   if (node.wildcard != null) {
     const { wildcard } = node;
@@ -103,6 +111,7 @@ const _compileNode = (
         wildcard.methods,
         [...params, `s.slice(${startIdx}).join('/')`],
         deps,
+        startIdx,
       );
   }
 
@@ -124,13 +133,13 @@ const _compileRouteMatch = (
   for (const key in router.static) {
     const node = router.static[key];
     if (node != null && node.methods != null)
-      str += `if(p===${JSON.stringify(key)}){${_compileMethodMatch(node.methods, [], deps)}}`;
+      str += `if(p===${JSON.stringify(key)}){${_compileMethodMatch(node.methods, [], deps, -1)}}`;
   }
 
   return (
     str +
     "let s=p.split('/').filter(q=>q!==''),l=s.length;" +
-    _compileNode(router.root, [], 0, deps)
+    _compileNode(router.root, [], 0, deps, false)
   );
 };
 
