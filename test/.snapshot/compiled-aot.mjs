@@ -18,7 +18,7 @@ const findRoute = (m, p) => {
   if (p === "/another/path") {
     if (m === "GET") return { data: { path: "/another/path" } };
   }
-  let s = p.split("/").filter((q) => q !== ""),
+  let [_, ...s] = p.split("/"),
     l = s.length;
   if (s[0] === "test") {
     if (s[1] === "foo") {

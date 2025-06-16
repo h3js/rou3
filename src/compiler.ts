@@ -75,7 +75,7 @@ function compileRouteMatch(router: RouterContext<any>, deps?: any[]): string {
 
   return (
     str +
-    "let s=p.split('/').filter(q=>q!==''),l=s.length;" +
+    "let [_, ...s]=p.split('/'),l=s.length;" +
     compileNode(router.root, [], 0, deps, false, staticNodes)
   );
 }
