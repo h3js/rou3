@@ -4,6 +4,7 @@ import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 // s: path parts
 // l: path parts length
 // m: method
+// e: Empty group
 
 /**
  * Whether the current node has children nodes
@@ -47,17 +48,9 @@ const _compileMethodMatch = (
         str += ",params:{";
         for (let i = 0; i < paramsMap.length; i++) {
           const map = paramsMap[i];
-
-          if (typeof map[1] !== "string") {
-            console.warn(
-              `regexp route params are not supported in compiler mode yet, skipping`,
-              map[1],
-            );
-            continue; // TODO
-          }
-
-          // Select proper parameter
-          str += `${JSON.stringify(map[1])}:${params[i]},`;
+          str += typeof map[1] === "string"
+            ? `${JSON.stringify(map[1])}:${params[i]},`
+            : `...(${map[1].toString()}.exec(${params[i]})??e).groups,`
         }
         str += "}";
       }
@@ -165,6 +158,6 @@ export const compileRouter = <T>(
   const compiled = _compileRouteMatch(router, deps);
   return new Function(
     ...deps.map((_, i) => "d" + (i + 1)),
-    `return(m,p)=>{${compiled}}`,
+    `let e={groups:{}};return(m,p)=>{${compiled}}`,
   )(...deps);
 };
