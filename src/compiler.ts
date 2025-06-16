@@ -7,37 +7,56 @@ import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 // e: Empty group
 
 /**
+ * Compiles the router instance into a faster route-matching function.
+ *
+ * **IMPORTANT:** Compiler is an experimental feature, may contain issues and the API may change between versions.
+ *
+ * **IMPORTANT:** This function requires eval (`new Function`) support in the runtime environment for JIT (Just-In-Time)
+ * compilation.
+ *
+ * @example
+ * import { createRouter, addRoute } from "rou3";
+ * import { compileRouter } from "rou3/experimental-compiler";
+ * const router = createRouter();
+ * // [add some routes]
+ * const findRoute = compileRouter(router);
+ * findRoute("GET", "/path/foo/bar");
+ *
+ * @param router - The router context to compile.
+ */
+export function compileRouter<T>(
+  router: RouterContext<T>,
+): (method: string, path: string) => MatchedRoute<T> | undefined {
+  const deps: any[] = [];
+  const compiled = _compileRouteMatch(router, deps);
+  return new Function(
+    ...deps.map((_, i) => "d" + (i + 1)),
+    `let e={groups:{}};return(m,p)=>{${compiled}}`,
+  )(...deps);
+}
+
+// ------- internal functions -------
+
+/**
  * Whether the current node has children nodes
  * @param n
  */
-const _hasChild = (n: Node<any>): boolean =>
-  n.static != null || n.param != null || n.wildcard != null;
+function _hasChild(n: Node<any>): boolean {
+  return n.static != null || n.param != null || n.wildcard != null;
+}
 
-// Skip a native call for common methods
-const _fastMethodStringify = (m: string) =>
-  m === "GET"
-    ? '"GET"'
-    : m === "POST"
-      ? '"POST"'
-      : // eslint-disable-next-line
-        m === "PUT"
-        ? '"PUT"'
-        : m === "DELETE"
-          ? '"DELETE"'
-          : JSON.stringify(m);
-
-const _compileMethodMatch = (
+function _compileMethodMatch(
   methods: Record<string, MethodData<any>[] | undefined>,
   params: string[],
   deps: any[],
   currentIdx: number, // Set to -1 for non-param node
-): string => {
+): string {
   let str = "";
   for (const key in methods) {
     const data = methods[key];
     if (data != null && data.length > 0) {
       // Don't check for all method handler
-      if (key !== "") str += `if(m===${_fastMethodStringify(key)})`;
+      if (key !== "") str += `if(m==="${key}")`;
       let returnData = `return{data:d${deps.push(data[0].data)}`;
 
       // Add param properties
@@ -65,18 +84,18 @@ const _compileMethodMatch = (
     }
   }
   return str;
-};
+}
 
 /**
  * Compile a node to matcher logic
  */
-const _compileNode = (
+function _compileNode(
   node: Node<any>,
   params: string[],
   startIdx: number,
   deps: any[],
   isParamNode: boolean,
-): string => {
+): string {
   let str = "";
 
   if (node.methods != null)
@@ -116,17 +135,14 @@ const _compileNode = (
   }
 
   return str;
-};
+}
 
 /**
  * Compile a router to pattern matching statements
  * @param router
  * @param deps - Dependencies of the function scope
  */
-const _compileRouteMatch = (
-  router: RouterContext<any>,
-  deps: any[],
-): string => {
+function _compileRouteMatch(router: RouterContext<any>, deps: any[]): string {
   // Support trailing slash
   let str = "if(p[p.length-1]==='/')p=p.slice(0,-1);";
 
@@ -141,33 +157,4 @@ const _compileRouteMatch = (
     "let s=p.split('/').filter(q=>q!==''),l=s.length;" +
     _compileNode(router.root, [], 0, deps, false)
   );
-};
-
-/**
- * Compiles the router instance into a faster route-matching function.
- *
- * **IMPORTANT:** Compiler is an experimental feature, may contain issues and the API may change between versions.
- *
- * **IMPORTANT:** This function requires eval (`new Function`) support in the runtime environment for JIT (Just-In-Time)
- * compilation.
- *
- * @example
- * import { createRouter, addRoute } from "rou3";
- * import { compileRouter } from "rou3/experimental-compiler";
- * const router = createRouter();
- * // [add some routes]
- * const findRoute = compileRouter(router);
- * findRoute("GET", "/path/foo/bar");
- *
- * @param router - The router context to compile.
- */
-export const compileRouter = <T>(
-  router: RouterContext<T>,
-): ((method: string, path: string) => MatchedRoute<T> | undefined) => {
-  const deps: any[] = [];
-  const compiled = _compileRouteMatch(router, deps);
-  return new Function(
-    ...deps.map((_, i) => "d" + (i + 1)),
-    `let e={groups:{}};return(m,p)=>{${compiled}}`,
-  )(...deps);
-};
+}
