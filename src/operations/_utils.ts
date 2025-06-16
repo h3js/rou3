@@ -2,7 +2,8 @@ import { NullProtoObj } from "../_utils.ts";
 import type { MatchedRoute, ParamsIndexMap } from "../types.ts";
 
 export function splitPath(path: string): string[] {
-  return path.split("/").filter(Boolean);
+  const [_, ...s] = path.split("/");
+  return s[s.length - 1] === "" ? s.slice(0, -1) : s;
 }
 
 export function getMatchParams(

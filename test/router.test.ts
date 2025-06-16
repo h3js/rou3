@@ -386,6 +386,29 @@ describe("Router lookup", function () {
       },
     );
   });
+
+  describe("empty segments", function () {
+    testRouter(
+      ["/test//route", "/test/:param/route"],
+      (router) =>
+        expect(formatTree(router.root)).toMatchInlineSnapshot(`
+          "<root>
+              ├── /test
+              │       ├── <empty>
+              │       │       ├── /route ┈> [GET] /test//route
+              │       ├── /*
+              │       │       ├── /route ┈> [GET] /test/:param/route"
+        `),
+      {
+        "/test//route": {
+          data: { path: "/test//route" },
+        },
+        "/test/id/route": {
+          data: { path: "/test/:param/route" },
+        },
+      },
+    );
+  });
 });
 
 describe("Router insert", () => {
