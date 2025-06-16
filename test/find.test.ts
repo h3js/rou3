@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createRouter, formatTree } from "./_utils.ts";
 import { findRoute, removeRoute } from "../src/index.ts";
-import { compileRouter } from "../src/compiler.ts";
+import { compileRouter, compileRouterToString } from "../src/compiler.ts";
 import { format } from "prettier";
 
 describe("route matching", () => {
@@ -22,7 +22,7 @@ describe("route matching", () => {
 
   const compiledLookup = compileRouter(router);
 
-  it("snapshot", async () => {
+  it("snapshot", () => {
     expect(formatTree(router.root)).toMatchInlineSnapshot(`
       "<root>
           ├── /test ┈> [GET] /test
@@ -41,10 +41,18 @@ describe("route matching", () => {
           ├── /wildcard
           │       ├── /** ┈> [GET] /wildcard/**"
     `);
+  });
 
+  it("snapshot (compiled)", async () => {
     await expect(
       await format(compiledLookup.toString(), { parser: "acorn" }),
-    ).toMatchFileSnapshot(".snapshot/compiler.mjs");
+    ).toMatchFileSnapshot(".snapshot/compiled-jit.mjs");
+
+    await expect(
+      await format(compileRouterToString(router, "findRoute"), {
+        parser: "acorn",
+      }),
+    ).toMatchFileSnapshot(".snapshot/compiled-aot.mjs");
   });
 
   const lookups = [

@@ -87,13 +87,14 @@ findRoute(router, "GET", "/");
 
 ## Experimental Compiler
 
+> [!IMPORTANT]
+> Compiler is an experimental feature, may contain issues and the API may change between versions. See [#156](https://github.com/h3js/rou3/issues/156) for more context.
+
 <!-- automd:jsdocs src="./src/compiler.ts" -->
 
 ### `compileRouter(router)`
 
 Compiles the router instance into a faster route-matching function.
-
-**IMPORTANT:** Compiler is an experimental feature, may contain issues and the API may change between versions.
 
 **IMPORTANT:** This function requires eval (`new Function`) support in the runtime environment for JIT (Just-In-Time) compilation.
 
@@ -106,6 +107,23 @@ const router = createRouter();
 // [add some routes]
 const findRoute = compileRouter(router);
 findRoute("GET", "/path/foo/bar");
+```
+
+### `compileRouterToString(router, functionName?)`
+
+Compile the router instance into a compact runnable code.
+
+**IMPORTANT:** Route data must be serializable to JSON (i.e., no functions or classes).
+
+**Example:**
+
+```ts
+import { createRouter, addRoute } from "rou3";
+import { compileRouterToString } from "rou3/experimental-compiler";
+const router = createRouter();
+// [add some routes with serializable data]
+const compilerCode = compileRouterToString(router, "findRoute");
+// "const findRoute=(m, m) => {}"
 ```
 
 <!--/automd -->
