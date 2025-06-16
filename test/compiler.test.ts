@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createRouter, formatTree } from "./_utils.ts";
 import { compileRouter } from "../src/compiler.ts";
+import { format } from "prettier";
 
 describe("Compiled router", () => {
   const router = createRouter([
@@ -18,7 +19,9 @@ describe("Compiled router", () => {
     "/wildcard/**",
   ]);
 
-  it("snapshot", () => {
+  const compiledLookup = compileRouter(router);
+
+  it("snapshot", async () => {
     expect(formatTree(router.root)).toMatchInlineSnapshot(`
       "<root>
           ├── /test ┈> [GET] /test
@@ -37,11 +40,13 @@ describe("Compiled router", () => {
           ├── /wildcard
           │       ├── /** ┈> [GET] /wildcard/**"
     `);
+
+    await expect(
+      await format(compiledLookup.toString(), { parser: "acorn" }),
+    ).toMatchFileSnapshot(".snapshot/compiler.mjs");
   });
 
   it("lookup works", () => {
-    const compiledLookup = compileRouter(router);
-
     // Static
     expect(compiledLookup("GET", "/test")).toEqual({
       data: { path: "/test" },
