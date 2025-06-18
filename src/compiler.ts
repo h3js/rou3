@@ -18,18 +18,12 @@ import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 export function compileRouter<T>(
   router: RouterContext<T>,
 ): (method: string, path: string) => MatchedRoute<T> | undefined {
-  const deps: any[] = [];
-  const compiled = compileRouteMatch(router, deps);
-  return new Function(
-    ...deps.map((_, i) => "d" + (i + 1)),
-    `return(m,p)=>{${compiled}}`,
-  )(...deps);
+  const [init, compiled] = compileRouteMatch(router);
+  return new Function("r", `${init}return(m,p)=>{${compiled}}`)(router);
 }
 
 /**
  * Compile the router instance into a compact runnable code.
- *
- * **IMPORTANT:** Route data must be serializable to JSON (i.e., no functions or classes) or implement the `toJSON()` method to render custom code.
  *
  * @example
  * import { createRouter, addRoute } from "rou3";
@@ -37,13 +31,14 @@ export function compileRouter<T>(
  * const router = createRouter();
  * // [add some routes with serializable data]
  * const compilerCode = compileRouterToString(router, "findRoute");
- * // "const findRoute=(m, p) => {}"
+ * // "const findRoute = (router) => (m, p) => {}"
  */
 export function compileRouterToString(
   router: RouterContext,
   functionName?: string,
 ): string {
-  const compiled = `(m,p)=>{${compileRouteMatch(router)}}`;
+  const [init, code] = compileRouteMatch(router);
+  const compiled = `(r)=>{${init}return (m,p)=>{${code}}}`;
   return functionName ? `const ${functionName}=${compiled};` : compiled;
 }
 
@@ -59,31 +54,42 @@ export function compileRouterToString(
  * @param router
  * @param deps - Dependencies of the function scope
  */
-function compileRouteMatch(router: RouterContext<any>, deps?: any[]): string {
+function compileRouteMatch(router: RouterContext<any>): [string, string] {
   // Ignore trailing slash
   let str = `if(p[p.length-1]==='/')p=p.slice(0,-1)||'/';`;
 
   const staticNodes = new Set<Node>();
 
+  const deps: string[] = [];
+
   for (const key in router.static) {
     const node = router.static[key];
     if (node?.methods) {
       staticNodes.add(node);
-      str += `if(p===${JSON.stringify(key.replace(/\/$/, "") || "/")}){${compileMethodMatch(node.methods, [], deps, -1)}}`;
+      str += `if(p===${JSON.stringify(key.replace(/\/$/, "") || "/")}){${compileMethodMatch(`r.static[${JSON.stringify(key)}]`, node.methods, [], deps, -1)}}`;
     }
   }
 
-  return (
-    str +
-    "let [_, ...s]=p.split('/'),l=s.length;" +
-    compileNode(router.root, [], 0, deps, false, staticNodes)
+  const tail = compileNode(
+    "r.root",
+    router.root,
+    [],
+    0,
+    deps,
+    false,
+    staticNodes,
   );
+  return [
+    deps.length > 0 ? `let ${deps.join(",")};` : "",
+    str + "let [_, ...s]=p.split('/'),l=s.length;" + tail,
+  ];
 }
 
 function compileMethodMatch(
+  root: string,
   methods: Record<string, MethodData<any>[] | undefined>,
   params: string[],
-  deps: any[] | undefined,
+  deps: string[],
   currentIdx: number, // Set to -1 for non-param node
 ): string {
   let str = "";
@@ -92,10 +98,11 @@ function compileMethodMatch(
     if (data && data?.length > 0) {
       // Don't check for all method handler
       if (key !== "") str += `if(m==='${key}')`;
-      const dataValue = data[0].data;
-      let returnData = deps
-        ? `return{data:d${deps.push(dataValue)}`
-        : `return{data:${typeof dataValue?.toJSON === "function" ? dataValue.toJSON() : JSON.stringify(dataValue)}`;
+      const depsIndex = deps.length;
+      deps.push(
+        `d${depsIndex}=${root}.methods[${JSON.stringify(key)}][0].data`,
+      );
+      let returnData = `return{data:d${depsIndex}`;
 
       // Add param properties
       const { paramsMap } = data[0];
@@ -128,22 +135,24 @@ function compileMethodMatch(
  * Compile a node to matcher logic
  */
 function compileNode(
+  root: string,
   node: Node<any>,
   params: string[],
   startIdx: number,
-  deps: any[] | undefined,
+  deps: string[],
   isParamNode: boolean,
   staticNodes: Set<Node>,
 ): string {
   let str = "";
 
   if (node.methods && !staticNodes.has(node)) {
-    str += `if(l===${startIdx}${isParamNode ? `||l===${startIdx - 1}` : ""}){${compileMethodMatch(node.methods, params, deps, isParamNode ? startIdx : -1)}}`;
+    str += `if(l===${startIdx}${isParamNode ? `||l===${startIdx - 1}` : ""}){${compileMethodMatch(root, node.methods, params, deps, isParamNode ? startIdx : -1)}}`;
   }
 
   if (node.static) {
     for (const key in node.static)
       str += `if(s[${startIdx}]===${JSON.stringify(key)}){${compileNode(
+        `${root}.static[${JSON.stringify(key)}]`,
         node.static[key],
         params,
         startIdx + 1,
@@ -155,6 +164,7 @@ function compileNode(
 
   if (node.param) {
     str += compileNode(
+      `${root}.param`,
       node.param,
       [...params, `s[${startIdx}]`],
       startIdx + 1,
@@ -172,6 +182,7 @@ function compileNode(
 
     if (wildcard.methods)
       str += compileMethodMatch(
+        `${root}.wildcard`,
         wildcard.methods,
         [...params, `s.slice(${startIdx}).join('/')`],
         deps,

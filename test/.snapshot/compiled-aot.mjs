@@ -1,75 +1,77 @@
-const findRoute = (m, p) => {
-  if (p[p.length - 1] === "/") p = p.slice(0, -1) || "/";
-  if (p === "/test") {
-    if (m === "GET") return { data: { path: "/test" } };
-  }
-  if (p === "/test/foo") {
-    if (m === "GET") return { data: { path: "/test/foo" } };
-  }
-  if (p === "/test/foo/bar/qux") {
-    if (m === "GET") return { data: { path: "/test/foo/bar/qux" } };
-  }
-  if (p === "/test/foo/baz") {
-    if (m === "GET") return { data: { path: "/test/foo/baz" } };
-  }
-  if (p === "/test/fooo") {
-    if (m === "GET") return { data: { path: "/test/fooo" } };
-  }
-  if (p === "/another/path") {
-    if (m === "GET") return { data: { path: "/another/path" } };
-  }
-  let [_, ...s] = p.split("/"),
-    l = s.length;
-  if (s[0] === "test") {
-    if (s[1] === "foo") {
-      if (s[2] === "bar") {
-        if (s[3] === "qux") {
+const findRoute = (r) => {
+  let d0 = r.static["/test"].methods["GET"][0].data,
+    d1 = r.static["/test/foo"].methods["GET"][0].data,
+    d2 = r.static["/test/foo/bar/qux"].methods["GET"][0].data,
+    d3 = r.static["/test/foo/baz"].methods["GET"][0].data,
+    d4 = r.static["/test/fooo"].methods["GET"][0].data,
+    d5 = r.static["/another/path"].methods["GET"][0].data,
+    d6 = r.root.static["test"].static["foo"].param.methods["GET"][0].data,
+    d7 = r.root.static["test"].static["foo"].wildcard.methods["GET"][0].data,
+    d8 = r.root.static["test"].param.methods["GET"][0].data,
+    d9 = r.root.static["test"].param.static["y"].methods["GET"][0].data,
+    d10 =
+      r.root.static["test"].param.static["y"].static["z"].methods["GET"][0]
+        .data,
+    d11 = r.root.static["wildcard"].wildcard.methods["GET"][0].data;
+  return (m, p) => {
+    if (p[p.length - 1] === "/") p = p.slice(0, -1) || "/";
+    if (p === "/test") {
+      if (m === "GET") return { data: d0 };
+    }
+    if (p === "/test/foo") {
+      if (m === "GET") return { data: d1 };
+    }
+    if (p === "/test/foo/bar/qux") {
+      if (m === "GET") return { data: d2 };
+    }
+    if (p === "/test/foo/baz") {
+      if (m === "GET") return { data: d3 };
+    }
+    if (p === "/test/fooo") {
+      if (m === "GET") return { data: d4 };
+    }
+    if (p === "/another/path") {
+      if (m === "GET") return { data: d5 };
+    }
+    let [_, ...s] = p.split("/"),
+      l = s.length;
+    if (s[0] === "test") {
+      if (s[1] === "foo") {
+        if (s[2] === "bar") {
+          if (s[3] === "qux") {
+          }
+        }
+        if (s[2] === "baz") {
+        }
+        if (l === 3 || l === 2) {
+          if (m === "GET") return { data: d6, params: { _0: s[2] } };
+        }
+        if (m === "GET")
+          return { data: d7, params: { _: s.slice(2).join("/") } };
+      }
+      if (s[1] === "fooo") {
+      }
+      if (l === 2 || l === 1) {
+        if (m === "GET") if (l >= 2) return { data: d8, params: { id: s[1] } };
+      }
+      if (s[2] === "y") {
+        if (l === 3) {
+          if (m === "GET") return { data: d9, params: { idY: s[1] } };
+        }
+        if (s[3] === "z") {
+          if (l === 4) {
+            if (m === "GET") return { data: d10, params: { idYZ: s[1] } };
+          }
         }
       }
-      if (s[2] === "baz") {
+    }
+    if (s[0] === "another") {
+      if (s[1] === "path") {
       }
-      if (l === 3 || l === 2) {
-        if (m === "GET")
-          return { data: { path: "/test/foo/*" }, params: { _0: s[2] } };
-      }
+    }
+    if (s[0] === "wildcard") {
       if (m === "GET")
-        return {
-          data: { path: "/test/foo/**" },
-          params: { _: s.slice(2).join("/") },
-        };
+        return { data: d11, params: { _: s.slice(1).join("/") } };
     }
-    if (s[1] === "fooo") {
-    }
-    if (l === 2 || l === 1) {
-      if (m === "GET")
-        if (l >= 2)
-          return { data: { path: "/test/:id" }, params: { id: s[1] } };
-    }
-    if (s[2] === "y") {
-      if (l === 3) {
-        if (m === "GET")
-          return { data: { path: "/test/:idY/y" }, params: { idY: s[1] } };
-      }
-      if (s[3] === "z") {
-        if (l === 4) {
-          if (m === "GET")
-            return {
-              data: { path: "/test/:idYZ/y/z" },
-              params: { idYZ: s[1] },
-            };
-        }
-      }
-    }
-  }
-  if (s[0] === "another") {
-    if (s[1] === "path") {
-    }
-  }
-  if (s[0] === "wildcard") {
-    if (m === "GET")
-      return {
-        data: { path: "/wildcard/**" },
-        params: { _: s.slice(1).join("/") },
-      };
-  }
+  };
 };

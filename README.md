@@ -113,8 +113,6 @@ findRoute("GET", "/path/foo/bar");
 
 Compile the router instance into a compact runnable code.
 
-**IMPORTANT:** Route data must be serializable to JSON (i.e., no functions or classes) or implement the `toJSON()` method to render custom code.
-
 **Example:**
 
 ```ts
@@ -123,7 +121,7 @@ import { compileRouterToString } from "rou3/compiler";
 const router = createRouter();
 // [add some routes with serializable data]
 const compilerCode = compileRouterToString(router, "findRoute");
-// "const findRoute=(m, p) => {}"
+// "const findRoute = (router) => (m, p) => {}"
 ```
 
 <!--/automd -->
