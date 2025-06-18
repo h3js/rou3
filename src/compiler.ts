@@ -69,14 +69,20 @@ function compileRouteMatch(router: RouterContext<any>, deps?: any[]): string {
     const node = router.static[key];
     if (node?.methods) {
       staticNodes.add(node);
-      str += `if(p===${JSON.stringify(key.replace(/\/$/, "") || "/")}){${compileMethodMatch(node.methods, [], deps, -1)}}`;
+      str += `if(p===${JSON.stringify(key.replace(/\/$/, "") || "/")}){${compileMethodMatch(node.methods, [], deps, -1)[1]}}`;
     }
   }
 
+  const [existsTail, tail] = compileNode(
+    router.root,
+    [],
+    0,
+    deps,
+    false,
+    staticNodes,
+  );
   return (
-    str +
-    "let [_, ...s]=p.split('/'),l=s.length;" +
-    compileNode(router.root, [], 0, deps, false, staticNodes)
+    str + (existsTail ? "let [_, ...s]=p.split('/'),l=s.length;" + tail : "")
   );
 }
 
@@ -85,11 +91,13 @@ function compileMethodMatch(
   params: string[],
   deps: any[] | undefined,
   currentIdx: number, // Set to -1 for non-param node
-): string {
+): [boolean, string] {
   let str = "";
+  let exists = false;
   for (const key in methods) {
     const data = methods[key];
     if (data && data?.length > 0) {
+      exists = true;
       // Don't check for all method handler
       if (key !== "") str += `if(m==='${key}')`;
       const dataValue = data[0].data;
@@ -121,7 +129,7 @@ function compileMethodMatch(
       str += returnData + "}";
     }
   }
-  return str;
+  return [exists, str];
 }
 
 /**
@@ -134,27 +142,42 @@ function compileNode(
   deps: any[] | undefined,
   isParamNode: boolean,
   staticNodes: Set<Node>,
-): string {
+): [boolean, string] {
   let str = "";
+  let exists = false;
 
   if (node.methods && !staticNodes.has(node)) {
-    str += `if(l===${startIdx}${isParamNode ? `||l===${startIdx - 1}` : ""}){${compileMethodMatch(node.methods, params, deps, isParamNode ? startIdx : -1)}}`;
+    const [existsChild, match] = compileMethodMatch(
+      node.methods,
+      params,
+      deps,
+      isParamNode ? startIdx : -1,
+    );
+    if (existsChild) {
+      exists = true;
+      str += `if(l===${startIdx}${isParamNode ? `||l===${startIdx - 1}` : ""}){${match}}`;
+    }
   }
 
   if (node.static) {
-    for (const key in node.static)
-      str += `if(s[${startIdx}]===${JSON.stringify(key)}){${compileNode(
+    for (const key in node.static) {
+      const [existsChild, match] = compileNode(
         node.static[key],
         params,
         startIdx + 1,
         deps,
         false,
         staticNodes,
-      )}}`;
+      );
+      if (existsChild) {
+        exists = true;
+        str += `if(s[${startIdx}]===${JSON.stringify(key)}){${match}}`;
+      }
+    }
   }
 
   if (node.param) {
-    str += compileNode(
+    const [existsChild, match] = compileNode(
       node.param,
       [...params, `s[${startIdx}]`],
       startIdx + 1,
@@ -162,6 +185,10 @@ function compileNode(
       true,
       staticNodes,
     );
+    if (existsChild) {
+      exists = true;
+      str += match;
+    }
   }
 
   if (node.wildcard) {
@@ -170,16 +197,21 @@ function compileNode(
       throw new Error("Compiler mode does not support patterns after wildcard");
     }
 
-    if (wildcard.methods)
-      str += compileMethodMatch(
+    if (wildcard.methods) {
+      const [existsChild, match] = compileMethodMatch(
         wildcard.methods,
         [...params, `s.slice(${startIdx}).join('/')`],
         deps,
         startIdx,
       );
+      if (existsChild) {
+        exists = true;
+        str += match;
+      }
+    }
   }
 
-  return str;
+  return [exists, str];
 }
 
 /**
