@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.7.1
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.7.0...v0.7.1)
+
+### 🔥 Performance
+
+- **compiler:** Treeshake empty conditions ([#162](https://github.com/h3js/rou3/pull/162))
+
+### 🏡 Chore
+
+- **release:** V0.7.0 ([d714798](https://github.com/h3js/rou3/commit/d714798))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+- Vlad Sirenko ([@sirenkovladd](https://github.com/sirenkovladd))
+
 ## v0.7.0
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.6.3...v0.7.0)
