@@ -22,18 +22,10 @@
     l = s.length;
   if (s[0] === "test") {
     if (s[1] === "foo") {
-      if (s[2] === "bar") {
-        if (s[3] === "qux") {
-        }
-      }
-      if (s[2] === "baz") {
-      }
       if (l === 3 || l === 2) {
         if (m === "GET") return { data: d7, params: { _0: s[2] } };
       }
       if (m === "GET") return { data: d8, params: { _: s.slice(2).join("/") } };
-    }
-    if (s[1] === "fooo") {
     }
     if (l === 2 || l === 1) {
       if (m === "GET") if (l >= 2) return { data: d9, params: { id: s[1] } };
@@ -47,10 +39,6 @@
           if (m === "GET") return { data: d11, params: { idYZ: s[1] } };
         }
       }
-    }
-  }
-  if (s[0] === "another") {
-    if (s[1] === "path") {
     }
   }
   if (s[0] === "wildcard") {

@@ -22,12 +22,6 @@ const findRoute = (m, p) => {
     l = s.length;
   if (s[0] === "test") {
     if (s[1] === "foo") {
-      if (s[2] === "bar") {
-        if (s[3] === "qux") {
-        }
-      }
-      if (s[2] === "baz") {
-      }
       if (l === 3 || l === 2) {
         if (m === "GET")
           return { data: { path: "/test/foo/*" }, params: { _0: s[2] } };
@@ -37,8 +31,6 @@ const findRoute = (m, p) => {
           data: { path: "/test/foo/**" },
           params: { _: s.slice(2).join("/") },
         };
-    }
-    if (s[1] === "fooo") {
     }
     if (l === 2 || l === 1) {
       if (m === "GET")
@@ -59,10 +51,6 @@ const findRoute = (m, p) => {
             };
         }
       }
-    }
-  }
-  if (s[0] === "another") {
-    if (s[1] === "path") {
     }
   }
   if (s[0] === "wildcard") {
