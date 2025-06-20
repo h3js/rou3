@@ -1,4 +1,4 @@
-import { NullProtoObj } from "../_utils.ts";
+import { NullProtoObj } from "../object.ts";
 import type { RouterContext, ParamsIndexMap } from "../types.ts";
 import { splitPath } from "./_utils.ts";
 

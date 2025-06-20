@@ -1,4 +1,4 @@
-import { NullProtoObj } from "../_utils.ts";
+import { NullProtoObj } from "../object.ts";
 import type { MatchedRoute, ParamsIndexMap } from "../types.ts";
 
 export function splitPath(path: string): string[] {

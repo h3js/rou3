@@ -1,4 +1,4 @@
-import { NullProtoObj } from "./_utils.ts";
+import { NullProtoObj } from "./object.ts";
 import type { RouterContext } from "./types.ts";
 
 /**
