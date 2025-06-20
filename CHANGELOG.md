@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.7.2
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.7.1...v0.7.2)
+
+### 🩹 Fixes
+
+- **routeToRegExp:** Match wildcard without trailing slashes as well ([f0361df](https://github.com/h3js/rou3/commit/f0361df))
+- **routeToRegExp:** Keep wildcard as `_` ([205430d](https://github.com/h3js/rou3/commit/205430d))
+- **routeToRegExp:** Support named wildcard ([5d0c8f5](https://github.com/h3js/rou3/commit/5d0c8f5))
+- **routeToRegExp:** Preserve anonymous counter ids ([5682d66](https://github.com/h3js/rou3/commit/5682d66))
+
+### 🏡 Chore
+
+- Rename `_utils.ts` to `object.ts` ([0f72045](https://github.com/h3js/rou3/commit/0f72045))
+
+### ✅ Tests
+
+- Update regexp tests ([e848ec7](https://github.com/h3js/rou3/commit/e848ec7))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.7.1
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.7.0...v0.7.1)
