@@ -5,7 +5,7 @@ export function routeToRegExp(route: string = "/"): RegExp {
     if (segment === "*") {
       reSegments.push("[^/]*");
     } else if (segment === "**") {
-      reSegments.push(".*");
+      reSegments.push("?.*");
     } else if (segment.includes(":")) {
       reSegments.push(
         segment

@@ -29,12 +29,8 @@ describe("routeToRegExp", () => {
       match: [["/path/anything/foo"], ["/path//foo"], ["/path//foo/"]],
     },
     "/path/**": {
-      regex: /^\/path\/.*\/?$/,
-      match: [
-        ["/path/"],
-        // ["/path"], // TODO
-        ["/path/anything/more"],
-      ],
+      regex: /^\/path\/?.*\/?$/,
+      match: [["/path/"], ["/path"], ["/path/anything/more"]],
     },
   } as const;
 
