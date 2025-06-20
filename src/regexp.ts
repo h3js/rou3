@@ -4,8 +4,10 @@ export function routeToRegExp(route: string = "/"): RegExp {
     if (!segment) continue;
     if (segment === "*") {
       reSegments.push("[^/]*");
-    } else if (segment === "**") {
-      reSegments.push("?(?<_>.*)");
+    } else if (segment.startsWith("**")) {
+      reSegments.push(
+        segment === "**" ? "?(?<_>.*)" : `?(?<${segment.slice(3)}>.+)`,
+      );
     } else if (segment.includes(":")) {
       reSegments.push(
         segment

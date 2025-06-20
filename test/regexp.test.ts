@@ -36,6 +36,10 @@ describe("routeToRegExp", () => {
         ["/path/anything/more", { _: "anything/more" }],
       ],
     },
+    "/base/**:path": {
+      regex: /^\/base\/?(?<path>.+)\/?$/,
+      match: [["/base/anything/more", { path: "anything/more" }]],
+    },
   } as const;
 
   for (const [route, expected] of Object.entries(routes)) {
