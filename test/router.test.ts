@@ -4,6 +4,8 @@ import { createRouter, formatTree } from "./_utils.ts";
 import { addRoute, findRoute, removeRoute } from "../src/index.ts";
 import { compileRouter } from "../src/compiler.ts";
 
+import { testBunRoutes } from "./bun/bun.utils.ts";
+
 type TestRoute = {
   data: { path: string };
   params?: Record<string, string>;
@@ -16,7 +18,7 @@ export function createTestRoutes(paths: string[]): Record<string, any> {
   return Object.fromEntries(paths.map((path) => [path, { path }]));
 }
 
-function testRouter(
+async function testRouter(
   routes: string[] | Record<string, any>,
   before?: (router: RouterContext<{ path?: string }>) => void,
   tests?: TestRoutes,
@@ -66,11 +68,40 @@ function testRouter(
       },
     );
   }
+
+  const res = await testBunRoutes({
+    routes: (Array.isArray(routes)
+      ? (routes as string[])
+      : Object.keys(routes)
+    ).map((route) => route),
+    tests: Object.keys(tests!),
+  });
+  for (const [path, expected] of Object.entries(tests!)) {
+    if (!expected) continue;
+    if (expected.skip) continue;
+
+    const expectedRoute = expected.data.path;
+    const filteredParams = /=:|\*\*:/.test(expectedRoute)
+      ? {}
+      : Object.fromEntries(
+          Object.entries(expected.params || {}).filter(
+            ([key, value]) => key[0] !== "_",
+          ),
+        );
+
+    if (path.endsWith("/") || expectedRoute.endsWith("/")) continue;
+
+    it(`bun ${path} => ${expectedRoute}`, () => {
+      const actual = res[path];
+      expect(actual.route).toBe(expectedRoute);
+      expect(actual.params).toMatchObject(filteredParams);
+    });
+  }
 }
 
 describe("Router lookup", function () {
-  describe("static routes", () => {
-    testRouter(
+  describe("static routes", async () => {
+    await testRouter(
       ["/", "/route", "/another-router", "/this/is/yet/another/route"],
       (router) =>
         expect(formatTree(router.root)).toMatchInlineSnapshot(`
@@ -86,8 +117,8 @@ describe("Router lookup", function () {
     );
   });
 
-  describe("retrieve placeholders", function () {
-    testRouter(
+  describe("retrieve placeholders", async function () {
+    await testRouter(
       [
         "/blog/*",
         "/carbon/:element",
@@ -138,7 +169,7 @@ describe("Router lookup", function () {
       },
     );
 
-    testRouter(
+    await testRouter(
       ["/", "/:a", "/:a/:y/:x/:b", "/:a/:x/:b", "/:a/:b"],
       (router) =>
         expect(formatTree(router.root)).toMatchInlineSnapshot(
@@ -185,7 +216,7 @@ describe("Router lookup", function () {
       },
     );
 
-    testRouter(
+    await testRouter(
       [
         "/",
         "/:packageAndRefOrSha",
@@ -225,8 +256,8 @@ describe("Router lookup", function () {
     );
   });
 
-  describe("should be able to perform wildcard lookups", () => {
-    testRouter(
+  describe("should be able to perform wildcard lookups", async () => {
+    await testRouter(
       [
         "/polymer/**:id",
         "/polymer/another/route",
@@ -262,8 +293,8 @@ describe("Router lookup", function () {
     );
   });
 
-  describe("fallback to dynamic", () => {
-    testRouter(
+  describe("fallback to dynamic", async () => {
+    await testRouter(
       ["/wildcard/**", "/test/**", "/test", "/dynamic/*"],
       (router) =>
         expect(formatTree(router.root)).toMatchInlineSnapshot(`
@@ -307,8 +338,8 @@ describe("Router lookup", function () {
     );
   });
 
-  describe("unnamed placeholders", function () {
-    testRouter(
+  describe("unnamed placeholders", async function () {
+    await testRouter(
       ["/polymer/**", "/polymer/route/*"],
       (router) =>
         expect(formatTree(router.root)).toMatchInlineSnapshot(`
@@ -335,9 +366,9 @@ describe("Router lookup", function () {
     );
   });
 
-  describe("mixed params in same segment", function () {
+  describe("mixed params in same segment", async function () {
     const mixedPath = "/files/:category/:id,name=:name.txt";
-    testRouter(
+    await testRouter(
       [mixedPath],
       (router) =>
         expect(formatTree(router.root)).toMatchInlineSnapshot(`
@@ -356,8 +387,8 @@ describe("Router lookup", function () {
     );
   });
 
-  describe("should be able to match routes with trailing slash", function () {
-    testRouter(
+  describe("should be able to match routes with trailing slash", async function () {
+    await testRouter(
       ["/route/without/trailing/slash", "/route/with/trailing/slash/"],
       (router) =>
         expect(formatTree(router.root)).toMatchInlineSnapshot(`
@@ -387,8 +418,8 @@ describe("Router lookup", function () {
     );
   });
 
-  describe("empty segments", function () {
-    testRouter(
+  describe("empty segments", async function () {
+    await testRouter(
       ["/test//route", "/test/:param/route"],
       (router) =>
         expect(formatTree(router.root)).toMatchInlineSnapshot(`
