@@ -25,14 +25,18 @@ describe("routeToRegExp", () => {
       match: [["/path/value1/value2", { param1: "value1", param2: "value2" }]],
     },
     "/path/*/foo": {
-      regex: /^\/path\/[^/]*\/foo\/?$/,
-      match: [["/path/anything/foo"], ["/path//foo"], ["/path//foo/"]],
+      regex: /^\/path\/(?<_0>[^/]*)\/foo\/?$/,
+      match: [
+        ["/path/anything/foo", { _0: "anything" }],
+        ["/path//foo", { _0: "" }],
+        ["/path//foo/", { _0: "" }],
+      ],
     },
     "/path/**": {
       regex: /^\/path\/?(?<_>.*)\/?$/,
       match: [
-        ["/path/"],
-        ["/path"],
+        ["/path/", { _: "" }],
+        ["/path", { _: "" }],
         ["/path/anything/more", { _: "anything/more" }],
       ],
     },
@@ -50,7 +54,14 @@ describe("routeToRegExp", () => {
       const regex = routeToRegExp(route);
 
       for (const [path, params] of expected.match) {
-        expect(findRoute(router, "", path)).toMatchObject({ data: { route } });
+        expect(findRoute(router, "", path)).toMatchObject(
+          params
+            ? {
+                data: { route },
+                params,
+              }
+            : { data: { route } },
+        );
 
         const match = path.match(regex);
         expect(match, path).not.toBeNull();

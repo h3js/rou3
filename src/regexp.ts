@@ -1,9 +1,10 @@
 export function routeToRegExp(route: string = "/"): RegExp {
   const reSegments = [];
+  let idCtr = 0;
   for (const segment of route.split("/")) {
     if (!segment) continue;
     if (segment === "*") {
-      reSegments.push("[^/]*");
+      reSegments.push(`(?<_${idCtr++}>[^/]*)`);
     } else if (segment.startsWith("**")) {
       reSegments.push(
         segment === "**" ? "?(?<_>.*)" : `?(?<${segment.slice(3)}>.+)`,
