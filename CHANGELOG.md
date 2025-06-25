@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.7.3
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.7.2...v0.7.3)
+
+### 🚀 Enhancements
+
+- **compiler:** Support `matchAll` mode ([#165](https://github.com/h3js/rou3/pull/165))
+
+### 🔥 Performance
+
+- **compiler:** Avoid array slicing ([#164](https://github.com/h3js/rou3/pull/164))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.7.2
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.7.1...v0.7.2)
