@@ -92,7 +92,7 @@ findRoute(router, "GET", "/");
 
 <!-- automd:jsdocs src="./src/compiler.ts" -->
 
-### `compileRouter(router)`
+### `compileRouter(router, opts?)`
 
 Compiles the router instance into a faster route-matching function.
 
@@ -106,10 +106,11 @@ import { compileRouter } from "rou3/compiler";
 const router = createRouter();
 // [add some routes]
 const findRoute = compileRouter(router);
+const matchAll = compileRouter(router, { matchAll: true });
 findRoute("GET", "/path/foo/bar");
 ```
 
-### `compileRouterToString(router, functionName?)`
+### `compileRouterToString(router, functionName?, opts?)`
 
 Compile the router instance into a compact runnable code.
 
