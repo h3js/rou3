@@ -1,5 +1,9 @@
 import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 
+export interface RouterCompilerOptions {
+  matchAll?: boolean;
+}
+
 /**
  * Compiles the router instance into a faster route-matching function.
  *
@@ -11,15 +15,25 @@ import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
  * const router = createRouter();
  * // [add some routes]
  * const findRoute = compileRouter(router);
+ * const matchAll = compileRouter(router, { matchAll: true });
  * findRoute("GET", "/path/foo/bar");
  *
  * @param router - The router context to compile.
  */
-export function compileRouter<T>(
+export function compileRouter<
+  T,
+  O extends RouterCompilerOptions = RouterCompilerOptions,
+>(
   router: RouterContext<T>,
-): (method: string, path: string) => MatchedRoute<T> | undefined {
+  opts?: O,
+): (
+  method: string,
+  path: string,
+) => O["matchAll"] extends true
+  ? MatchedRoute<T>[]
+  : MatchedRoute<T> | undefined {
   const deps: any[] = [];
-  const compiled = compileRouteMatch(router, deps);
+  const compiled = compileRouteMatch(router, deps, opts?.matchAll);
   return new Function(
     ...deps.map((_, i) => "d" + (i + 1)),
     `return(m,p)=>{${compiled}}`,
@@ -42,8 +56,9 @@ export function compileRouter<T>(
 export function compileRouterToString(
   router: RouterContext,
   functionName?: string,
+  opts?: RouterCompilerOptions,
 ): string {
-  const compiled = `(m,p)=>{${compileRouteMatch(router)}}`;
+  const compiled = `(m,p)=>{${compileRouteMatch(router, undefined, opts?.matchAll)}}`;
   return functionName ? `const ${functionName}=${compiled};` : compiled;
 }
 
@@ -53,15 +68,20 @@ export function compileRouterToString(
 // s: path parts
 // l: path parts length
 // m: method
+// r: matchAll matches
 
 /**
  * Compile a router to pattern matching statements
  * @param router
  * @param deps - Dependencies of the function scope
  */
-function compileRouteMatch(router: RouterContext<any>, deps?: any[]): string {
+function compileRouteMatch(
+  router: RouterContext<any>,
+  deps?: any[],
+  matchAll?: boolean,
+): string {
   // Ignore trailing slash
-  let str = `if(p[p.length-1]==='/')p=p.slice(0,-1)||'/';`;
+  let str = `${matchAll ? `let r=[];` : ""}if(p[p.length-1]==='/')p=p.slice(0,-1)||'/';`;
 
   const staticNodes = new Set<Node>();
 
@@ -69,7 +89,7 @@ function compileRouteMatch(router: RouterContext<any>, deps?: any[]): string {
     const node = router.static[key];
     if (node?.methods) {
       staticNodes.add(node);
-      str += `if(p===${JSON.stringify(key.replace(/\/$/, "") || "/")}){${compileMethodMatch(node.methods, [], deps, -1)[1]}}`;
+      str += `if(p===${JSON.stringify(key.replace(/\/$/, "") || "/")}){${compileMethodMatch(node.methods, [], deps, -1, matchAll)[1]}}`;
     }
   }
 
@@ -80,8 +100,16 @@ function compileRouteMatch(router: RouterContext<any>, deps?: any[]): string {
     deps,
     false,
     staticNodes,
+    matchAll,
   );
-  return str + (existsTail ? "let s=p.split('/'),l=s.length-1;" + tail : "");
+  return (
+    str +
+    (existsTail
+      ? "let s=p.split('/'),l=s.length-1;" +
+        tail +
+        (matchAll ? ";return r" : "")
+      : "")
+  );
 }
 
 function compileMethodMatch(
@@ -89,6 +117,7 @@ function compileMethodMatch(
   params: string[],
   deps: any[] | undefined,
   currentIdx: number, // Set to -1 for non-param node
+  matchAll: boolean | undefined,
 ): [boolean, string] {
   let str = "";
   let exists = false;
@@ -96,12 +125,12 @@ function compileMethodMatch(
     const data = methods[key];
     if (data && data?.length > 0) {
       exists = true;
-      // Don't check for all method handler
+      // Don't check for matchAll method handler
       if (key !== "") str += `if(m==='${key}')`;
       const dataValue = data[0].data;
-      let returnData = deps
-        ? `return{data:d${deps.push(dataValue)}`
-        : `return{data:${typeof dataValue?.toJSON === "function" ? dataValue.toJSON() : JSON.stringify(dataValue)}`;
+      let res = deps
+        ? `{data:d${deps.push(dataValue)}`
+        : `{data:${typeof dataValue?.toJSON === "function" ? dataValue.toJSON() : JSON.stringify(dataValue)}`;
 
       // Add param properties
       const { paramsMap } = data[0];
@@ -112,19 +141,19 @@ function compileMethodMatch(
         if (required) str += `if(l>=${currentIdx})`;
 
         // Create the param object based on previous parameters
-        returnData += ",params:{";
+        res += ",params:{";
         for (let i = 0; i < paramsMap.length; i++) {
           const map = paramsMap[i];
 
-          returnData +=
+          res +=
             typeof map[1] === "string"
               ? `${JSON.stringify(map[1])}:${params[i]},`
               : `...(${map[1].toString()}.exec(${params[i]}))?.groups,`;
         }
-        returnData += "}";
+        res += "}";
       }
 
-      str += returnData + "}";
+      str += matchAll ? `r.unshift(${res}});` : `return ${res}};`;
     }
   }
   return [exists, str];
@@ -140,6 +169,7 @@ function compileNode(
   deps: any[] | undefined,
   isParamNode: boolean,
   staticNodes: Set<Node>,
+  matchAll: boolean | undefined,
 ): [boolean, string] {
   let str = "";
   let exists = false;
@@ -150,6 +180,7 @@ function compileNode(
       params,
       deps,
       isParamNode ? startIdx : -1,
+      matchAll,
     );
     if (existsChild) {
       exists = true;
@@ -166,6 +197,7 @@ function compileNode(
         deps,
         false,
         staticNodes,
+        matchAll,
       );
       if (existsChild) {
         exists = true;
@@ -182,6 +214,7 @@ function compileNode(
       deps,
       true,
       staticNodes,
+      matchAll,
     );
     if (existsChild) {
       exists = true;
@@ -201,6 +234,7 @@ function compileNode(
         [...params, `s.slice(${startIdx + 1}).join('/')`],
         deps,
         startIdx,
+        matchAll,
       );
       if (existsChild) {
         exists = true;

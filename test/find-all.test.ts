@@ -1,15 +1,26 @@
 import { describe, it, expect } from "vitest";
 import { createRouter, formatTree } from "./_utils.ts";
 import { findAllRoutes, type RouterContext } from "../src/index.ts";
+import { compileRouter } from "../src/compiler.ts";
+import { format } from "prettier";
 
 // Helper to make snapsots more readable
 const _findAllRoutes = (
   ctx: RouterContext<{ path?: string }>,
   method: string = "",
   path: string,
-) => findAllRoutes(ctx, method, path).map((m) => m.data.path);
+) => {
+  const res = findAllRoutes(ctx, method, path).map((m) => m.data.path);
 
-describe("find-all: basic", () => {
+  const compiled = compileRouter(ctx, { matchAll: true });
+  const compiledRes = compiled(method, path).map((m) => m.data.path);
+
+  expect(res).toEqual(compiledRes);
+
+  return res;
+};
+
+describe("find-matchAll: basic", () => {
   const router = createRouter([
     "/foo",
     "/foo/**",
@@ -30,6 +41,15 @@ describe("find-all: basic", () => {
           │       ├── /** ┈> [GET] /foo/**
           ├── /** ┈> [GET] /**"
     `);
+  });
+
+  it("snapshot (compiled)", async () => {
+    console.log(compileRouter(router, { matchAll: true }).toString());
+    await expect(
+      await format(compileRouter(router, { matchAll: true }).toString(), {
+        parser: "acorn",
+      }),
+    ).toMatchFileSnapshot(".snapshot/compiled-matchAll.mjs");
   });
 
   it("matches /foo/bar/baz pattern", () => {
