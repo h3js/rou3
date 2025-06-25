@@ -18,30 +18,30 @@
   if (p === "/another/path") {
     if (m === "GET") return { data: d6 };
   }
-  let [_, ...s] = p.split("/"),
-    l = s.length;
-  if (s[0] === "test") {
-    if (s[1] === "foo") {
+  let s = p.split("/"),
+    l = s.length - 1;
+  if (s[1] === "test") {
+    if (s[2] === "foo") {
       if (l === 3 || l === 2) {
-        if (m === "GET") return { data: d7, params: { _0: s[2] } };
+        if (m === "GET") return { data: d7, params: { _0: s[3] } };
       }
-      if (m === "GET") return { data: d8, params: { _: s.slice(2).join("/") } };
+      if (m === "GET") return { data: d8, params: { _: s.slice(3).join("/") } };
     }
     if (l === 2 || l === 1) {
-      if (m === "GET") if (l >= 2) return { data: d9, params: { id: s[1] } };
+      if (m === "GET") if (l >= 2) return { data: d9, params: { id: s[2] } };
     }
-    if (s[2] === "y") {
+    if (s[3] === "y") {
       if (l === 3) {
-        if (m === "GET") return { data: d10, params: { idY: s[1] } };
+        if (m === "GET") return { data: d10, params: { idY: s[2] } };
       }
-      if (s[3] === "z") {
+      if (s[4] === "z") {
         if (l === 4) {
-          if (m === "GET") return { data: d11, params: { idYZ: s[1] } };
+          if (m === "GET") return { data: d11, params: { idYZ: s[2] } };
         }
       }
     }
   }
-  if (s[0] === "wildcard") {
-    if (m === "GET") return { data: d12, params: { _: s.slice(1).join("/") } };
+  if (s[1] === "wildcard") {
+    if (m === "GET") return { data: d12, params: { _: s.slice(2).join("/") } };
   }
 };

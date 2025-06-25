@@ -50,6 +50,9 @@ importers:
       prettier:
         specifier: ^3.5.3
         version: 3.5.3
+      rou3-latest:
+        specifier: npm:rou3@0.7.2
+        version: rou3@0.7.2
       typescript:
         specifier: ^5.8.3
         version: 5.8.3
@@ -2617,6 +2620,9 @@ packages:
     resolution: {integrity: sha512-wdN2Kd3Twh8MAEOEJZsuxuLKCsBEo4PVNLK6tQWAn10VhsVewQLzcucMgLolRlhFybGxfclbPeEYBaP6RvUFGg==}
     engines: {node: '>=18.0.0', npm: '>=8.0.0'}
     hasBin: true
+
+  rou3@0.7.2:
+    resolution: {integrity: sha512-GQuhKsN8Tp4CJh81PUmLWS6VKlL38P+LIVpE+bW8OlVKuf+ICysK9Cnh8mGWE4wKkPmOQTpB9hvbLk0bRmHsMQ==}
 
   run-applescript@7.0.0:
     resolution: {integrity: sha512-9by4Ij99JUr/MCFBUkDKLWK3G9HVXmabKz9U5MlIAIuvuzkiOicRYs8XJLxX+xahD+mLiiCYDqF9dKAgtzKP1A==}
@@ -5820,6 +5826,8 @@ snapshots:
       '@rollup/rollup-win32-ia32-msvc': 4.43.0
       '@rollup/rollup-win32-x64-msvc': 4.43.0
       fsevents: 2.3.3
+
+  rou3@0.7.2: {}
 
   run-applescript@7.0.0: {}
 
