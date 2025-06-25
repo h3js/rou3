@@ -81,9 +81,7 @@ function compileRouteMatch(router: RouterContext<any>, deps?: any[]): string {
     false,
     staticNodes,
   );
-  return (
-    str + (existsTail ? "let [_, ...s]=p.split('/'),l=s.length;" + tail : "")
-  );
+  return str + (existsTail ? "let s=p.split('/'),l=s.length-1;" + tail : "");
 }
 
 function compileMethodMatch(
@@ -171,7 +169,7 @@ function compileNode(
       );
       if (existsChild) {
         exists = true;
-        str += `if(s[${startIdx}]===${JSON.stringify(key)}){${match}}`;
+        str += `if(s[${startIdx + 1}]===${JSON.stringify(key)}){${match}}`;
       }
     }
   }
@@ -179,7 +177,7 @@ function compileNode(
   if (node.param) {
     const [existsChild, match] = compileNode(
       node.param,
-      [...params, `s[${startIdx}]`],
+      [...params, `s[${startIdx + 1}]`],
       startIdx + 1,
       deps,
       true,
@@ -200,7 +198,7 @@ function compileNode(
     if (wildcard.methods) {
       const [existsChild, match] = compileMethodMatch(
         wildcard.methods,
-        [...params, `s.slice(${startIdx}).join('/')`],
+        [...params, `s.slice(${startIdx + 1}).join('/')`],
         deps,
         startIdx,
       );
