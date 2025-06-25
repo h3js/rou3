@@ -44,12 +44,11 @@ describe("find-matchAll: basic", () => {
   });
 
   it("snapshot (compiled)", async () => {
-    console.log(compileRouter(router, { matchAll: true }).toString());
     await expect(
       await format(compileRouter(router, { matchAll: true }).toString(), {
         parser: "acorn",
       }),
-    ).toMatchFileSnapshot(".snapshot/compiled-matchAll.mjs");
+    ).toMatchFileSnapshot(".snapshot/compiled-all.mjs");
   });
 
   it("matches /foo/bar/baz pattern", () => {
