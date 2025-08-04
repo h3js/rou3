@@ -22,3 +22,15 @@ export type MatchedRoute<T = unknown> = {
   data: T;
   params?: Record<string, string>;
 };
+
+type ExtractParams<TPath extends string> = TPath extends `${infer _Start}:${infer Rest}`
+  ? Rest extends `${infer Param}/${infer Tail}`
+    ? Param | ExtractParams<`/${Tail}`>
+    : Rest
+  : TPath extends `/${infer Rest}`
+  ? ExtractParams<Rest>
+  : never;
+
+export type InferRouteParams<TPath extends string> = {
+  [K in ExtractParams<TPath>]: string;
+};
