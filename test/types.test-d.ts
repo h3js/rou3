@@ -15,5 +15,41 @@ describe("types", () => {
       type Expected = {};
       expectTypeOf<Params>().toEqualTypeOf<Expected>();
     });
+
+    it("should infer wildcard params", () => {
+      type Params = InferRouteParams<"/test/*">;
+      type Expected = { _0: string };
+      expectTypeOf<Params>().toEqualTypeOf<Expected>();
+    });
+
+    it("should infer multiple wildcard params", () => {
+      type Params = InferRouteParams<"/test/*/foo/*/bar">;
+      type Expected = { _0: string; _1: string };
+      expectTypeOf<Params>().toEqualTypeOf<Expected>();
+    });
+
+    it("should handle catch-all wildcard", () => {
+      type Params = InferRouteParams<"/test/**">;
+      type Expected = { _: string };
+      expectTypeOf<Params>().toEqualTypeOf<Expected>();
+    });
+
+    it("should handle named wildcard", () => {
+      type Params = InferRouteParams<"/test/**:id">;
+      type Expected = { id: string };
+      expectTypeOf<Params>().toEqualTypeOf<Expected>();
+    });
+
+    it("should infer mixed params", () => {
+      type Params = InferRouteParams<"/test/:id/*/foo/:name/**">;
+      type Expected = { id: string; _0: string; name: string; _: string };
+      expectTypeOf<Params>().toEqualTypeOf<Expected>();
+    });
+
+    it("should work with trailing slash", () => {
+      type Params = InferRouteParams<"/test/:id/static">;
+      type Expected = { id: string };
+      expectTypeOf<Params>().toEqualTypeOf<Expected>();
+    });
   });
 });
