@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.7.4
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.7.3...v0.7.4)
+
+### 🩹 Fixes
+
+- **compiler:** Add missing return statement for matchAll ([0e02b36](https://github.com/h3js/rou3/commit/0e02b36))
+
+### 🏡 Chore
+
+- Update deps ([7880055](https://github.com/h3js/rou3/commit/7880055))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.7.3
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.7.2...v0.7.3)
