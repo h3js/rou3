@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.7.5
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.7.4...v0.7.5)
+
+### 🚀 Enhancements
+
+- **compiler:** Support custom data `serialize` option ([c633ed1](https://github.com/h3js/rou3/commit/c633ed1))
+
+### 🏡 Chore
+
+- Apply automated updates ([e459e5b](https://github.com/h3js/rou3/commit/e459e5b))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.7.4
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.7.3...v0.7.4)
