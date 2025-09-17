@@ -102,13 +102,12 @@ function compileRouteMatch(
     staticNodes,
     matchAll,
   );
+  const returnStmt = matchAll ? "return r;" : "";
   return (
     str +
     (existsTail
-      ? "let s=p.split('/'),l=s.length-1;" +
-        tail +
-        (matchAll ? ";return r" : "")
-      : "")
+      ? "let s=p.split('/'),l=s.length-1;" + tail + returnStmt
+      : returnStmt)
   );
 }
 
