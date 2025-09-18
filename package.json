@@ -1,6 +1,6 @@
 {
   "name": "rou3",
-  "version": "0.7.3",
+  "version": "0.7.5",
   "description": "Lightweight and fast router for JavaScript.",
   "repository": "h3js/rou3",
   "license": "MIT",
@@ -27,23 +27,23 @@
     "test:types": "tsc --noEmit"
   },
   "devDependencies": {
+    "0x": "^6.0.0",
     "@mitata/counters": "^0.0.8",
-    "@types/node": "^24.0.1",
-    "@vitest/coverage-v8": "^3.2.3",
-    "0x": "^5.8.0",
-    "automd": "^0.4.0",
-    "changelogen": "^0.6.1",
-    "esbuild": "^0.25.5",
-    "eslint": "^9.29.0",
-    "eslint-config-unjs": "^0.4.2",
-    "jiti": "^2.4.2",
+    "@types/node": "^24.5.1",
+    "@vitest/coverage-v8": "^3.2.4",
+    "automd": "^0.4.2",
+    "changelogen": "^0.6.2",
+    "esbuild": "^0.25.9",
+    "eslint": "^9.35.0",
+    "eslint-config-unjs": "^0.5.0",
+    "jiti": "^2.5.1",
     "listhen": "^1.9.0",
     "mitata": "^1.0.34",
     "obuild": "^0.2.1",
-    "prettier": "^3.5.3",
-    "rou3-latest": "npm:rou3@0.7.2",
-    "typescript": "^5.8.3",
-    "vitest": "^3.2.3"
+    "prettier": "^3.6.2",
+    "rou3-latest": "npm:rou3@^0.7.3",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
   },
-  "packageManager": "pnpm@10.12.1"
+  "packageManager": "pnpm@10.16.1"
 }

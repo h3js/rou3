@@ -1,7 +1,8 @@
 import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 
-export interface RouterCompilerOptions {
+export interface RouterCompilerOptions<T = any> {
   matchAll?: boolean;
+  serialize?: (data: T) => string;
 }
 
 /**
@@ -22,7 +23,7 @@ export interface RouterCompilerOptions {
  */
 export function compileRouter<
   T,
-  O extends RouterCompilerOptions = RouterCompilerOptions,
+  O extends RouterCompilerOptions<T> = RouterCompilerOptions<T>,
 >(
   router: RouterContext<T>,
   opts?: O,
@@ -33,7 +34,7 @@ export function compileRouter<
   ? MatchedRoute<T>[]
   : MatchedRoute<T> | undefined {
   const deps: any[] = [];
-  const compiled = compileRouteMatch(router, deps, opts?.matchAll);
+  const compiled = compileRouteMatch(router, deps, opts);
   return new Function(
     ...deps.map((_, i) => "d" + (i + 1)),
     `return(m,p)=>{${compiled}}`,
@@ -43,7 +44,7 @@ export function compileRouter<
 /**
  * Compile the router instance into a compact runnable code.
  *
- * **IMPORTANT:** Route data must be serializable to JSON (i.e., no functions or classes) or implement the `toJSON()` method to render custom code.
+ * **IMPORTANT:** Route data must be serializable to JSON (i.e., no functions or classes) or implement the `toJSON()` method to render custom code or you can pass custom `serialize` function in options.
  *
  * @example
  * import { createRouter, addRoute } from "rou3";
@@ -58,7 +59,7 @@ export function compileRouterToString(
   functionName?: string,
   opts?: RouterCompilerOptions,
 ): string {
-  const compiled = `(m,p)=>{${compileRouteMatch(router, undefined, opts?.matchAll)}}`;
+  const compiled = `(m,p)=>{${compileRouteMatch(router, undefined, opts)}}`;
   return functionName ? `const ${functionName}=${compiled};` : compiled;
 }
 
@@ -78,10 +79,10 @@ export function compileRouterToString(
 function compileRouteMatch(
   router: RouterContext<any>,
   deps?: any[],
-  matchAll?: boolean,
+  opts?: RouterCompilerOptions,
 ): string {
   // Ignore trailing slash
-  let str = `${matchAll ? `let r=[];` : ""}if(p[p.length-1]==='/')p=p.slice(0,-1)||'/';`;
+  let str = `${opts?.matchAll ? `let r=[];` : ""}if(p[p.length-1]==='/')p=p.slice(0,-1)||'/';`;
 
   const staticNodes = new Set<Node>();
 
@@ -89,7 +90,7 @@ function compileRouteMatch(
     const node = router.static[key];
     if (node?.methods) {
       staticNodes.add(node);
-      str += `if(p===${JSON.stringify(key.replace(/\/$/, "") || "/")}){${compileMethodMatch(node.methods, [], deps, -1, matchAll)[1]}}`;
+      str += `if(p===${JSON.stringify(key.replace(/\/$/, "") || "/")}){${compileMethodMatch(node.methods, [], deps, -1, opts)[1]}}`;
     }
   }
 
@@ -100,15 +101,14 @@ function compileRouteMatch(
     deps,
     false,
     staticNodes,
-    matchAll,
+    opts,
   );
+  const returnStmt = opts?.matchAll ? "return r;" : "";
   return (
     str +
     (existsTail
-      ? "let s=p.split('/'),l=s.length-1;" +
-        tail +
-        (matchAll ? ";return r" : "")
-      : "")
+      ? "let s=p.split('/'),l=s.length-1;" + tail + returnStmt
+      : returnStmt)
   );
 }
 
@@ -117,7 +117,7 @@ function compileMethodMatch(
   params: string[],
   deps: any[] | undefined,
   currentIdx: number, // Set to -1 for non-param node
-  matchAll: boolean | undefined,
+  opts?: RouterCompilerOptions,
 ): [boolean, string] {
   let str = "";
   let exists = false;
@@ -127,10 +127,19 @@ function compileMethodMatch(
       exists = true;
       // Don't check for matchAll method handler
       if (key !== "") str += `if(m==='${key}')`;
+
       const dataValue = data[0].data;
-      let res = deps
-        ? `{data:d${deps.push(dataValue)}`
-        : `{data:${typeof dataValue?.toJSON === "function" ? dataValue.toJSON() : JSON.stringify(dataValue)}`;
+      let serializedData: string;
+      if (deps) {
+        serializedData = `d${deps.push(dataValue)}`;
+      } else if (opts?.serialize) {
+        serializedData = opts.serialize(dataValue);
+      } else if (typeof dataValue?.toJSON === "function") {
+        serializedData = dataValue.toJSON();
+      } else {
+        serializedData = JSON.stringify(dataValue);
+      }
+      let res = `{data:${serializedData}`;
 
       // Add param properties
       const { paramsMap } = data[0];
@@ -153,7 +162,7 @@ function compileMethodMatch(
         res += "}";
       }
 
-      str += matchAll ? `r.unshift(${res}});` : `return ${res}};`;
+      str += opts?.matchAll ? `r.unshift(${res}});` : `return ${res}};`;
     }
   }
   return [exists, str];
@@ -169,7 +178,7 @@ function compileNode(
   deps: any[] | undefined,
   isParamNode: boolean,
   staticNodes: Set<Node>,
-  matchAll: boolean | undefined,
+  opts?: RouterCompilerOptions,
 ): [boolean, string] {
   let str = "";
   let exists = false;
@@ -180,7 +189,7 @@ function compileNode(
       params,
       deps,
       isParamNode ? startIdx : -1,
-      matchAll,
+      opts,
     );
     if (existsChild) {
       exists = true;
@@ -197,7 +206,7 @@ function compileNode(
         deps,
         false,
         staticNodes,
-        matchAll,
+        opts,
       );
       if (existsChild) {
         exists = true;
@@ -214,7 +223,7 @@ function compileNode(
       deps,
       true,
       staticNodes,
-      matchAll,
+      opts,
     );
     if (existsChild) {
       exists = true;
@@ -234,7 +243,7 @@ function compileNode(
         [...params, `s.slice(${startIdx + 1}).join('/')`],
         deps,
         startIdx,
-        matchAll,
+        opts,
       );
       if (existsChild) {
         exists = true;

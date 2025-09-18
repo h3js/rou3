@@ -38,7 +38,7 @@ import {
 } from "rou3";
 ```
 
-**CDN** (Deno, Bun and Browsers)
+**CDN** (Deno and Browsers)
 
 ```js
 import {
@@ -114,7 +114,7 @@ findRoute("GET", "/path/foo/bar");
 
 Compile the router instance into a compact runnable code.
 
-**IMPORTANT:** Route data must be serializable to JSON (i.e., no functions or classes) or implement the `toJSON()` method to render custom code.
+**IMPORTANT:** Route data must be serializable to JSON (i.e., no functions or classes) or implement the `toJSON()` method to render custom code or you can pass custom `serialize` function in options.
 
 **Example:**
 
