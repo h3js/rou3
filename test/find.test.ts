@@ -69,49 +69,49 @@ describe("route matching", () => {
   for (const { name, match } of lookups) {
     it(`match with ${name}`, () => {
       // Static
-      expect(match("GET", "/test")).toEqual({
+      expect(match("GET", "/test")).toMatchObject({
         data: { path: "/test" },
       });
-      expect(match("GET", "/test/foo")).toEqual({
+      expect(match("GET", "/test/foo")).toMatchObject({
         data: { path: "/test/foo" },
       });
-      expect(match("GET", "/test/fooo")).toEqual({
+      expect(match("GET", "/test/fooo")).toMatchObject({
         data: { path: "/test/fooo" },
       });
-      expect(match("GET", "/another/path")).toEqual({
+      expect(match("GET", "/another/path")).toMatchObject({
         data: { path: "/another/path" },
       });
       // Param
-      expect(match("GET", "/test/123")).toEqual({
+      expect(match("GET", "/test/123")).toMatchObject({
         data: { path: "/test/:id" },
         params: { id: "123" },
       });
-      expect(match("GET", "/test/123/y")).toEqual({
+      expect(match("GET", "/test/123/y")).toMatchObject({
         data: { path: "/test/:idY/y" },
         params: { idY: "123" },
       });
-      expect(match("GET", "/test/123/y/z")).toEqual({
+      expect(match("GET", "/test/123/y/z")).toMatchObject({
         data: { path: "/test/:idYZ/y/z" },
         params: { idYZ: "123" },
       });
-      expect(match("GET", "/test/foo/123")).toEqual({
+      expect(match("GET", "/test/foo/123")).toMatchObject({
         data: { path: "/test/foo/*" },
         params: { _0: "123" },
       });
       // Wildcard
-      expect(match("GET", "/test/foo/123/456")).toEqual({
+      expect(match("GET", "/test/foo/123/456")).toMatchObject({
         data: { path: "/test/foo/**" },
         params: { _: "123/456" },
       });
-      expect(match("GET", "/wildcard/foo")).toEqual({
+      expect(match("GET", "/wildcard/foo")).toMatchObject({
         data: { path: "/wildcard/**" },
         params: { _: "foo" },
       });
-      expect(match("GET", "/wildcard/foo/bar")).toEqual({
+      expect(match("GET", "/wildcard/foo/bar")).toMatchObject({
         data: { path: "/wildcard/**" },
         params: { _: "foo/bar" },
       });
-      expect(match("GET", "/wildcard")).toEqual({
+      expect(match("GET", "/wildcard")).toMatchObject({
         data: { path: "/wildcard/**" },
         params: { _: "" },
       });

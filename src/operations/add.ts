@@ -18,6 +18,7 @@ export function addRoute<T>(
   let _unnamedParamIndex = 0;
 
   const paramsMap: ParamsIndexMap = [];
+  const paramsRegexp: RegExp[] = [];
 
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
@@ -42,14 +43,18 @@ export function addRoute<T>(
         node.param = { key: "*" };
       }
       node = node.param;
-      const isOptional = segment === "*";
-      paramsMap.push([
-        i,
-        isOptional
-          ? `_${_unnamedParamIndex++}`
-          : (_getParamMatcher(segment) as string),
-        isOptional,
-      ]);
+      if (segment === "*") {
+        paramsMap.push([i, `_${_unnamedParamIndex++}`, true /* optional */]);
+      } else {
+        if (segment.includes(":", 1)) {
+          const regexp = getParamRegexp(segment);
+          paramsRegexp[i] = regexp;
+          node.hasRegexParam = true;
+          paramsMap.push([i, regexp, false]);
+        } else {
+          paramsMap.push([i, segment.slice(1), false]);
+        }
+      }
       continue;
     }
 
@@ -77,6 +82,7 @@ export function addRoute<T>(
   }
   node.methods![method].push({
     data: data || (null as T),
+    paramsRegexp,
     paramsMap: hasParams ? paramsMap : undefined,
   });
 
@@ -86,11 +92,7 @@ export function addRoute<T>(
   }
 }
 
-function _getParamMatcher(segment: string): string | RegExp {
-  if (!segment.includes(":", 1)) {
-    // Single param
-    return segment.slice(1);
-  }
+function getParamRegexp(segment: string): RegExp {
   const regex = segment
     .replace(/:(\w+)/g, (_, id) => `(?<${id}>[^/]+)`)
     .replace(/\./g, "\\.");

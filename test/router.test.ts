@@ -354,6 +354,27 @@ describe("Router lookup", function () {
         "/files/test": undefined,
       },
     );
+
+    testRouter(
+      ["/npm/@:param1/:param2", "/npm/:param1/:param2"],
+      (router) =>
+        expect(formatTree(router.root)).toMatchInlineSnapshot(`
+          "<root>
+              ├── /npm
+              │       ├── /*
+              │       │       ├── /* ┈> [GET] /npm/@:param1/:param2 + /npm/:param1/:param2"
+        `),
+      {
+        "/npm/@test/123": {
+          data: { path: "/npm/@:param1/:param2" },
+          params: { param1: "test", param2: "123" },
+        },
+        "/npm/test/123": {
+          data: { path: "/npm/:param1/:param2" },
+          params: { param1: "test", param2: "123" },
+        },
+      },
+    );
   });
 
   describe("should be able to match routes with trailing slash", function () {

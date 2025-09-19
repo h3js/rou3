@@ -103,7 +103,14 @@ function _lookupTree<T>(
   if (node.param) {
     const match = _lookupTree(ctx, node.param, method, segments, index + 1);
     if (match) {
-      return match;
+      if (match.length === 1 || !node.param.hasRegexParam) {
+        return match;
+      } else {
+        const exactMatch =
+          match.find((m) => m.paramsRegexp[index]?.test(segment)) ||
+          match.find((m) => !m.paramsRegexp[index]);
+        return exactMatch ? [exactMatch] : undefined;
+      }
     }
   }
 
