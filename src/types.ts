@@ -4,7 +4,7 @@ export interface RouterContext<T = unknown> {
 }
 
 export type ParamsIndexMap = Array<
-  [Index: number, name: string | RegExp, optional?: boolean]
+  [Index: number, name: string | RegExp, optional: boolean]
 >;
 export type MethodData<T = unknown> = {
   data: T;
