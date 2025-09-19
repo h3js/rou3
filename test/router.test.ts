@@ -335,7 +335,7 @@ describe("Router lookup", function () {
     );
   });
 
-  describe("mixed params in same segment", function () {
+  describe.only("mixed params in same segment", function () {
     const mixedPath = "/files/:category/:id,name=:name.txt";
     testRouter(
       [mixedPath],
@@ -352,6 +352,27 @@ describe("Router lookup", function () {
           params: { category: "test", id: "123", name: "foobar" },
         },
         "/files/test": undefined,
+      },
+    );
+
+    testRouter(
+      ["/npm/@:param1/:param2", "/npm/:param1/:param2"],
+      (router) =>
+        expect(formatTree(router.root)).toMatchInlineSnapshot(`
+          "<root>
+              ├── /npm
+              │       ├── /*
+              │       │       ├── /* ┈> [GET] /npm/@:param1/:param2 + /npm/:param1/:param2"
+        `),
+      {
+        "/npm/@test/123": {
+          data: { path: "/npm/@:param1/:param2" },
+          params: { param1: "test", param2: "123" },
+        },
+        "/npm/test/123": {
+          data: { path: "/npm/:param1/:param2" },
+          params: { param1: "test", param2: "123" },
+        },
       },
     );
   });

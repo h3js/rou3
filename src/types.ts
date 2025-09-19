@@ -4,9 +4,13 @@ export interface RouterContext<T = unknown> {
 }
 
 export type ParamsIndexMap = Array<
-  [Index: number, name: string | RegExp, optional: boolean]
+  [Index: number, name: string | RegExp, optional?: boolean]
 >;
-export type MethodData<T = unknown> = { data: T; paramsMap?: ParamsIndexMap };
+export type MethodData<T = unknown> = {
+  data: T;
+  paramsMap?: ParamsIndexMap;
+  paramsRegexp: RegExp[];
+};
 
 export interface Node<T = unknown> {
   key: string;
@@ -14,6 +18,8 @@ export interface Node<T = unknown> {
   static?: Record<string, Node<T>>;
   param?: Node<T>;
   wildcard?: Node<T>;
+
+  hasRegexParam?: boolean;
 
   methods?: Record<string, MethodData<T>[] | undefined>;
 }
