@@ -335,7 +335,7 @@ describe("Router lookup", function () {
     );
   });
 
-  describe.only("mixed params in same segment", function () {
+  describe("mixed params in same segment", function () {
     const mixedPath = "/files/:category/:id,name=:name.txt";
     testRouter(
       [mixedPath],
