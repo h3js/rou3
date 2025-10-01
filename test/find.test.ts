@@ -55,6 +55,14 @@ describe("route matching", () => {
     ).toMatchFileSnapshot(".snapshot/compiled-aot.mjs");
   });
 
+  it("snapshot (compiled - empty)", async () => {
+    await expect(
+      await format(compileRouter(createRouter([])).toString(), {
+        parser: "acorn",
+      }),
+    ).toMatchFileSnapshot(".snapshot/compiled-empty.mjs");
+  });
+
   const lookups = [
     {
       name: "findRoute",

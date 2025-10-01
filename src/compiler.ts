@@ -97,6 +97,10 @@ function compileRouteMatch(
     str += "let s=p.split('/'),l=s.length-1;" + match;
   }
 
+  if (!str) {
+    return opts?.matchAll ? "return [];" : "";
+  }
+
   return `${opts?.matchAll ? `let r=[];` : ""}if(p[p.length-1]==='/')p=p.slice(0,-1)||'/';${str}${opts?.matchAll ? "return r;" : ""}`;
 }
 
