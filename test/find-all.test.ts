@@ -51,6 +51,17 @@ describe("find-matchAll: basic", () => {
     ).toMatchFileSnapshot(".snapshot/compiled-all.mjs");
   });
 
+  it("snapshot (compiled - empty)", async () => {
+    await expect(
+      await format(
+        compileRouter(createRouter([]), { matchAll: true }).toString(),
+        {
+          parser: "acorn",
+        },
+      ),
+    ).toMatchFileSnapshot(".snapshot/compiled-all-empty.mjs");
+  });
+
   it("matches /foo/bar/baz pattern", () => {
     const matches = _findAllRoutes(router, "GET", "/foo/bar/baz");
     expect(matches).to.toMatchInlineSnapshot(`

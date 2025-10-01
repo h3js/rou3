@@ -81,35 +81,27 @@ function compileRouteMatch(
   deps?: any[],
   opts?: RouterCompilerOptions,
 ): string {
-  // Ignore trailing slash
-  let str = `${opts?.matchAll ? `let r=[];` : ""}if(p[p.length-1]==='/')p=p.slice(0,-1)||'/';`;
-
+  let str = "";
   const staticNodes = new Set<Node>();
 
   for (const key in router.static) {
     const node = router.static[key];
     if (node?.methods) {
       staticNodes.add(node);
-      str += `if(p===${JSON.stringify(key.replace(/\/$/, "") || "/")}){${compileMethodMatch(node.methods, [], deps, -1, opts)[1]}}`;
+      str += `if(p===${JSON.stringify(key.replace(/\/$/, "") || "/")}){${compileMethodMatch(node.methods, [], deps, -1, opts)}}`;
     }
   }
 
-  const [existsTail, tail] = compileNode(
-    router.root,
-    [],
-    0,
-    deps,
-    false,
-    staticNodes,
-    opts,
-  );
-  const returnStmt = opts?.matchAll ? "return r;" : "";
-  return (
-    str +
-    (existsTail
-      ? "let s=p.split('/'),l=s.length-1;" + tail + returnStmt
-      : returnStmt)
-  );
+  const match = compileNode(router.root, [], 0, deps, false, staticNodes, opts);
+  if (match) {
+    str += "let s=p.split('/'),l=s.length-1;" + match;
+  }
+
+  if (!str) {
+    return opts?.matchAll ? "return [];" : "";
+  }
+
+  return `${opts?.matchAll ? `let r=[];` : ""}if(p[p.length-1]==='/')p=p.slice(0,-1)||'/';${str}${opts?.matchAll ? "return r;" : ""}`;
 }
 
 function compileMethodMatch(
@@ -118,13 +110,11 @@ function compileMethodMatch(
   deps: any[] | undefined,
   currentIdx: number, // Set to -1 for non-param node
   opts?: RouterCompilerOptions,
-): [boolean, string] {
+): string {
   let str = "";
-  let exists = false;
   for (const key in methods) {
     const data = methods[key];
     if (data && data?.length > 0) {
-      exists = true;
       // Don't check for matchAll method handler
       if (key !== "") str += `if(m==='${key}')`;
 
@@ -165,7 +155,7 @@ function compileMethodMatch(
       str += opts?.matchAll ? `r.unshift(${res}});` : `return ${res}};`;
     }
   }
-  return [exists, str];
+  return str;
 }
 
 /**
@@ -179,27 +169,25 @@ function compileNode(
   isParamNode: boolean,
   staticNodes: Set<Node>,
   opts?: RouterCompilerOptions,
-): [boolean, string] {
+): string {
   let str = "";
-  let exists = false;
 
   if (node.methods && !staticNodes.has(node)) {
-    const [existsChild, match] = compileMethodMatch(
+    const match = compileMethodMatch(
       node.methods,
       params,
       deps,
       isParamNode ? startIdx : -1,
       opts,
     );
-    if (existsChild) {
-      exists = true;
+    if (match) {
       str += `if(l===${startIdx}${isParamNode ? `||l===${startIdx - 1}` : ""}){${match}}`;
     }
   }
 
   if (node.static) {
     for (const key in node.static) {
-      const [existsChild, match] = compileNode(
+      const match = compileNode(
         node.static[key],
         params,
         startIdx + 1,
@@ -208,15 +196,14 @@ function compileNode(
         staticNodes,
         opts,
       );
-      if (existsChild) {
-        exists = true;
+      if (match) {
         str += `if(s[${startIdx + 1}]===${JSON.stringify(key)}){${match}}`;
       }
     }
   }
 
   if (node.param) {
-    const [existsChild, match] = compileNode(
+    const match = compileNode(
       node.param,
       [...params, `s[${startIdx + 1}]`],
       startIdx + 1,
@@ -225,8 +212,7 @@ function compileNode(
       staticNodes,
       opts,
     );
-    if (existsChild) {
-      exists = true;
+    if (match) {
       str += match;
     }
   }
@@ -238,21 +224,20 @@ function compileNode(
     }
 
     if (wildcard.methods) {
-      const [existsChild, match] = compileMethodMatch(
+      const match = compileMethodMatch(
         wildcard.methods,
         [...params, `s.slice(${startIdx + 1}).join('/')`],
         deps,
         startIdx,
         opts,
       );
-      if (existsChild) {
-        exists = true;
+      if (match) {
         str += match;
       }
     }
   }
 
-  return [exists, str];
+  return str;
 }
 
 /**
