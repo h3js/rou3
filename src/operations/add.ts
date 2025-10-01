@@ -11,6 +11,11 @@ export function addRoute<T>(
   path: string,
   data?: T,
 ): void {
+  method = method.toUpperCase();
+  if (path[0] !== "/") {
+    path = `/${path}`;
+  }
+
   const segments = splitPath(path);
 
   let node = ctx.root;
@@ -72,10 +77,8 @@ export function addRoute<T>(
   if (!node.methods) {
     node.methods = new NullProtoObj();
   }
-  if (!node.methods![method]) {
-    node.methods![method] = [];
-  }
-  node.methods![method].push({
+  node.methods![method] ??= [];
+  node.methods![method]!.push({
     data: data || (null as T),
     paramsMap: hasParams ? paramsMap : undefined,
   });
