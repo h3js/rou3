@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.7.7
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.7.6...v0.7.7)
+
+### 🩹 Fixes
+
+- **addRoute:** Always normalize path and method ([844776f](https://github.com/h3js/rou3/commit/844776f))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.7.6
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.7.5...v0.7.6)
