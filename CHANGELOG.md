@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.7.6
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.7.5...v0.7.6)
+
+### 🚀 Enhancements
+
+- **types:** Add `InferRouteParams` for param extraction ([#168](https://github.com/h3js/rou3/pull/168))
+
+### 🔥 Performance
+
+- **compiler:** Short circuit when no routes exist ([ef3c444](https://github.com/h3js/rou3/commit/ef3c444))
+
+### 💅 Refactors
+
+- **compiler:** Simplify logic ([082f20f](https://github.com/h3js/rou3/commit/082f20f))
+
+### 🏡 Chore
+
+- Update deps ([7571e28](https://github.com/h3js/rou3/commit/7571e28))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+- Lucas Nørgård ([@luxass](https://github.com/luxass))
+
 ## v0.7.5
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.7.4...v0.7.5)
