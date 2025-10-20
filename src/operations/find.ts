@@ -15,7 +15,7 @@ export function findRoute<T = unknown>(
   path: string,
   opts?: { params?: boolean },
 ): MatchedRoute<T> | undefined {
-  if (path[path.length - 1] === "/") {
+  if (path.charCodeAt(path.length - 1) === 47 /* '/' */) {
     path = path.slice(0, -1);
   }
 

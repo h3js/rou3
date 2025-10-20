@@ -15,7 +15,7 @@ export function findAllRoutes<T>(
   path: string,
   opts?: { params?: boolean },
 ): MatchedRoute<T>[] {
-  if (path[path.length - 1] === "/") {
+  if (path.charCodeAt(path.length - 1) === 47 /* '/' */) {
     path = path.slice(0, -1);
   }
   const segments = splitPath(path);
