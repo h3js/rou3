@@ -101,7 +101,7 @@ function compileRouteMatch(
     return opts?.matchAll ? "return [];" : "";
   }
 
-  return `${opts?.matchAll ? `let r=[];` : ""}if(p[p.length-1]==='/')p=p.slice(0,-1)||'/';${str}${opts?.matchAll ? "return r;" : ""}`;
+  return `${opts?.matchAll ? `let r=[];` : ""}if(p.charCodeAt(p.length-1)===47)p=p.slice(0,-1)||'/';${str}${opts?.matchAll ? "return r;" : ""}`;
 }
 
 function compileMethodMatch(

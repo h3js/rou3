@@ -1,5 +1,5 @@
 const findRoute = (m, p) => {
-  if (p[p.length - 1] === "/") p = p.slice(0, -1) || "/";
+  if (p.charCodeAt(p.length - 1) === 47) p = p.slice(0, -1) || "/";
   if (p === "/test") {
     if (m === "GET") return { data: { path: "/test" } };
   }

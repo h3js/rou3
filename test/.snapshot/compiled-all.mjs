@@ -1,6 +1,6 @@
 (m, p) => {
   let r = [];
-  if (p[p.length - 1] === "/") p = p.slice(0, -1) || "/";
+  if (p.charCodeAt(p.length - 1) === 47) p = p.slice(0, -1) || "/";
   if (p === "/foo") {
     if (m === "GET") r.unshift({ data: d1 });
   }
