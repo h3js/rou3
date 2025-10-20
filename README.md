@@ -85,6 +85,12 @@ findRoute(router, "GET", "/path/foo/bar/baz");
 findRoute(router, "GET", "/");
 ```
 
+> [!IMPORTANT]
+> Paths should **always begin with `/`**.
+
+> [!IMPORTANT]
+> Method should **always be UPPERCASE**.
+
 ## Experimental Compiler
 
 > [!IMPORTANT]
