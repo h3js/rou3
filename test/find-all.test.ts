@@ -15,7 +15,7 @@ const _findAllRoutes = (
   const compiled = compileRouter(ctx, { matchAll: true });
   const compiledRes = compiled(method, path).map((m) => m.data.path);
 
-  expect(res).toEqual(compiledRes);
+  expect(compiledRes).toEqual(res);
 
   return res;
 };

@@ -33,12 +33,12 @@ export function compileRouter<
 ) => O["matchAll"] extends true
   ? MatchedRoute<T>[]
   : MatchedRoute<T> | undefined {
-  const deps: any[] = [];
-  const compiled = compileRouteMatch(router, deps, opts);
+  const ctx: CompilerContext = { opts: opts || {}, router, deps: [] };
+  const compiled = compileRouteMatch(ctx);
   return new Function(
-    ...deps.map((_, i) => "d" + (i + 1)),
+    ...ctx.deps!.map((_, i) => "d" + (i + 1)),
     `return(m,p)=>{${compiled}}`,
-  )(...deps);
+  )(...ctx.deps!);
 }
 
 /**
@@ -59,191 +59,173 @@ export function compileRouterToString(
   functionName?: string,
   opts?: RouterCompilerOptions,
 ): string {
-  const compiled = `(m,p)=>{${compileRouteMatch(router, undefined, opts)}}`;
+  const ctx: CompilerContext = { opts: opts || {}, router, deps: undefined };
+  const compiled = `(m,p)=>{${compileRouteMatch(ctx)}}`;
   return functionName ? `const ${functionName}=${compiled};` : compiled;
 }
 
 // ------- internal functions -------
 
-// p: path
-// s: path parts
-// l: path parts length
-// m: method
-// r: matchAll matches
+interface CompilerContext {
+  opts: RouterCompilerOptions;
+  router: RouterContext<any>;
+  deps: string[] | undefined;
+}
 
-/**
- * Compile a router to pattern matching statements
- * @param router
- * @param deps - Dependencies of the function scope
- */
-function compileRouteMatch(
-  router: RouterContext<any>,
-  deps?: any[],
-  opts?: RouterCompilerOptions,
-): string {
-  let str = "";
+function compileRouteMatch(ctx: CompilerContext): string {
+  let code = "";
   const staticNodes = new Set<Node>();
 
-  for (const key in router.static) {
-    const node = router.static[key];
+  for (const key in ctx.router.static) {
+    const node = ctx.router.static[key];
     if (node?.methods) {
       staticNodes.add(node);
-      str += `if(p===${JSON.stringify(key.replace(/\/$/, "") || "/")}){${compileMethodMatch(node.methods, [], deps, -1, opts)}}`;
+      code += `if(p===${JSON.stringify(key.replace(/\/$/, "") || "/")}){${compileMethodMatch(ctx, node.methods, [], -1)}}`;
     }
   }
 
-  const match = compileNode(router.root, [], 0, deps, false, staticNodes, opts);
+  const match = compileNode(ctx, ctx.router.root, [], 0, staticNodes);
   if (match) {
-    str += "let s=p.split('/'),l=s.length-1;" + match;
+    code += `let s=p.split("/"),l=s.length-1;${match}`;
   }
 
-  if (!str) {
-    return opts?.matchAll ? "return [];" : "";
+  if (!code) {
+    return ctx.opts?.matchAll ? `return [];` : "";
   }
 
-  return `${opts?.matchAll ? `let r=[];` : ""}if(p.charCodeAt(p.length-1)===47)p=p.slice(0,-1)||'/';${str}${opts?.matchAll ? "return r;" : ""}`;
+  return `${ctx.opts?.matchAll ? `let r=[];` : ""}if(p.charCodeAt(p.length-1)===47)p=p.slice(0,-1)||"/";${code}${ctx.opts?.matchAll ? "return r;" : ""}`;
 }
 
 function compileMethodMatch(
+  ctx: CompilerContext,
   methods: Record<string, MethodData<any>[] | undefined>,
   params: string[],
-  deps: any[] | undefined,
   currentIdx: number, // Set to -1 for non-param node
-  opts?: RouterCompilerOptions,
 ): string {
-  let str = "";
+  let code = "";
   for (const key in methods) {
     const data = methods[key];
     if (data && data?.length > 0) {
       // Don't check for matchAll method handler
-      if (key !== "") str += `if(m==='${key}')`;
-
-      const dataValue = data[0].data;
-      let serializedData: string;
-      if (deps) {
-        serializedData = `d${deps.push(dataValue)}`;
-      } else if (opts?.serialize) {
-        serializedData = opts.serialize(dataValue);
-      } else if (typeof dataValue?.toJSON === "function") {
-        serializedData = dataValue.toJSON();
-      } else {
-        serializedData = JSON.stringify(dataValue);
-      }
-      let res = `{data:${serializedData}`;
-
-      // Add param properties
-      const { paramsMap } = data[0];
-      if (paramsMap && paramsMap.length > 0) {
-        // Check for optional end parameters
-        const required =
-          !paramsMap[paramsMap.length - 1][2] && currentIdx !== -1;
-        if (required) str += `if(l>=${currentIdx})`;
-
-        // Create the param object based on previous parameters
-        res += ",params:{";
-        for (let i = 0; i < paramsMap.length; i++) {
-          const map = paramsMap[i];
-
-          res +=
-            typeof map[1] === "string"
-              ? `${JSON.stringify(map[1])}:${params[i]},`
-              : `...(${map[1].toString()}.exec(${params[i]}))?.groups,`;
-        }
-        res += "}";
-      }
-
-      str += opts?.matchAll ? `r.unshift(${res}});` : `return ${res}};`;
+      if (key !== "") code += `if(m==="${key}")`;
+      code += compileFinalMatch(ctx, data[0], currentIdx, params);
     }
   }
-  return str;
+  return code;
 }
 
-/**
- * Compile a node to matcher logic
- */
+function compileFinalMatch(
+  ctx: CompilerContext,
+  data: MethodData<any>,
+  currentIdx: number,
+  params: string[],
+): string {
+  let code = "";
+  let ret = `{data:${serializeData(ctx, data.data)}`;
+
+  // Add param properties
+  const { paramsMap } = data;
+  if (paramsMap && paramsMap.length > 0) {
+    // Check for optional end parameters
+    const required = !paramsMap[paramsMap.length - 1][2] && currentIdx !== -1;
+    if (required) code += `if(l>=${currentIdx})`;
+    // Create the param object based on previous parameters
+    ret += ",params:{";
+    for (let i = 0; i < paramsMap.length; i++) {
+      const map = paramsMap[i];
+      ret +=
+        typeof map[1] === "string"
+          ? `${JSON.stringify(map[1])}:${params[i]},`
+          : `...(${map[1].toString()}.exec(${params[i]}))?.groups,`;
+    }
+    ret += "}";
+  }
+  return (
+    code + (ctx.opts?.matchAll ? `r.unshift(${ret}});` : `return ${ret}};`)
+  );
+}
+
 function compileNode(
+  ctx: CompilerContext,
   node: Node<any>,
   params: string[],
   startIdx: number,
-  deps: any[] | undefined,
-  isParamNode: boolean,
   staticNodes: Set<Node>,
-  opts?: RouterCompilerOptions,
 ): string {
-  let str = "";
+  let code = "";
 
   if (node.methods && !staticNodes.has(node)) {
     const match = compileMethodMatch(
+      ctx,
       node.methods,
       params,
-      deps,
-      isParamNode ? startIdx : -1,
-      opts,
+      node.key === "*" ? startIdx : -1,
     );
     if (match) {
-      str += `if(l===${startIdx}${isParamNode ? `||l===${startIdx - 1}` : ""}){${match}}`;
+      const hasLastOptionalParam = node.key === "*";
+      code += `if(l===${startIdx}${hasLastOptionalParam ? `||l===${startIdx - 1}` : ""}){${match}}`;
     }
   }
 
   if (node.static) {
     for (const key in node.static) {
       const match = compileNode(
+        ctx,
         node.static[key],
         params,
         startIdx + 1,
-        deps,
-        false,
         staticNodes,
-        opts,
       );
       if (match) {
-        str += `if(s[${startIdx + 1}]===${JSON.stringify(key)}){${match}}`;
+        code += `if(s[${startIdx + 1}]===${JSON.stringify(key)}){${match}}`;
       }
     }
   }
 
   if (node.param) {
     const match = compileNode(
+      ctx,
       node.param,
       [...params, `s[${startIdx + 1}]`],
       startIdx + 1,
-      deps,
-      true,
       staticNodes,
-      opts,
     );
     if (match) {
-      str += match;
+      code += match;
     }
   }
 
   if (node.wildcard) {
     const { wildcard } = node;
-    if (hasChild(wildcard)) {
+    if (wildcard.static || wildcard.param || wildcard.wildcard) {
       throw new Error("Compiler mode does not support patterns after wildcard");
     }
 
     if (wildcard.methods) {
       const match = compileMethodMatch(
+        ctx,
         wildcard.methods,
         [...params, `s.slice(${startIdx + 1}).join('/')`],
-        deps,
         startIdx,
-        opts,
       );
       if (match) {
-        str += match;
+        code += match;
       }
     }
   }
 
-  return str;
+  return code;
 }
 
-/**
- * Whether the current node has children nodes
- * @param n
- */
-function hasChild(n: Node<any>): boolean {
-  return !!(n.static || n.param || n.wildcard);
+function serializeData(ctx: CompilerContext, value: any): string {
+  if (ctx.deps) {
+    return `d${ctx.deps.push(value)}`;
+  }
+  if (ctx.opts?.serialize) {
+    return ctx.opts.serialize(value);
+  }
+  if (typeof value?.toJSON === "function") {
+    return value.toJSON();
+  }
+  return JSON.stringify(value);
 }
