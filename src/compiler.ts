@@ -108,8 +108,11 @@ function compileMethodMatch(
     if (matchers && matchers?.length > 0) {
       if (key !== "")
         code += `if(m==="${key}")${matchers.length > 1 ? "{" : ""}`;
-      for (const _data of matchers) {
-        code += compileFinalMatch(ctx, _data, currentIdx, params);
+      const _matchers = matchers
+        .map((m) => compileFinalMatch(ctx, m, currentIdx, params))
+        .sort((a, b) => b.weight - a.weight);
+      for (const matcher of _matchers) {
+        code += matcher.code;
       }
       if (key !== "") code += matchers.length > 1 ? "}" : "";
     }
@@ -122,16 +125,15 @@ function compileFinalMatch(
   data: MethodData<any>,
   currentIdx: number,
   params: string[],
-): string {
-  let code = "";
+): { code: string; weight: number } {
   let ret = `{data:${serializeData(ctx, data.data)}`;
+
+  const conditions: string[] = [];
 
   // Add param properties
   const { paramsMap, paramsRegexp } = data;
   if (paramsMap && paramsMap.length > 0) {
     // Check for optional end parameters
-    const conditions: string[] = [];
-
     const required = !paramsMap[paramsMap.length - 1][2] && currentIdx !== -1;
     if (required) {
       conditions.push(`l>=${currentIdx}`);
@@ -142,9 +144,6 @@ function compileFinalMatch(
         continue;
       }
       conditions.push(`${regexp.toString()}.test(s[${i + 1}])`);
-    }
-    if (conditions.length > 0) {
-      code += `if(${conditions.join("&&")})`;
     }
 
     // Create the param object based on previous parameters
@@ -158,9 +157,12 @@ function compileFinalMatch(
     }
     ret += "}";
   }
-  return (
-    code + (ctx.opts?.matchAll ? `r.unshift(${ret}});` : `return ${ret}};`)
-  );
+
+  const code =
+    (conditions.length > 0 ? `if(${conditions.join("&&")})` : "") +
+    (ctx.opts?.matchAll ? `r.unshift(${ret}});` : `return ${ret}};`);
+
+  return { code, weight: conditions.length };
 }
 
 function compileNode(
