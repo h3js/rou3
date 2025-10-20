@@ -14,5 +14,6 @@ export default unjs({
     "unicorn/no-array-method-this-argument": 0,
     "unicorn/prefer-at": 0,
     "unicorn/prefer-string-raw": 0,
+    "unicorn/prefer-code-point": 0,
   },
 });

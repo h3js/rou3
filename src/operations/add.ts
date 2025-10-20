@@ -12,7 +12,7 @@ export function addRoute<T>(
   data?: T,
 ): void {
   method = method.toUpperCase();
-  if (path[0] !== "/") {
+  if (path.charCodeAt(0) !== 47 /* '/' */) {
     path = `/${path}`;
   }
 
