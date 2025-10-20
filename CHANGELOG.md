@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.7.8
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.7.7...v0.7.8)
+
+### 🔥 Performance
+
+- Prefer `String.charCodeAt` ([#170](https://github.com/h3js/rou3/pull/170))
+
+### 🩹 Fixes
+
+- Match correct regex param ([#169](https://github.com/h3js/rou3/pull/169))
+
+### 💅 Refactors
+
+- Simplify compiler logic ([9b7adcb](https://github.com/h3js/rou3/commit/9b7adcb))
+
+### 📖 Documentation
+
+- Add note about inputs ([4baeb0e](https://github.com/h3js/rou3/commit/4baeb0e))
+
+### 🏡 Chore
+
+- Update eps ([20d740d](https://github.com/h3js/rou3/commit/20d740d))
+- Remove note about experimental compiler ([bce9b9f](https://github.com/h3js/rou3/commit/bce9b9f))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.7.7
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.7.6...v0.7.7)
