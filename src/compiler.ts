@@ -104,11 +104,17 @@ function compileMethodMatch(
 ): string {
   let code = "";
   for (const key in methods) {
-    const data = methods[key];
-    if (data && data?.length > 0) {
-      // Don't check for matchAll method handler
-      if (key !== "") code += `if(m==="${key}")`;
-      code += compileFinalMatch(ctx, data[0], currentIdx, params);
+    const matchers = methods[key];
+    if (matchers && matchers?.length > 0) {
+      if (key !== "")
+        code += `if(m==="${key}")${matchers.length > 1 ? "{" : ""}`;
+      const _matchers = matchers
+        .map((m) => compileFinalMatch(ctx, m, currentIdx, params))
+        .sort((a, b) => b.weight - a.weight);
+      for (const matcher of _matchers) {
+        code += matcher.code;
+      }
+      if (key !== "") code += matchers.length > 1 ? "}" : "";
     }
   }
   return code;
@@ -119,16 +125,27 @@ function compileFinalMatch(
   data: MethodData<any>,
   currentIdx: number,
   params: string[],
-): string {
-  let code = "";
+): { code: string; weight: number } {
   let ret = `{data:${serializeData(ctx, data.data)}`;
 
+  const conditions: string[] = [];
+
   // Add param properties
-  const { paramsMap } = data;
+  const { paramsMap, paramsRegexp } = data;
   if (paramsMap && paramsMap.length > 0) {
     // Check for optional end parameters
     const required = !paramsMap[paramsMap.length - 1][2] && currentIdx !== -1;
-    if (required) code += `if(l>=${currentIdx})`;
+    if (required) {
+      conditions.push(`l>=${currentIdx}`);
+    }
+    for (let i = 0; i < paramsRegexp.length; i++) {
+      const regexp = paramsRegexp[i];
+      if (!regexp) {
+        continue;
+      }
+      conditions.push(`${regexp.toString()}.test(s[${i + 1}])`);
+    }
+
     // Create the param object based on previous parameters
     ret += ",params:{";
     for (let i = 0; i < paramsMap.length; i++) {
@@ -140,9 +157,12 @@ function compileFinalMatch(
     }
     ret += "}";
   }
-  return (
-    code + (ctx.opts?.matchAll ? `r.unshift(${ret}});` : `return ${ret}};`)
-  );
+
+  const code =
+    (conditions.length > 0 ? `if(${conditions.join("&&")})` : "") +
+    (ctx.opts?.matchAll ? `r.unshift(${ret}});` : `return ${ret}};`);
+
+  return { code, weight: conditions.length };
 }
 
 function compileNode(
