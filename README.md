@@ -91,10 +91,7 @@ findRoute(router, "GET", "/");
 > [!IMPORTANT]
 > Method should **always be UPPERCASE**.
 
-## Experimental Compiler
-
-> [!IMPORTANT]
-> Compiler is an experimental feature, may contain issues and the API may change between versions. See [#156](https://github.com/h3js/rou3/issues/156) for more context.
+## Compiler
 
 <!-- automd:jsdocs src="./src/compiler.ts" -->
 
