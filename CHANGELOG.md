@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.7.9
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.7.8...v0.7.9)
+
+### 📦 Build
+
+- Reduce dist size ([425ee50](https://github.com/h3js/rou3/commit/425ee50))
+
+### 🏡 Chore
+
+- Update dev dependencies ([05a81ff](https://github.com/h3js/rou3/commit/05a81ff))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.7.8
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.7.7...v0.7.8)
