@@ -1,63 +1,63 @@
-const findRoute = (m, p) => {
-  if (p.charCodeAt(p.length - 1) === 47) p = p.slice(0, -1) || "/";
-  if (p === "/test") {
-    if (m === "GET") return { data: { path: "/test" } };
-  }
-  if (p === "/test/foo") {
-    if (m === "GET") return { data: { path: "/test/foo" } };
-  }
-  if (p === "/test/foo/bar/qux") {
-    if (m === "GET") return { data: { path: "/test/foo/bar/qux" } };
-  }
-  if (p === "/test/foo/baz") {
-    if (m === "GET") return { data: { path: "/test/foo/baz" } };
-  }
-  if (p === "/test/fooo") {
-    if (m === "GET") return { data: { path: "/test/fooo" } };
-  }
-  if (p === "/another/path") {
-    if (m === "GET") return { data: { path: "/another/path" } };
-  }
-  let s = p.split("/"),
-    l = s.length - 1;
-  if (s[1] === "test") {
-    if (s[2] === "foo") {
-      if (l === 3 || l === 2) {
-        if (m === "GET")
-          return { data: { path: "/test/foo/*" }, params: { _0: s[3] } };
-      }
-      if (m === "GET")
-        return {
-          data: { path: "/test/foo/**" },
-          params: { _: s.slice(3).join("/") },
-        };
+const findRoute = /* @__PURE__ */ (() => {
+  const $0 = { path: "/test" },
+    $1 = { path: "/test/foo" },
+    $2 = { path: "/test/foo/bar/qux" },
+    $3 = { path: "/test/foo/baz" },
+    $4 = { path: "/test/fooo" },
+    $5 = { path: "/another/path" },
+    $6 = { path: "/test/foo/*" },
+    $7 = { path: "/test/foo/**" },
+    $8 = { path: "/test/:id" },
+    $9 = { path: "/test/:idY/y" },
+    $10 = { path: "/test/:idYZ/y/z" },
+    $11 = { path: "/wildcard/**" };
+  return (m, p) => {
+    if (p.charCodeAt(p.length - 1) === 47) p = p.slice(0, -1) || "/";
+    if (p === "/test") {
+      if (m === "GET") return { data: $0 };
     }
-    if (l === 2 || l === 1) {
-      if (m === "GET")
-        if (l >= 2)
-          return { data: { path: "/test/:id" }, params: { id: s[2] } };
+    if (p === "/test/foo") {
+      if (m === "GET") return { data: $1 };
     }
-    if (s[3] === "y") {
-      if (l === 3) {
+    if (p === "/test/foo/bar/qux") {
+      if (m === "GET") return { data: $2 };
+    }
+    if (p === "/test/foo/baz") {
+      if (m === "GET") return { data: $3 };
+    }
+    if (p === "/test/fooo") {
+      if (m === "GET") return { data: $4 };
+    }
+    if (p === "/another/path") {
+      if (m === "GET") return { data: $5 };
+    }
+    let s = p.split("/"),
+      l = s.length - 1;
+    if (s[1] === "test") {
+      if (s[2] === "foo") {
+        if (l === 3 || l === 2) {
+          if (m === "GET") return { data: $6, params: { _0: s[3] } };
+        }
         if (m === "GET")
-          return { data: { path: "/test/:idY/y" }, params: { idY: s[2] } };
+          return { data: $7, params: { _: s.slice(3).join("/") } };
       }
-      if (s[4] === "z") {
-        if (l === 4) {
-          if (m === "GET")
-            return {
-              data: { path: "/test/:idYZ/y/z" },
-              params: { idYZ: s[2] },
-            };
+      if (l === 2 || l === 1) {
+        if (m === "GET") if (l >= 2) return { data: $8, params: { id: s[2] } };
+      }
+      if (s[3] === "y") {
+        if (l === 3) {
+          if (m === "GET") return { data: $9, params: { idY: s[2] } };
+        }
+        if (s[4] === "z") {
+          if (l === 4) {
+            if (m === "GET") return { data: $10, params: { idYZ: s[2] } };
+          }
         }
       }
     }
-  }
-  if (s[1] === "wildcard") {
-    if (m === "GET")
-      return {
-        data: { path: "/wildcard/**" },
-        params: { _: s.slice(2).join("/") },
-      };
-  }
-};
+    if (s[1] === "wildcard") {
+      if (m === "GET")
+        return { data: $11, params: { _: s.slice(2).join("/") } };
+    }
+  };
+})();

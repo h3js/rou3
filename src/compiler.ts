@@ -33,12 +33,12 @@ export function compileRouter<
 ) => O["matchAll"] extends true
   ? MatchedRoute<T>[]
   : MatchedRoute<T> | undefined {
-  const ctx: CompilerContext = { opts: opts || {}, router, deps: [] };
+  const ctx: CompilerContext = { opts: opts || {}, router, data: [] };
   const compiled = compileRouteMatch(ctx);
   return new Function(
-    ...ctx.deps!.map((_, i) => "d" + (i + 1)),
+    ...ctx.data!.map((_, i) => `$${i}`),
     `return(m,p)=>{${compiled}}`,
-  )(...ctx.deps!);
+  )(...ctx.data!);
 }
 
 /**
@@ -59,8 +59,17 @@ export function compileRouterToString(
   functionName?: string,
   opts?: RouterCompilerOptions,
 ): string {
-  const ctx: CompilerContext = { opts: opts || {}, router, deps: undefined };
-  const compiled = `(m,p)=>{${compileRouteMatch(ctx)}}`;
+  const ctx: CompilerContext = {
+    opts: opts || {},
+    router,
+    data: [],
+    compileToString: true,
+  };
+  let compiled = `(m,p)=>{${compileRouteMatch(ctx)}}`;
+  if (ctx.data.length > 0) {
+    const dataCode = `const ${ctx.data.map((v, i) => `$${i}=${v}`).join(",")};`;
+    compiled = `/* @__PURE__ */ (() => { ${dataCode}; return ${compiled}})()`;
+  }
   return functionName ? `const ${functionName}=${compiled};` : compiled;
 }
 
@@ -69,7 +78,8 @@ export function compileRouterToString(
 interface CompilerContext {
   opts: RouterCompilerOptions;
   router: RouterContext<any>;
-  deps: string[] | undefined;
+  compileToString?: boolean;
+  data: string[];
 }
 
 function compileRouteMatch(ctx: CompilerContext): string {
@@ -238,14 +248,19 @@ function compileNode(
 }
 
 function serializeData(ctx: CompilerContext, value: any): string {
-  if (ctx.deps) {
-    return `d${ctx.deps.push(value)}`;
+  if (ctx.compileToString) {
+    if (ctx.opts?.serialize) {
+      value = ctx.opts.serialize(value);
+    } else if (typeof value?.toJSON === "function") {
+      value = value.toJSON();
+    } else {
+      value = JSON.stringify(value);
+    }
   }
-  if (ctx.opts?.serialize) {
-    return ctx.opts.serialize(value);
+  let index = ctx.data.indexOf(value);
+  if (index === -1) {
+    ctx.data.push(value);
+    index = ctx.data.length - 1;
   }
-  if (typeof value?.toJSON === "function") {
-    return value.toJSON();
-  }
-  return JSON.stringify(value);
+  return `$${index}`;
 }
