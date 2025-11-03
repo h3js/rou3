@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.7.10
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.7.9...v0.7.10)
+
+### 🔥 Performance
+
+- **compiler:** Eval data once in iot mode ([#172](https://github.com/h3js/rou3/pull/172))
+
+### 🏡 Chore
+
+- Update deps ([ef34343](https://github.com/h3js/rou3/commit/ef34343))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.7.9
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.7.8...v0.7.9)
