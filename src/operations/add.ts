@@ -35,7 +35,7 @@ export function addRoute<T>(
       }
       node = node.wildcard;
       paramsMap.push([
-        -i,
+        -(i + 1),
         segment.split(":")[1] || "_",
         segment.length === 2 /* no id */,
       ]);

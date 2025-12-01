@@ -13,9 +13,7 @@ export function getMatchParams(
   const params = new NullProtoObj();
   for (const [index, name] of paramsMap) {
     const segment =
-      index < 0 || Object.is(index, -0)
-        ? segments.slice(-1 * index).join("/")
-        : segments[index];
+      index < 0 ? segments.slice(-index - 1).join("/") : segments[index];
     if (typeof name === "string") {
       params[name] = segment;
     } else {
