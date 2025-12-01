@@ -10,7 +10,8 @@ const findRoute = /* @__PURE__ */ (() => {
     $8 = { path: "/test/:id" },
     $9 = { path: "/test/:idY/y" },
     $10 = { path: "/test/:idYZ/y/z" },
-    $11 = { path: "/wildcard/**" };
+    $11 = { path: "/wildcard/**" },
+    $12 = { path: "/**" };
   return (m, p) => {
     if (p.charCodeAt(p.length - 1) === 47) p = p.slice(0, -1) || "/";
     if (p === "/test") {
@@ -59,5 +60,6 @@ const findRoute = /* @__PURE__ */ (() => {
       if (m === "GET")
         return { data: $11, params: { _: s.slice(2).join("/") } };
     }
+    if (m === "GET") return { data: $12, params: { _: s.slice(1).join("/") } };
   };
 })();

@@ -44,4 +44,5 @@
   if (s[1] === "wildcard") {
     if (m === "GET") return { data: $11, params: { _: s.slice(2).join("/") } };
   }
+  if (m === "GET") return { data: $12, params: { _: s.slice(1).join("/") } };
 };
