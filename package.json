@@ -29,19 +29,19 @@
   "devDependencies": {
     "0x": "^6.0.0",
     "@mitata/counters": "^0.0.8",
-    "@types/node": "^24.10.0",
-    "@vitest/coverage-v8": "^4.0.6",
+    "@types/node": "^24.10.1",
+    "@vitest/coverage-v8": "^4.0.15",
     "automd": "^0.4.2",
     "changelogen": "^0.6.2",
-    "esbuild": "^0.25.12",
-    "eslint": "^9.39.0",
+    "esbuild": "^0.27.1",
+    "eslint": "^9.39.1",
     "eslint-config-unjs": "^0.5.0",
     "mitata": "^1.0.34",
-    "obuild": "^0.3.2",
-    "prettier": "^3.6.2",
-    "rou3-latest": "npm:rou3@^0.7.9",
+    "obuild": "^0.4.7",
+    "prettier": "^3.7.4",
+    "rou3-latest": "npm:rou3@^0.7.10",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.6"
+    "vitest": "^4.0.15"
   },
-  "packageManager": "pnpm@10.20.0"
+  "packageManager": "pnpm@10.24.0"
 }
