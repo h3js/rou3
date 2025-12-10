@@ -260,6 +260,25 @@ describe("Router lookup", function () {
         },
       },
     );
+
+    testRouter(
+      ["/**"],
+      (router) =>
+        expect(formatTree(router.root)).toMatchInlineSnapshot(`
+          "<root>
+              ├── /** ┈> [GET] /**"
+        `),
+      {
+        "/anything": {
+          data: { path: "/**" },
+          params: { _: "anything" },
+        },
+        "/any/deep/path": {
+          data: { path: "/**" },
+          params: { _: "any/deep/path" },
+        },
+      },
+    );
   });
 
   describe("fallback to dynamic", () => {

@@ -18,6 +18,7 @@ describe("route matching", () => {
     "/test/fooo",
     "/another/path",
     "/wildcard/**",
+    "/**",
   ]);
 
   const compiledLookup = compileRouter(router);
@@ -39,7 +40,8 @@ describe("route matching", () => {
           ├── /another
           │       ├── /path ┈> [GET] /another/path
           ├── /wildcard
-          │       ├── /** ┈> [GET] /wildcard/**"
+          │       ├── /** ┈> [GET] /wildcard/**
+          ├── /** ┈> [GET] /**"
     `);
   });
 
@@ -123,6 +125,15 @@ describe("route matching", () => {
         data: { path: "/wildcard/**" },
         params: { _: "" },
       });
+      // Root wildcard
+      expect(match("GET", "/anything")).toMatchObject({
+        data: { path: "/**" },
+        params: { _: "anything" },
+      });
+      expect(match("GET", "/any/deep/path")).toMatchObject({
+        data: { path: "/**" },
+        params: { _: "any/deep/path" },
+      });
     });
   }
 
@@ -131,6 +142,7 @@ describe("route matching", () => {
     removeRoute(router, "GET", "/test/*");
     removeRoute(router, "GET", "/test/foo/*");
     removeRoute(router, "GET", "/test/foo/**");
+    removeRoute(router, "GET", "/**");
     expect(formatTree(router.root)).toMatchInlineSnapshot(`
       "<root>
           ├── /test
