@@ -29,7 +29,7 @@
   "devDependencies": {
     "0x": "^6.0.0",
     "@mitata/counters": "^0.0.8",
-    "@types/node": "^24.10.1",
+    "@types/node": "^24.10.2",
     "@vitest/coverage-v8": "^4.0.15",
     "automd": "^0.4.2",
     "changelogen": "^0.6.2",
@@ -43,5 +43,5 @@
     "typescript": "^5.9.3",
     "vitest": "^4.0.15"
   },
-  "packageManager": "pnpm@10.24.0"
+  "packageManager": "pnpm@10.25.0"
 }
