@@ -18,6 +18,7 @@ describe("route matching", () => {
     "/test/fooo",
     "/another/path",
     "/wildcard/**",
+    "/static\\:path/\\*/\\*\\*",
     "/**",
   ]);
 
@@ -41,6 +42,9 @@ describe("route matching", () => {
           │       ├── /path ┈> [GET] /another/path
           ├── /wildcard
           │       ├── /** ┈> [GET] /wildcard/**
+          ├── /static%3Apath
+          │       ├── /*
+          │       │       ├── /** ┈> [GET] /static\\:path/\\*/\\*\\*
           ├── /** ┈> [GET] /**"
     `);
   });
@@ -134,6 +138,13 @@ describe("route matching", () => {
         data: { path: "/**" },
         params: { _: "any/deep/path" },
       });
+      // Escaped characters
+      expect(match("GET", "/static%3Apath/*/**")).toMatchObject({
+        data: { path: "/static\\:path/\\*/\\*\\*" },
+      });
+      expect(match("GET", "/static:path/some/deep/path")).toMatchObject({
+        data: { path: "/**" }, // should not match static route
+      });
     });
   }
 
@@ -157,7 +168,10 @@ describe("route matching", () => {
           ├── /another
           │       ├── /path ┈> [GET] /another/path
           ├── /wildcard
-          │       ├── /** ┈> [GET] /wildcard/**"
+          │       ├── /** ┈> [GET] /wildcard/**
+          ├── /static%3Apath
+          │       ├── /*
+          │       │       ├── /** ┈> [GET] /static\\:path/\\*/\\*\\*"
     `);
     expect(findRoute(router, "GET", "/test")).toBeUndefined();
   });
