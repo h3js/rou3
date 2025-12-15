@@ -44,6 +44,10 @@ describe("routeToRegExp", () => {
       regex: /^\/base\/?(?<path>.+)\/?$/,
       match: [["/base/anything/more", { path: "anything/more" }]],
     },
+    "/static%3Apath/\\*/\\*\\*": {
+      regex: /^\/static%3Apath\/\*\/\*\*\/?$/,
+      match: [["/static%3Apath/*/**"]],
+    },
     "/**": {
       regex: /^\/?(?<_>.*)\/?$/,
       match: [
