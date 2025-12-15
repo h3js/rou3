@@ -26,7 +26,10 @@ export function addRoute<T>(
   const paramsRegexp: RegExp[] = [];
 
   for (let i = 0; i < segments.length; i++) {
-    const segment = segments[i];
+    const segment = segments[i].replace(
+      /\\([:])/g,
+      (_m, ch) => `${encodeURIComponent(ch)}`,
+    );
 
     // Wildcard
     if (segment.startsWith("**")) {
