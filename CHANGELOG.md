@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.7.12
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.7.11...v0.7.12)
+
+### 🚀 Enhancements
+
+- **add:** Allow escaping `:` and `*` using backslash ([#175](https://github.com/h3js/rou3/pull/175))
+
+### 🏡 Chore
+
+- Update deps ([9d3703c](https://github.com/h3js/rou3/commit/9d3703c))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.7.11
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.7.10...v0.7.11)
