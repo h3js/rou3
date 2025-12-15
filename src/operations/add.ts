@@ -27,7 +27,7 @@ export function addRoute<T>(
 
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i].replace(
-      /\\([:])/g,
+      /\\([:*])/g,
       (_m, ch) => `${encodeURIComponent(ch)}`,
     );
 
