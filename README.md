@@ -92,7 +92,7 @@ findRoute(router, "GET", "/");
 > Method should **always be UPPERCASE**.
 
 > [!TIP]
-> If you need to register a pattern containing literal `:` or `*`, you can escape them with `\\`. For example, `/static\\:path\\/\\*\\*` matches only the static `/static:path/**` route.
+> If you need to register a pattern containing literal `:` or `*`, you can escape them with `\\`. For example, `/static\\:path/\\*\\*` matches only the static `/static:path/**` route.
 
 ## Compiler
 
