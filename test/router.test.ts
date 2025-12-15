@@ -486,7 +486,7 @@ describe("Router insert", () => {
       "/api/v1",
       "/api/v2",
       "/api/v3",
-      "/test\\:special",
+      "/static\\:path\\/\\*\\*",
     ]);
 
     addRoute(router, "", "/api/v3", {
@@ -512,7 +512,8 @@ describe("Router insert", () => {
           │       ├── /v1 ┈> [GET] /api/v1
           │       ├── /v2 ┈> [GET] /api/v2
           │       ├── /v3 ┈> [GET] /api/v3, [*] /api/v3(overridden)
-          ├── /test%3Aspecial ┈> [GET] /test\\:special"
+          ├── /static%3Apath\\
+          │       ├── /** ┈> [GET] /static\\:path\\/\\*\\*"
     `);
   });
 });

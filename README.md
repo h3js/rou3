@@ -91,6 +91,9 @@ findRoute(router, "GET", "/");
 > [!IMPORTANT]
 > Method should **always be UPPERCASE**.
 
+> [!TIP]
+> If you need to register a pattern containing literal `:` or `*`, you can escape them with `\\`. For example, `/static\\:path\\/\\*\\*` matches only the static `/static:path/**` route.
+
 ## Compiler
 
 <!-- automd:jsdocs src="./src/compiler.ts" -->

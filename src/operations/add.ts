@@ -16,6 +16,8 @@ export function addRoute<T>(
     path = `/${path}`;
   }
 
+  path = path.replace(/\\([:*])/g, (_m, ch) => `${encodeURIComponent(ch)}`);
+
   const segments = splitPath(path);
 
   let node = ctx.root;
@@ -26,10 +28,7 @@ export function addRoute<T>(
   const paramsRegexp: RegExp[] = [];
 
   for (let i = 0; i < segments.length; i++) {
-    const segment = segments[i].replace(
-      /\\([:*])/g,
-      (_m, ch) => `${encodeURIComponent(ch)}`,
-    );
+    const segment = segments[i];
 
     // Wildcard
     if (segment.startsWith("**")) {
