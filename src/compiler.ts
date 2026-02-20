@@ -96,7 +96,7 @@ function compileRouteMatch(ctx: CompilerContext): string {
     }
   }
 
-  const match = compileNode(ctx, ctx.router.root, [], 0);
+  const match = compileNode(ctx, ctx.router.root, [], 1);
   // Empty root node emit an empty bound check
   if (match) {
     code += `let s=p.split("/"),l=s.length;${match}`;
@@ -182,7 +182,7 @@ function compileNode(
   ctx: CompilerContext,
   node: Node<any>,
   params: string[],
-  startIdx: number,
+  currentIdx: number,
 ): string {
   const hasLastOptionalParam = node.key === "*";
   let code = "",
@@ -193,10 +193,10 @@ function compileNode(
       ctx,
       node.methods,
       params,
-      hasLastOptionalParam ? startIdx : -1,
+      hasLastOptionalParam ? currentIdx - 1 : -1,
     );
     if (match) {
-      code += `if(l===${startIdx + 1}${hasLastOptionalParam ? `||l===${startIdx}` : ""}){${match}}`;
+      code += `if(l===${currentIdx}${hasLastOptionalParam ? `||l===${currentIdx - 1}` : ""}){${match}}`;
       hasIf = true;
     }
   }
@@ -206,9 +206,9 @@ function compileNode(
     const notNeedBoundCheck = hasIf;
 
     for (const key in node.static) {
-      const match = compileNode(ctx, node.static[key], params, startIdx + 1);
+      const match = compileNode(ctx, node.static[key], params, currentIdx + 1);
       if (match) {
-        staticCode += `${hasIf ? "else " : ""}if(s[${startIdx + 1}]===${JSON.stringify(key)}){${match}}`;
+        staticCode += `${hasIf ? "else " : ""}if(s[${currentIdx}]===${JSON.stringify(key)}){${match}}`;
         hasIf = true;
       }
     }
@@ -216,15 +216,16 @@ function compileNode(
     if (staticCode)
       code += notNeedBoundCheck
         ? staticCode
-        : `if(l>${startIdx + 1}){${staticCode}}`;
+        : `if(l>${currentIdx}){${staticCode}}`;
   }
 
   if (node.param) {
     code += compileNode(
       ctx,
       node.param,
-      params.concat(`s[${startIdx + 1}]`),
-      startIdx + 1,
+      // Prevent deopt
+      params.concat(`s[${currentIdx}]`),
+      currentIdx + 1,
     );
   }
 
@@ -238,8 +239,8 @@ function compileNode(
       code += compileMethodMatch(
         ctx,
         wildcard.methods,
-        params.concat(`s.slice(${startIdx + 1}).join('/')`),
-        startIdx,
+        params.concat(`s.slice(${currentIdx}).join('/')`),
+        currentIdx,
       );
     }
   }
