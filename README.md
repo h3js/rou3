@@ -38,7 +38,7 @@ import {
 } from "rou3";
 ```
 
-**CDN** (Deno and Browsers)
+**CDN** (Deno, Bun and Browsers)
 
 ```js
 import {
