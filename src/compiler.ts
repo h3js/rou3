@@ -91,8 +91,8 @@ function compileRouteMatch(ctx: CompilerContext): string {
       const node = ctx.router.static[key];
       if (node?.methods) {
         code += `${hasIf ? "else " : ""}if(p===${JSON.stringify(key.replace(/\/$/, "") || "/")}){${compileMethodMatch(ctx, node.methods, [], -1)}}`;
+        hasIf = true;
       }
-      hasIf = true;
     }
   }
 
