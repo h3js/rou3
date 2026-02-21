@@ -10,6 +10,7 @@ export default unjs({
     "no-unused-expressions": 0,
     "unicorn/no-for-loop": 0,
     "unicorn/prefer-regexp-test": 0,
+    "unicorn/prefer-spread": 0,
     "unicorn/no-array-callback-reference": 0,
     "unicorn/no-array-method-this-argument": 0,
     "unicorn/prefer-at": 0,

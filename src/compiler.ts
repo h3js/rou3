@@ -84,19 +84,22 @@ interface CompilerContext {
 
 function compileRouteMatch(ctx: CompilerContext): string {
   let code = "";
-  const staticNodes = new Set<Node>();
 
-  for (const key in ctx.router.static) {
-    const node = ctx.router.static[key];
-    if (node?.methods) {
-      staticNodes.add(node);
-      code += `if(p===${JSON.stringify(key.replace(/\/$/, "") || "/")}){${compileMethodMatch(ctx, node.methods, [], -1)}}`;
+  {
+    let hasIf = false;
+    for (const key in ctx.router.static) {
+      const node = ctx.router.static[key];
+      if (node?.methods) {
+        code += `${hasIf ? "else " : ""}if(p===${JSON.stringify(key.replace(/\/$/, "") || "/")}){${compileMethodMatch(ctx, node.methods, [], -1)}}`;
+        hasIf = true;
+      }
     }
   }
 
-  const match = compileNode(ctx, ctx.router.root, [], 0, staticNodes);
+  const match = compileNode(ctx, ctx.router.root, [], 1);
+  // Empty root node emit an empty bound check
   if (match) {
-    code += `let s=p.split("/"),l=s.length-1;${match}`;
+    code += `let s=p.split("/"),l=s.length;${match}`;
   }
 
   if (!code) {
@@ -115,7 +118,7 @@ function compileMethodMatch(
   let code = "";
   for (const key in methods) {
     const matchers = methods[key];
-    if (matchers && matchers?.length > 0) {
+    if (matchers && matchers.length > 0) {
       if (key !== "")
         code += `if(m==="${key}")${matchers.length > 1 ? "{" : ""}`;
       const _matchers = matchers
@@ -146,7 +149,7 @@ function compileFinalMatch(
     // Check for optional end parameters
     const required = !paramsMap[paramsMap.length - 1][2] && currentIdx !== -1;
     if (required) {
-      conditions.push(`l>=${currentIdx}`);
+      conditions.push(`l>${currentIdx}`);
     }
     for (let i = 0; i < paramsRegexp.length; i++) {
       const regexp = paramsRegexp[i];
@@ -179,50 +182,51 @@ function compileNode(
   ctx: CompilerContext,
   node: Node<any>,
   params: string[],
-  startIdx: number,
-  staticNodes: Set<Node>,
+  currentIdx: number,
 ): string {
-  let code = "";
+  const hasLastOptionalParam = node.key === "*";
+  let code = "",
+    hasIf = false;
 
-  if (node.methods && !staticNodes.has(node)) {
+  if (node.methods && params.length > 0) {
     const match = compileMethodMatch(
       ctx,
       node.methods,
       params,
-      node.key === "*" ? startIdx : -1,
+      hasLastOptionalParam ? currentIdx - 1 : -1,
     );
     if (match) {
-      const hasLastOptionalParam = node.key === "*";
-      code += `if(l===${startIdx}${hasLastOptionalParam ? `||l===${startIdx - 1}` : ""}){${match}}`;
+      code += `if(l===${currentIdx}${hasLastOptionalParam ? `||l===${currentIdx - 1}` : ""}){${match}}`;
+      hasIf = true;
     }
   }
 
   if (node.static) {
+    let staticCode = "";
+    const notNeedBoundCheck = hasIf;
+
     for (const key in node.static) {
-      const match = compileNode(
-        ctx,
-        node.static[key],
-        params,
-        startIdx + 1,
-        staticNodes,
-      );
+      const match = compileNode(ctx, node.static[key], params, currentIdx + 1);
       if (match) {
-        code += `if(s[${startIdx + 1}]===${JSON.stringify(key)}){${match}}`;
+        staticCode += `${hasIf ? "else " : ""}if(s[${currentIdx}]===${JSON.stringify(key)}){${match}}`;
+        hasIf = true;
       }
     }
+
+    if (staticCode)
+      code += notNeedBoundCheck
+        ? staticCode
+        : `if(l>${currentIdx}){${staticCode}}`;
   }
 
   if (node.param) {
-    const match = compileNode(
+    code += compileNode(
       ctx,
       node.param,
-      [...params, `s[${startIdx + 1}]`],
-      startIdx + 1,
-      staticNodes,
+      // Prevent deopt
+      params.concat(`s[${currentIdx}]`),
+      currentIdx + 1,
     );
-    if (match) {
-      code += match;
-    }
   }
 
   if (node.wildcard) {
@@ -232,15 +236,12 @@ function compileNode(
     }
 
     if (wildcard.methods) {
-      const match = compileMethodMatch(
+      code += compileMethodMatch(
         ctx,
         wildcard.methods,
-        [...params, `s.slice(${startIdx + 1}).join('/')`],
-        startIdx,
+        params.concat(`s.slice(${currentIdx}).join('/')`),
+        currentIdx,
       );
-      if (match) {
-        code += match;
-      }
     }
   }
 
