@@ -65,7 +65,8 @@ export function addRoute<T>(
       if (segment === "*") {
         paramsMap.push([i, `_${_unnamedParamIndex++}`, true /* optional */]);
       } else if (segment.includes(":", 1) || segment.includes("(")) {
-        const regexp = getParamRegexp(segment);
+        const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex);
+        _unnamedParamIndex = nextIndex;
         paramsRegexp[i] = regexp;
         node.hasRegexParam = true;
         paramsMap.push([i, regexp, false]);
@@ -125,13 +126,14 @@ function _expandModifiers(segments: string[]): string[] | undefined {
       ];
     }
     const name = m[1].match(/:(\w+)/)?.[1] || "_";
-    const wc = "/" + pre.concat(`**:${name}`).join("/");
-    return m[2] === "+" ? [wc] : [wc, "/" + pre.join("/")];
+    const wc = "/" + [...pre, `**:${name}`, ...suf].join("/");
+    const without = "/" + [...pre, ...suf].join("/");
+    return m[2] === "+" ? [wc] : [wc, without];
   }
 }
 
-function getParamRegexp(segment: string): RegExp {
-  let _i = 0;
+function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
+  let _i = unnamedStart;
   const regex = segment
     .replace(
       /:(\w+)(?:\(([^)]*)\))?/g,
@@ -139,5 +141,5 @@ function getParamRegexp(segment: string): RegExp {
     )
     .replace(/\((?![?<])/g, () => `(?<_${_i++}>`)
     .replace(/\./g, "\\.");
-  return new RegExp(`^${regex}$`);
+  return [new RegExp(`^${regex}$`), _i];
 }

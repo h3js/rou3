@@ -96,81 +96,26 @@ findRoute(router, "GET", "/");
 
 ## Route Patterns
 
-rou3 supports a variety of route patterns, including [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API)-compatible syntax.
+rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API)-compatible syntax.
 
-### Static
+| Pattern | Example Match | Params |
+| --- | --- | --- |
+| `/path/to/resource` | `/path/to/resource` | `{}` |
+| `/users/:name` | `/users/foo` | `{ name: "foo" }` |
+| `/path/**` | `/path/foo/bar` | `{}` |
+| `/path/**:rest` | `/path/foo/bar` | `{ rest: "foo/bar" }` |
+| `/users/:id(\\d+)` | `/users/123` | `{ id: "123" }` |
+| `/files/:ext(png\|jpg)` | `/files/png` | `{ ext: "png" }` |
+| `/path/(\\d+)` | `/path/123` | `{ _0: "123" }` |
+| `/users/:id?` | `/users` or `/users/123` | `{}` or `{ id: "123" }` |
+| `/files/:path+` | `/files/a/b/c` | `{ path: "a/b/c" }` |
+| `/files/:path*` | `/files` or `/files/a/b` | `{}` or `{ path: "a/b" }` |
 
-```
-/path/to/resource
-```
-
-### Named Parameters
-
-`:name` matches a single path segment.
-
-```
-/users/:name        →  /users/foo        → { name: "foo" }
-```
-
-### Wildcards
-
-`**` matches zero or more segments. Use `**:name` to capture the matched path.
-
-```
-/path/**            →  /path/foo/bar     → {}
-/path/**:rest       →  /path/foo/bar     → { rest: "foo/bar" }
-```
-
-### Regex Constraints
-
-`:name(regex)` restricts a named parameter to match only the given pattern.
-
-```
-/users/:id(\d+)          →  /users/123     → { id: "123" }
-                          →  /users/abc     → (no match)
-/files/:ext(png|jpg|gif) →  /files/png     → { ext: "png" }
-                          →  /files/pdf     → (no match)
-```
-
-Regex-constrained and unconstrained params can coexist on the same path node (constrained routes are checked first):
-
-```
-/users/:id(\d+)   +   /users/:slug
-  /users/123  → { id: "123" }
-  /users/abc  → { slug: "abc" }
-```
-
-### Unnamed Regex Groups
-
-`(regex)` without a parameter name captures into auto-indexed keys `_0`, `_1`, etc.
-
-```
-/path/(\d+)              →  /path/123      → { _0: "123" }
-/files/(png|jpg|gif)     →  /files/png     → { _0: "png" }
-```
-
-### Modifiers
-
-- `:name?` — optional (zero or one segment)
-- `:name+` — one or more segments
-- `:name*` — zero or more segments
-
-```
-/users/:id?              →  /users/123     → { id: "123" }
-                          →  /users         → {}
-/files/:path+            →  /files/a/b/c   → { path: "a/b/c" }
-                          →  /files         → (no match)
-/files/:path*            →  /files/a/b/c   → { path: "a/b/c" }
-                          →  /files         → {}
-```
-
-Modifiers can be combined with regex constraints:
-
-```
-/users/:id(\d+)?         →  /users/123     → { id: "123" }
-                          →  /users         → {}
-                          →  /users/abc     → (no match)
-```
+- **Named params** (`:name`) match a single segment.
+- **Wildcards** (`**`) match zero or more segments. Use `**:name` to capture.
+- **Regex constraints** (`:name(regex)`) restrict matching. Constrained and unconstrained params can coexist on the same node (constrained checked first).
+- **Unnamed groups** (`(regex)`) capture into auto-indexed keys `_0`, `_1`, etc.
+- **Modifiers:** `:name?` (optional), `:name+` (one or more), `:name*` (zero or more). Can combine with regex: `:id(\d+)?`.
 
 ## Compiler
 

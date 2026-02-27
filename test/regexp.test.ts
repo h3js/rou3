@@ -95,6 +95,17 @@ describe("routeToRegExp", () => {
       regex: /^\/path\/(?<_0>png|jpg|gif)\/?$/,
       match: [["/path/png", { _0: "png" }]],
     },
+    "/path/:id(\\d+)+": {
+      regex: /^\/path\/?(?<id>\d+(?:\/\d+)*)\/?$/,
+      match: [
+        ["/path/123", { id: "123" }],
+        ["/path/123/456", { id: "123/456" }],
+      ],
+    },
+    "/path/:id(\\d+)*": {
+      regex: /^\/path\/?(?<id>\d+(?:\/\d+)*)?\/?$/,
+      match: [["/path/123", { id: "123" }], ["/path"]],
+    },
   } as const;
 
   for (const [route, expected] of Object.entries(routes)) {

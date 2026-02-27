@@ -9,7 +9,7 @@ export function routeToRegExp(route: string = "/"): RegExp {
       reSegments.push(
         segment === "**" ? "?(?<_>.*)" : `?(?<${segment.slice(3)}>.+)`,
       );
-    } else if (segment.includes(":") || segment.includes("(")) {
+    } else if (segment.includes(":") || /(^|[^\\])\(/.test(segment)) {
       const modMatch = segment.match(/^(.*:\w+(?:\([^)]*\))?)([?+*])$/);
       if (modMatch) {
         const [, base, mod] = modMatch;
@@ -24,8 +24,18 @@ export function routeToRegExp(route: string = "/"): RegExp {
           reSegments.push(`?${inner}?`);
           continue;
         }
-        // + or *
-        reSegments.push(mod === "+" ? `?(?<${name}>.+)` : `?(?<${name}>.*)`);
+        // + or * (preserve inline constraint when present)
+        const pattern = base.match(/:(\w+)(?:\(([^)]*)\))?/)?.[2];
+        if (pattern) {
+          const repeated = `${pattern}(?:/${pattern})*`;
+          reSegments.push(
+            mod === "+"
+              ? `?(?<${name}>${repeated})`
+              : `?(?<${name}>${repeated})?`,
+          );
+        } else {
+          reSegments.push(mod === "+" ? `?(?<${name}>.+)` : `?(?<${name}>.*)`);
+        }
         continue;
       }
       reSegments.push(
@@ -34,7 +44,7 @@ export function routeToRegExp(route: string = "/"): RegExp {
             /:(\w+)(?:\(([^)]*)\))?/g,
             (_, id, pattern) => `(?<${id}>${pattern || "[^/]+"})`,
           )
-          .replace(/\((?![?<])/g, () => `(?<_${idCtr++}>`)
+          .replace(/(^|[^\\])\((?![?<])/g, (_, p) => `${p}(?<_${idCtr++}>`)
           .replace(/\./g, "\\."),
       );
     } else {

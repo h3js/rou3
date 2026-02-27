@@ -494,6 +494,16 @@ describe("Router lookup", function () {
       "/path/abc/foo": undefined,
     });
 
+    // Multi-unnamed groups across segments
+    testRouter(["/path/(\\d+)/(\\w+)"], undefined, {
+      "/path/123/abc": {
+        data: { path: "/path/(\\d+)/(\\w+)" },
+        params: { _0: "123", _1: "abc" },
+      },
+      "/path/abc/abc": undefined,
+      "/path/123/!": undefined,
+    });
+
     // Coexistence: unnamed regex + unconstrained param
     testRouter(["/path/(\\d+)", "/path/:slug"], undefined, {
       "/path/123": {
