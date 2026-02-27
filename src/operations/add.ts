@@ -16,7 +16,10 @@ export function addRoute<T>(
     path = `/${path}`;
   }
 
-  path = path.replace(/\\:/g, "%3A").replace(/\\\(/g, "%28").replace(/\\\)/g, "%29");
+  path = path
+    .replace(/\\:/g, "%3A")
+    .replace(/\\\(/g, "%28")
+    .replace(/\\\)/g, "%29");
 
   const segments = splitPath(path);
 
@@ -130,8 +133,9 @@ function _expandModifiers(segments: string[]): string[] | undefined {
 function getParamRegexp(segment: string): RegExp {
   let _i = 0;
   const regex = segment
-    .replace(/:(\w+)(?:\(([^)]*)\))?/g, (_, id, pattern) =>
-      `(?<${id}>${pattern || "[^/]+"})`,
+    .replace(
+      /:(\w+)(?:\(([^)]*)\))?/g,
+      (_, id, pattern) => `(?<${id}>${pattern || "[^/]+"})`,
     )
     .replace(/\((?![?<])/g, () => `(?<_${_i++}>`)
     .replace(/\./g, "\\.");

@@ -85,10 +85,7 @@ describe("routeToRegExp", () => {
     },
     "/path/:rest*": {
       regex: /^\/path\/?(?<rest>.*)\/?$/,
-      match: [
-        ["/path/a/b", { rest: "a/b" }],
-        ["/path"],
-      ],
+      match: [["/path/a/b", { rest: "a/b" }], ["/path"]],
     },
     "/path/(\\d+)": {
       regex: /^\/path\/(?<_0>\d+)\/?$/,

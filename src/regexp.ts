@@ -16,23 +16,23 @@ export function routeToRegExp(route: string = "/"): RegExp {
         const name = base.match(/:(\w+)/)?.[1] || `_${idCtr++}`;
         if (mod === "?") {
           const inner = base
-            .replace(/:(\w+)(?:\(([^)]*)\))?/g, (_, id, pattern) =>
-              `(?<${id}>${pattern || "[^/]+"})`,
+            .replace(
+              /:(\w+)(?:\(([^)]*)\))?/g,
+              (_, id, pattern) => `(?<${id}>${pattern || "[^/]+"})`,
             )
             .replace(/\./g, "\\.");
           reSegments.push(`?${inner}?`);
           continue;
         }
         // + or *
-        reSegments.push(
-          mod === "+" ? `?(?<${name}>.+)` : `?(?<${name}>.*)`,
-        );
+        reSegments.push(mod === "+" ? `?(?<${name}>.+)` : `?(?<${name}>.*)`);
         continue;
       }
       reSegments.push(
         segment
-          .replace(/:(\w+)(?:\(([^)]*)\))?/g, (_, id, pattern) =>
-            `(?<${id}>${pattern || "[^/]+"})`,
+          .replace(
+            /:(\w+)(?:\(([^)]*)\))?/g,
+            (_, id, pattern) => `(?<${id}>${pattern || "[^/]+"})`,
           )
           .replace(/\((?![?<])/g, () => `(?<_${idCtr++}>`)
           .replace(/\./g, "\\."),
