@@ -87,6 +87,12 @@ interface Node<T> {
 - Supported forms: `{...}` and `{...}?` (plus single-segment `{...}+` / `{...}*` converted to `(?:...)+/*` regex fragments).
 - Limitation: `{...}+` / `{...}*` are rejected when group body contains `/` (cross-segment repetition unsupported in radix tree).
 
+### Wildcard segment captures
+
+- Unescaped `*` inside a segment is treated as an unnamed capture (`_0`, `_1`, ...), including mid-pattern forms like `/*.png` and `/file-*-*.png`.
+- Wildcard capture indexing is shared with unnamed regex groups in the same route.
+- `removeRoute()` now treats wildcard-segment patterns as dynamic segments (same classification as add/find/regexp).
+
 ## Build & Scripts
 
 - **Builder:** `obuild` (config in `build.config.mjs`)

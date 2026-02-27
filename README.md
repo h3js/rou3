@@ -104,6 +104,8 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 | `/users/:name` | `/users/foo` | `{ name: "foo" }` |
 | `/path/**` | `/path/foo/bar` | `{}` |
 | `/path/**:rest` | `/path/foo/bar` | `{ rest: "foo/bar" }` |
+| `/files/*.png` | `/files/icon.png` | `{ _0: "icon" }` |
+| `/files/file-*-*.png` | `/files/file-a-b.png` | `{ _0: "a", _1: "b" }` |
 | `/users/:id(\\d+)` | `/users/123` | `{ id: "123" }` |
 | `/files/:ext(png\|jpg)` | `/files/png` | `{ ext: "png" }` |
 | `/path/(\\d+)` | `/path/123` | `{ _0: "123" }` |
@@ -114,6 +116,7 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 | `/blog/:id(\\d+){-:title}?` | `/blog/123` or `/blog/123-my-post` | `{ id: "123" }` or `{ id: "123", title: "my-post" }` |
 
 - **Named params** (`:name`) match a single segment.
+- **Single-segment wildcards** (`*`) capture unnamed params (`_0`, `_1`, ...) and can be used as full or mid-segment tokens (for example `/*` or `/*.png`).
 - **Wildcards** (`**`) match zero or more segments. Use `**:name` to capture.
 - **Regex constraints** (`:name(regex)`) restrict matching. Constrained and unconstrained params can coexist on the same node (constrained checked first).
 - **Unnamed groups** (`(regex)`) capture into auto-indexed keys `_0`, `_1`, etc.

@@ -1,4 +1,8 @@
 import { expandGroupDelimiters } from "../_group-delimiters.ts";
+import {
+  hasSegmentWildcard,
+  replaceSegmentWildcards,
+} from "../_segment-wildcards.ts";
 import { NullProtoObj } from "../object.ts";
 import type { RouterContext, ParamsIndexMap } from "../types.ts";
 import { splitPath } from "./_utils.ts";
@@ -68,14 +72,23 @@ export function addRoute<T>(
     }
 
     // Param
-    if (segment === "*" || segment.includes(":") || segment.includes("(")) {
+    if (
+      segment === "*" ||
+      segment.includes(":") ||
+      segment.includes("(") ||
+      hasSegmentWildcard(segment)
+    ) {
       if (!node.param) {
         node.param = { key: "*" };
       }
       node = node.param;
       if (segment === "*") {
         paramsMap.push([i, `_${_unnamedParamIndex++}`, true /* optional */]);
-      } else if (segment.includes(":", 1) || segment.includes("(")) {
+      } else if (
+        segment.includes(":", 1) ||
+        segment.includes("(") ||
+        hasSegmentWildcard(segment)
+      ) {
         const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex);
         _unnamedParamIndex = nextIndex;
         paramsRegexp[i] = regexp;
@@ -145,6 +158,8 @@ function _expandModifiers(segments: string[]): string[] | undefined {
 
 function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
   let _i = unnamedStart;
+  [segment, _i] = replaceSegmentWildcards(segment, _i);
+
   const regex = segment
     .replace(
       /:(\w+)(?:\(([^)]*)\))?/g,
@@ -152,5 +167,6 @@ function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
     )
     .replace(/\((?![?<])/g, () => `(?<_${_i++}>`)
     .replace(/\./g, "\\.");
+
   return [new RegExp(`^${regex}$`), _i];
 }

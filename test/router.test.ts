@@ -517,6 +517,32 @@ describe("Router lookup", function () {
     });
   });
 
+  describe("wildcard segment patterns", function () {
+    testRouter(["/files/*.png"], undefined, {
+      "/files/logo.png": {
+        data: { path: "/files/*.png" },
+        params: { _0: "logo" },
+      },
+      "/files/icon.jpg": undefined,
+    });
+
+    testRouter(["/files/file-*-*.png"], undefined, {
+      "/files/file-a-b.png": {
+        data: { path: "/files/file-*-*.png" },
+        params: { _0: "a", _1: "b" },
+      },
+      "/files/file-a.png": undefined,
+    });
+
+    testRouter(["/combo/*.png/*-v"], undefined, {
+      "/combo/logo.png/abc-v": {
+        data: { path: "/combo/*.png/*-v" },
+        params: { _0: "logo", _1: "abc" },
+      },
+      "/combo/logo.png/v": undefined,
+    });
+  });
+
   describe("url pattern modifiers", function () {
     // :name? — optional single segment (last position)
     testRouter(["/users/:id?"], undefined, {
@@ -817,5 +843,19 @@ describe("Router remove", function () {
 
     expect(findRoute(router, "GET", "/user/123")).toBeUndefined();
     expect(findRoute(router, "GET", "/user/wildcard")).toBeUndefined();
+  });
+
+  it("remove wildcard segment patterns", function () {
+    const route = "/assets/*.png";
+    const router = createRouter([route]);
+
+    expect(findRoute(router, "GET", "/assets/logo.png")).toMatchObject({
+      data: { path: route },
+      params: { _0: "logo" },
+    });
+
+    removeRoute(router, "GET", route);
+
+    expect(findRoute(router, "GET", "/assets/logo.png")).toBeUndefined();
   });
 });

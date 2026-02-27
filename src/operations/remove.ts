@@ -1,4 +1,5 @@
 import { expandGroupDelimiters } from "../_group-delimiters.ts";
+import { hasSegmentWildcard } from "../_segment-wildcards.ts";
 import type { RouterContext, Node } from "../types.ts";
 import { splitPath } from "./_utils.ts";
 
@@ -40,23 +41,23 @@ function _remove(
 
   const segment = segments[index];
 
-  // Param
-  if (segment === "*") {
-    if (node.param) {
-      _remove(node.param, method, segments, index + 1);
-      if (_isEmptyNode(node.param)) {
-        node.param = undefined;
-      }
-    }
-    return;
-  }
-
   // Wildcard
   if (segment.startsWith("**")) {
     if (node.wildcard) {
       _remove(node.wildcard, method, segments, index + 1);
       if (_isEmptyNode(node.wildcard)) {
         node.wildcard = undefined;
+      }
+    }
+    return;
+  }
+
+  // Param
+  if (_isParamSegment(segment)) {
+    if (node.param) {
+      _remove(node.param, method, segments, index + 1);
+      if (_isEmptyNode(node.param)) {
+        node.param = undefined;
       }
     }
     return;
@@ -73,6 +74,15 @@ function _remove(
       }
     }
   }
+}
+
+function _isParamSegment(segment: string): boolean {
+  return (
+    segment === "*" ||
+    segment.includes(":") ||
+    segment.includes("(") ||
+    hasSegmentWildcard(segment)
+  );
 }
 
 function _isEmptyNode(node: Node) {

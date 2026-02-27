@@ -32,6 +32,14 @@ describe("routeToRegExp", () => {
         ["/path//foo/", { _0: "" }],
       ],
     },
+    "/path/*.png": {
+      regex: /^\/path\/(?<_0>[^/]*)\.png\/?$/,
+      match: [["/path/icon.png", { _0: "icon" }]],
+    },
+    "/path/file-*-*.png": {
+      regex: /^\/path\/file-(?<_0>[^/]*)-(?<_1>[^/]*)\.png\/?$/,
+      match: [["/path/file-a-b.png", { _0: "a", _1: "b" }]],
+    },
     "/path/**": {
       regex: /^\/path\/?(?<_>.*)\/?$/,
       match: [
