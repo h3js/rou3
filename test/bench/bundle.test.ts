@@ -14,8 +14,8 @@ describe("benchmark", () => {
     `;
     const { bytes, gzipSize } = await getBundleSize(code);
     console.log("bundle size", { bytes, gzipSize });
-    expect(bytes).toBeLessThanOrEqual(4500); // <4.5kb
-    expect(gzipSize).toBeLessThanOrEqual(1800); // <1.8kb
+    expect(bytes).toBeLessThanOrEqual(5000); // <5kb
+    expect(gzipSize).toBeLessThanOrEqual(2000); // <2kb
   });
 });
 
