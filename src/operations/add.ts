@@ -1,3 +1,9 @@
+import { expandGroupDelimiters } from "../_group-delimiters.ts";
+import {
+  hasSegmentWildcard,
+  replaceSegmentWildcards,
+  toUnnamedGroupKey,
+} from "../_segment-wildcards.ts";
 import { NullProtoObj } from "../object.ts";
 import type { RouterContext, ParamsIndexMap } from "../types.ts";
 import { splitPath } from "./_utils.ts";
@@ -16,9 +22,31 @@ export function addRoute<T>(
     path = `/${path}`;
   }
 
-  path = path.replace(/\\:/g, "%3A");
+  const groupExpanded = expandGroupDelimiters(path);
+  if (groupExpanded) {
+    for (const expandedPath of groupExpanded) {
+      addRoute(ctx, method, expandedPath, data);
+    }
+    return;
+  }
+
+  path = path
+    .replace(/\\:/g, "%3A")
+    .replace(/\\\(/g, "%28")
+    .replace(/\\\)/g, "%29")
+    .replace(/\\\{/g, "%7B")
+    .replace(/\\\}/g, "%7D");
 
   const segments = splitPath(path);
+
+  // Expand modifiers (:name?, :name+, :name*) into multiple route entries
+  const expanded = _expandModifiers(segments);
+  if (expanded) {
+    for (const p of expanded) {
+      addRoute(ctx, method, p, data);
+    }
+    return;
+  }
 
   let node = ctx.root;
 
@@ -45,22 +73,30 @@ export function addRoute<T>(
     }
 
     // Param
-    if (segment === "*" || segment.includes(":")) {
+    if (
+      segment === "*" ||
+      segment.includes(":") ||
+      segment.includes("(") ||
+      hasSegmentWildcard(segment)
+    ) {
       if (!node.param) {
         node.param = { key: "*" };
       }
       node = node.param;
       if (segment === "*") {
-        paramsMap.push([i, `_${_unnamedParamIndex++}`, true /* optional */]);
+        paramsMap.push([i, String(_unnamedParamIndex++), true /* optional */]);
+      } else if (
+        segment.includes(":", 1) ||
+        segment.includes("(") ||
+        hasSegmentWildcard(segment)
+      ) {
+        const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex);
+        _unnamedParamIndex = nextIndex;
+        paramsRegexp[i] = regexp;
+        node.hasRegexParam = true;
+        paramsMap.push([i, regexp, false]);
       } else {
-        if (segment.includes(":", 1)) {
-          const regexp = getParamRegexp(segment);
-          paramsRegexp[i] = regexp;
-          node.hasRegexParam = true;
-          paramsMap.push([i, regexp, false]);
-        } else {
-          paramsMap.push([i, segment.slice(1), false]);
-        }
+        paramsMap.push([i, segment.slice(1), false]);
       }
       continue;
     }
@@ -102,9 +138,36 @@ export function addRoute<T>(
   }
 }
 
-function getParamRegexp(segment: string): RegExp {
+function _expandModifiers(segments: string[]): string[] | undefined {
+  for (let i = 0; i < segments.length; i++) {
+    const m = segments[i].match(/^(.*:\w+(?:\([^)]*\))?)([?+*])$/);
+    if (!m) continue;
+    const pre = segments.slice(0, i);
+    const suf = segments.slice(i + 1);
+    if (m[2] === "?") {
+      return [
+        "/" + pre.concat(m[1]).concat(suf).join("/"),
+        "/" + pre.concat(suf).join("/"),
+      ];
+    }
+    const name = m[1].match(/:(\w+)/)?.[1] || "_";
+    const wc = "/" + [...pre, `**:${name}`, ...suf].join("/");
+    const without = "/" + [...pre, ...suf].join("/");
+    return m[2] === "+" ? [wc] : [wc, without];
+  }
+}
+
+function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
+  let _i = unnamedStart;
+  [segment, _i] = replaceSegmentWildcards(segment, _i);
+
   const regex = segment
-    .replace(/:(\w+)/g, (_, id) => `(?<${id}>[^/]+)`)
+    .replace(
+      /:(\w+)(?:\(([^)]*)\))?/g,
+      (_, id, pattern) => `(?<${id}>${pattern || "[^/]+"})`,
+    )
+    .replace(/\((?![?<])/g, () => `(?<${toUnnamedGroupKey(_i++)}>`)
     .replace(/\./g, "\\.");
-  return new RegExp(`^${regex}$`);
+
+  return [new RegExp(`^${regex}$`), _i];
 }

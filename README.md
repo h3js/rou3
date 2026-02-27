@@ -94,6 +94,36 @@ findRoute(router, "GET", "/");
 > [!TIP]
 > If you need to register a pattern containing literal `:` or `*`, you can escape them with `\\`. For example, `/static\\:path/\\*\\*` matches only the static `/static:path/**` route.
 
+## Route Patterns
+
+rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API)-compatible syntax.
+
+| Pattern | Example Match | Params |
+| --- | --- | --- |
+| `/path/to/resource` | `/path/to/resource` | `{}` |
+| `/users/:name` | `/users/foo` | `{ name: "foo" }` |
+| `/path/**` | `/path/foo/bar` | `{}` |
+| `/path/**:rest` | `/path/foo/bar` | `{ rest: "foo/bar" }` |
+| `/files/*.png` | `/files/icon.png` | `{ "0": "icon" }` |
+| `/files/file-*-*.png` | `/files/file-a-b.png` | `{ "0": "a", "1": "b" }` |
+| `/users/:id(\\d+)` | `/users/123` | `{ id: "123" }` |
+| `/files/:ext(png\|jpg)` | `/files/png` | `{ ext: "png" }` |
+| `/path/(\\d+)` | `/path/123` | `{ "0": "123" }` |
+| `/users/:id?` | `/users` or `/users/123` | `{}` or `{ id: "123" }` |
+| `/files/:path+` | `/files/a/b/c` | `{ path: "a/b/c" }` |
+| `/files/:path*` | `/files` or `/files/a/b` | `{}` or `{ path: "a/b" }` |
+| `/book{s}?` | `/book` or `/books` | `{}` |
+| `/blog/:id(\\d+){-:title}?` | `/blog/123` or `/blog/123-my-post` | `{ id: "123" }` or `{ id: "123", title: "my-post" }` |
+
+- **Named params** (`:name`) match a single segment.
+- **Single-segment wildcards** (`*`) capture unnamed params (`0`, `1`, ...) and can be used as full or mid-segment tokens (for example `/*` or `/*.png`).
+- **Wildcards** (`**`) match zero or more segments. Use `**:name` to capture.
+- **Regex constraints** (`:name(regex)`) restrict matching. Constrained and unconstrained params can coexist on the same node (constrained checked first).
+- **Unnamed groups** (`(regex)`) capture into auto-indexed keys `0`, `1`, etc.
+- **Modifiers:** `:name?` (optional), `:name+` (one or more), `:name*` (zero or more). Can combine with regex: `:id(\d+)?`.
+- **Non-capturing groups** (`{...}`): supported with inline (`/foo{bar}`) and optional (`/foo{bar}?`) forms.
+- **Current limitation:** repeating non-capturing groups (`{...}+`, `{...}*`) are supported only within a single segment (no `/` inside the group body).
+
 ## Compiler
 
 <!-- automd:jsdocs src="./src/compiler.ts" -->
