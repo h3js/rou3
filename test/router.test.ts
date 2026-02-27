@@ -414,6 +414,153 @@ describe("Router lookup", function () {
     );
   });
 
+  describe("url pattern regex constraints", function () {
+    testRouter(
+      ["/users/:id(\\d+)"],
+      (router) =>
+        expect(formatTree(router.root)).toMatchInlineSnapshot(`
+          "<root>
+              ├── /users
+              │       ├── /* ┈> [GET] /users/:id(\\d+)"
+        `),
+      {
+        "/users/123": {
+          data: { path: "/users/:id(\\d+)" },
+          params: { id: "123" },
+        },
+        "/users/abc": undefined,
+      },
+    );
+
+    testRouter(
+      ["/files/:ext(png|jpg|gif)"],
+      undefined,
+      {
+        "/files/png": {
+          data: { path: "/files/:ext(png|jpg|gif)" },
+          params: { ext: "png" },
+        },
+        "/files/jpg": {
+          data: { path: "/files/:ext(png|jpg|gif)" },
+          params: { ext: "jpg" },
+        },
+        "/files/pdf": undefined,
+      },
+    );
+
+    testRouter(
+      ["/api/:version(v\\d+)/:resource"],
+      undefined,
+      {
+        "/api/v2/users": {
+          data: { path: "/api/:version(v\\d+)/:resource" },
+          params: { version: "v2", resource: "users" },
+        },
+        "/api/latest/users": undefined,
+      },
+    );
+
+    // Coexistence: regex-constrained + unconstrained
+    testRouter(
+      ["/users/:id(\\d+)", "/users/:slug"],
+      undefined,
+      {
+        "/users/123": {
+          data: { path: "/users/:id(\\d+)" },
+          params: { id: "123" },
+        },
+        "/users/abc": {
+          data: { path: "/users/:slug" },
+          params: { slug: "abc" },
+        },
+      },
+    );
+  });
+
+  describe("url pattern modifiers", function () {
+    // :name? — optional single segment (last position)
+    testRouter(
+      ["/users/:id?"],
+      undefined,
+      {
+        "/users/123": {
+          data: { path: "/users/:id?" },
+          params: { id: "123" },
+        },
+        "/users": {
+          data: { path: "/users/:id?" },
+        },
+      },
+    );
+
+    // :name? — optional mid-path
+    testRouter(
+      ["/api/:version?/users"],
+      undefined,
+      {
+        "/api/v2/users": {
+          data: { path: "/api/:version?/users" },
+          params: { version: "v2" },
+        },
+        "/api/users": {
+          data: { path: "/api/:version?/users" },
+        },
+      },
+    );
+
+    // :name(regex)? — optional with regex constraint
+    testRouter(
+      ["/users/:id(\\d+)?"],
+      undefined,
+      {
+        "/users/123": {
+          data: { path: "/users/:id(\\d+)?" },
+          params: { id: "123" },
+        },
+        "/users": {
+          data: { path: "/users/:id(\\d+)?" },
+        },
+        "/users/abc": undefined,
+      },
+    );
+
+    // :name+ — one or more segments
+    testRouter(
+      ["/files/:path+"],
+      undefined,
+      {
+        "/files/a/b/c": {
+          data: { path: "/files/:path+" },
+          params: { path: "a/b/c" },
+        },
+        "/files/a": {
+          data: { path: "/files/:path+" },
+          params: { path: "a" },
+        },
+        "/files": undefined,
+      },
+    );
+
+    // :name* — zero or more segments
+    testRouter(
+      ["/files/:path*"],
+      undefined,
+      {
+        "/files/a/b/c": {
+          data: { path: "/files/:path*" },
+          params: { path: "a/b/c" },
+        },
+        "/files/a": {
+          data: { path: "/files/:path*" },
+          params: { path: "a" },
+        },
+        "/files": {
+          data: { path: "/files/:path*" },
+        },
+      },
+    );
+  });
+
   describe("should be able to match routes with trailing slash", function () {
     testRouter(
       ["/route/without/trailing/slash", "/route/with/trailing/slash/"],

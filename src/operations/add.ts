@@ -16,9 +16,18 @@ export function addRoute<T>(
     path = `/${path}`;
   }
 
-  path = path.replace(/\\:/g, "%3A");
+  path = path.replace(/\\:/g, "%3A").replace(/\\\(/g, "%28").replace(/\\\)/g, "%29");
 
   const segments = splitPath(path);
+
+  // Expand modifiers (:name?, :name+, :name*) into multiple route entries
+  const expanded = _expandModifiers(segments);
+  if (expanded) {
+    for (const p of expanded) {
+      addRoute(ctx, method, p, data);
+    }
+    return;
+  }
 
   let node = ctx.root;
 
@@ -52,15 +61,13 @@ export function addRoute<T>(
       node = node.param;
       if (segment === "*") {
         paramsMap.push([i, `_${_unnamedParamIndex++}`, true /* optional */]);
+      } else if (segment.includes(":", 1) || segment.includes("(")) {
+        const regexp = getParamRegexp(segment);
+        paramsRegexp[i] = regexp;
+        node.hasRegexParam = true;
+        paramsMap.push([i, regexp, false]);
       } else {
-        if (segment.includes(":", 1)) {
-          const regexp = getParamRegexp(segment);
-          paramsRegexp[i] = regexp;
-          node.hasRegexParam = true;
-          paramsMap.push([i, regexp, false]);
-        } else {
-          paramsMap.push([i, segment.slice(1), false]);
-        }
+        paramsMap.push([i, segment.slice(1), false]);
       }
       continue;
     }
@@ -102,9 +109,29 @@ export function addRoute<T>(
   }
 }
 
+function _expandModifiers(segments: string[]): string[] | undefined {
+  for (let i = 0; i < segments.length; i++) {
+    const m = segments[i].match(/^(.*:\w+(?:\([^)]*\))?)([?+*])$/);
+    if (!m) continue;
+    const pre = segments.slice(0, i);
+    const suf = segments.slice(i + 1);
+    if (m[2] === "?") {
+      return [
+        "/" + pre.concat(m[1]).concat(suf).join("/"),
+        "/" + pre.concat(suf).join("/"),
+      ];
+    }
+    const name = m[1].match(/:(\w+)/)?.[1] || "_";
+    const wc = "/" + pre.concat(`**:${name}`).join("/");
+    return m[2] === "+" ? [wc] : [wc, "/" + pre.join("/")];
+  }
+}
+
 function getParamRegexp(segment: string): RegExp {
   const regex = segment
-    .replace(/:(\w+)/g, (_, id) => `(?<${id}>[^/]+)`)
+    .replace(/:(\w+)(?:\(([^)]*)\))?/g, (_, id, pattern) =>
+      `(?<${id}>${pattern || "[^/]+"})`,
+    )
     .replace(/\./g, "\\.");
   return new RegExp(`^${regex}$`);
 }

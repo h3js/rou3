@@ -56,6 +56,40 @@ describe("routeToRegExp", () => {
         ["/any/deep/path", { _: "any/deep/path" }],
       ],
     },
+    "/path/:id(\\d+)": {
+      regex: /^\/path\/(?<id>\d+)\/?$/,
+      match: [["/path/123", { id: "123" }]],
+    },
+    "/path/:ext(png|jpg|gif)": {
+      regex: /^\/path\/(?<ext>png|jpg|gif)\/?$/,
+      match: [["/path/png", { ext: "png" }]],
+    },
+    "/path/:version(v\\d+)/:resource": {
+      regex: /^\/path\/(?<version>v\d+)\/(?<resource>[^/]+)\/?$/,
+      match: [["/path/v2/users", { version: "v2", resource: "users" }]],
+    },
+    "/path/:id?": {
+      regex: /^\/path\/?(?<id>[^/]+)?\/?$/,
+      match: [["/path/123", { id: "123" }], ["/path"]],
+    },
+    "/path/:id(\\d+)?": {
+      regex: /^\/path\/?(?<id>\d+)?\/?$/,
+      match: [["/path/123", { id: "123" }], ["/path"]],
+    },
+    "/path/:rest+": {
+      regex: /^\/path\/?(?<rest>.+)\/?$/,
+      match: [
+        ["/path/a/b", { rest: "a/b" }],
+        ["/path/a", { rest: "a" }],
+      ],
+    },
+    "/path/:rest*": {
+      regex: /^\/path\/?(?<rest>.*)\/?$/,
+      match: [
+        ["/path/a/b", { rest: "a/b" }],
+        ["/path"],
+      ],
+    },
   } as const;
 
   for (const [route, expected] of Object.entries(routes)) {
