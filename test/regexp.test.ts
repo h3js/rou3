@@ -5,6 +5,21 @@ import {
   addRoute,
   findRoute,
 } from "../src/index.ts";
+import { normalizeUnnamedGroupKey } from "../src/_segment-wildcards.ts";
+
+function normalizeGroups(groups?: Record<string, string>) {
+  if (!groups) {
+    return groups;
+  }
+
+  const normalized: Record<string, string> = {};
+  for (const key in groups) {
+    const normalizedKey = normalizeUnnamedGroupKey(key).replace(/^_(\d+)$/, "$1");
+    normalized[normalizedKey] = groups[key];
+  }
+
+  return normalized;
+}
 
 describe("routeToRegExp", () => {
   const routes = {
@@ -27,18 +42,18 @@ describe("routeToRegExp", () => {
     "/path/*/foo": {
       regex: /^\/path\/(?<_0>[^/]*)\/foo\/?$/,
       match: [
-        ["/path/anything/foo", { _0: "anything" }],
-        ["/path//foo", { _0: "" }],
-        ["/path//foo/", { _0: "" }],
+        ["/path/anything/foo", { "0": "anything" }],
+        ["/path//foo", { "0": "" }],
+        ["/path//foo/", { "0": "" }],
       ],
     },
     "/path/*.png": {
       regex: /^\/path\/(?<_0>[^/]*)\.png\/?$/,
-      match: [["/path/icon.png", { _0: "icon" }]],
+      match: [["/path/icon.png", { "0": "icon" }]],
     },
     "/path/file-*-*.png": {
       regex: /^\/path\/file-(?<_0>[^/]*)-(?<_1>[^/]*)\.png\/?$/,
-      match: [["/path/file-a-b.png", { _0: "a", _1: "b" }]],
+      match: [["/path/file-a-b.png", { "0": "a", "1": "b" }]],
     },
     "/path/**": {
       regex: /^\/path\/?(?<_>.*)\/?$/,
@@ -97,11 +112,11 @@ describe("routeToRegExp", () => {
     },
     "/path/(\\d+)": {
       regex: /^\/path\/(?<_0>\d+)\/?$/,
-      match: [["/path/123", { _0: "123" }]],
+      match: [["/path/123", { "0": "123" }]],
     },
     "/path/(png|jpg|gif)": {
       regex: /^\/path\/(?<_0>png|jpg|gif)\/?$/,
-      match: [["/path/png", { _0: "png" }]],
+      match: [["/path/png", { "0": "png" }]],
     },
     "/path/:id(\\d+)+": {
       regex: /^\/path\/?(?<id>\d+(?:\/\d+)*)\/?$/,
@@ -152,7 +167,7 @@ describe("routeToRegExp", () => {
         const match = path.match(regex);
         expect(match, path).not.toBeNull();
         if (params) {
-          expect(match?.groups).toMatchObject(params);
+          expect(normalizeGroups(match?.groups)).toMatchObject(params);
         }
       }
 

@@ -89,7 +89,8 @@ interface Node<T> {
 
 ### Wildcard segment captures
 
-- Unescaped `*` inside a segment is treated as an unnamed capture (`_0`, `_1`, ...), including mid-pattern forms like `/*.png` and `/file-*-*.png`.
+- **Breaking change:** unnamed captures now use URLPattern-style numeric keys (`"0"`, `"1"`, ...) instead of legacy `_0`, `_1`, ...
+- Unescaped `*` inside a segment is treated as an unnamed capture (`"0"`, `"1"`, ...), including mid-pattern forms like `/*.png` and `/file-*-*.png`.
 - Wildcard capture indexing is shared with unnamed regex groups in the same route.
 - `removeRoute()` now treats wildcard-segment patterns as dynamic segments (same classification as add/find/regexp).
 

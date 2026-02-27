@@ -110,7 +110,7 @@ describe("route matching", () => {
       });
       expect(match("GET", "/test/foo/123")).toMatchObject({
         data: { path: "/test/foo/*" },
-        params: { _0: "123" },
+        params: { "0": "123" },
       });
       // Wildcard
       expect(match("GET", "/test/foo/123/456")).toMatchObject({

@@ -1,8 +1,5 @@
 import { expandGroupDelimiters } from "./_group-delimiters.ts";
-import {
-  hasSegmentWildcard,
-  replaceSegmentWildcards,
-} from "./_segment-wildcards.ts";
+import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcards.ts";
 
 export function routeToRegExp(route: string = "/"): RegExp {
   const groupExpanded = expandGroupDelimiters(route);
@@ -24,7 +21,7 @@ function _routeToRegExp(route: string): RegExp {
     if (!segment) continue;
 
     if (segment === "*") {
-      reSegments.push(`(?<_${idCtr++}>[^/]*)`);
+      reSegments.push(`(?<${toRegExpUnnamedKey(idCtr++)}>[^/]*)`);
     } else if (segment.startsWith("**")) {
       reSegments.push(
         segment === "**" ? "?(?<_>.*)" : `?(?<${segment.slice(3)}>.+)`,
@@ -67,7 +64,11 @@ function _routeToRegExp(route: string): RegExp {
       }
 
       let dynamicSegment = segment;
-      [dynamicSegment, idCtr] = replaceSegmentWildcards(dynamicSegment, idCtr);
+      [dynamicSegment, idCtr] = replaceSegmentWildcards(
+        dynamicSegment,
+        idCtr,
+        toRegExpUnnamedKey,
+      );
 
       reSegments.push(
         dynamicSegment
@@ -75,7 +76,10 @@ function _routeToRegExp(route: string): RegExp {
             /:(\w+)(?:\(([^)]*)\))?/g,
             (_, id, pattern) => `(?<${id}>${pattern || "[^/]+"})`,
           )
-          .replace(/(^|[^\\])\((?![?<])/g, (_, p) => `${p}(?<_${idCtr++}>`)
+          .replace(
+            /(^|[^\\])\((?![?<])/g,
+            (_, p) => `${p}(?<${toRegExpUnnamedKey(idCtr++)}>`,
+          )
           .replace(/\./g, "\\."),
       );
     } else {
@@ -84,4 +88,8 @@ function _routeToRegExp(route: string): RegExp {
   }
 
   return new RegExp(`^/${reSegments.join("/")}/?$`);
+}
+
+function toRegExpUnnamedKey(index: number): string {
+  return `_${index}`;
 }

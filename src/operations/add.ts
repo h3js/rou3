@@ -2,6 +2,7 @@ import { expandGroupDelimiters } from "../_group-delimiters.ts";
 import {
   hasSegmentWildcard,
   replaceSegmentWildcards,
+  toUnnamedGroupKey,
 } from "../_segment-wildcards.ts";
 import { NullProtoObj } from "../object.ts";
 import type { RouterContext, ParamsIndexMap } from "../types.ts";
@@ -83,7 +84,7 @@ export function addRoute<T>(
       }
       node = node.param;
       if (segment === "*") {
-        paramsMap.push([i, `_${_unnamedParamIndex++}`, true /* optional */]);
+        paramsMap.push([i, String(_unnamedParamIndex++), true /* optional */]);
       } else if (
         segment.includes(":", 1) ||
         segment.includes("(") ||
@@ -165,7 +166,7 @@ function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
       /:(\w+)(?:\(([^)]*)\))?/g,
       (_, id, pattern) => `(?<${id}>${pattern || "[^/]+"})`,
     )
-    .replace(/\((?![?<])/g, () => `(?<_${_i++}>`)
+    .replace(/\((?![?<])/g, () => `(?<${toUnnamedGroupKey(_i++)}>`)
     .replace(/\./g, "\\.");
 
   return [new RegExp(`^${regex}$`), _i];

@@ -1,3 +1,6 @@
+export const UNNAMED_GROUP_PREFIX = "__rou3_unnamed_";
+const _unnamedGroupPrefixLength = UNNAMED_GROUP_PREFIX.length;
+
 export function hasSegmentWildcard(segment: string): boolean {
   let depth = 0;
 
@@ -26,6 +29,7 @@ export function hasSegmentWildcard(segment: string): boolean {
 export function replaceSegmentWildcards(
   segment: string,
   unnamedStart: number,
+  toGroupKey: (index: number) => string = toUnnamedGroupKey,
 ): [string, number] {
   let depth = 0;
   let nextIndex = unnamedStart;
@@ -55,7 +59,7 @@ export function replaceSegmentWildcards(
     }
 
     if (ch === 42 /* * */ && depth === 0) {
-      replaced += `(?<_${nextIndex++}>[^/]*)`;
+      replaced += `(?<${toGroupKey(nextIndex++)}>[^/]*)`;
       continue;
     }
 
@@ -63,4 +67,14 @@ export function replaceSegmentWildcards(
   }
 
   return [replaced, nextIndex];
+}
+
+export function toUnnamedGroupKey(index: number): string {
+  return `${UNNAMED_GROUP_PREFIX}${index}`;
+}
+
+export function normalizeUnnamedGroupKey(key: string): string {
+  return key.startsWith(UNNAMED_GROUP_PREFIX)
+    ? key.slice(_unnamedGroupPrefixLength)
+    : key;
 }

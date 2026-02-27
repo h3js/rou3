@@ -18,13 +18,13 @@ describe("types", () => {
 
     it("should infer wildcard params", () => {
       type Params = InferRouteParams<"/test/*">;
-      type Expected = { _0: string };
+      type Expected = { "0": string };
       expectTypeOf<Params>().toEqualTypeOf<Expected>();
     });
 
     it("should infer multiple wildcard params", () => {
       type Params = InferRouteParams<"/test/*/foo/*/bar">;
-      type Expected = { _0: string; _1: string };
+      type Expected = { "0": string; "1": string };
       expectTypeOf<Params>().toEqualTypeOf<Expected>();
     });
 
@@ -42,7 +42,7 @@ describe("types", () => {
 
     it("should infer mixed params", () => {
       type Params = InferRouteParams<"/test/:id/*/foo/:name/**">;
-      type Expected = { id: string; _0: string; name: string; _: string };
+      type Expected = { id: string; "0": string; name: string; _: string };
       expectTypeOf<Params>().toEqualTypeOf<Expected>();
     });
 

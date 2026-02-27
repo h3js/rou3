@@ -344,7 +344,7 @@ describe("Router lookup", function () {
         },
         "/polymer/route/anon": {
           data: { path: "/polymer/route/*" },
-          params: { _0: "anon" },
+          params: { "0": "anon" },
         },
         "/polymer/constructor": {
           data: { path: "/polymer/**" },
@@ -469,7 +469,7 @@ describe("Router lookup", function () {
     testRouter(["/path/(\\d+)"], undefined, {
       "/path/123": {
         data: { path: "/path/(\\d+)" },
-        params: { _0: "123" },
+        params: { "0": "123" },
       },
       "/path/abc": undefined,
     });
@@ -477,11 +477,11 @@ describe("Router lookup", function () {
     testRouter(["/files/(png|jpg|gif)"], undefined, {
       "/files/png": {
         data: { path: "/files/(png|jpg|gif)" },
-        params: { _0: "png" },
+        params: { "0": "png" },
       },
       "/files/jpg": {
         data: { path: "/files/(png|jpg|gif)" },
-        params: { _0: "jpg" },
+        params: { "0": "jpg" },
       },
       "/files/pdf": undefined,
     });
@@ -489,7 +489,7 @@ describe("Router lookup", function () {
     testRouter(["/path/(\\d+)/foo"], undefined, {
       "/path/123/foo": {
         data: { path: "/path/(\\d+)/foo" },
-        params: { _0: "123" },
+        params: { "0": "123" },
       },
       "/path/abc/foo": undefined,
     });
@@ -498,7 +498,7 @@ describe("Router lookup", function () {
     testRouter(["/path/(\\d+)/(\\w+)"], undefined, {
       "/path/123/abc": {
         data: { path: "/path/(\\d+)/(\\w+)" },
-        params: { _0: "123", _1: "abc" },
+        params: { "0": "123", "1": "abc" },
       },
       "/path/abc/abc": undefined,
       "/path/123/!": undefined,
@@ -508,7 +508,7 @@ describe("Router lookup", function () {
     testRouter(["/path/(\\d+)", "/path/:slug"], undefined, {
       "/path/123": {
         data: { path: "/path/(\\d+)" },
-        params: { _0: "123" },
+        params: { "0": "123" },
       },
       "/path/abc": {
         data: { path: "/path/:slug" },
@@ -521,7 +521,7 @@ describe("Router lookup", function () {
     testRouter(["/files/*.png"], undefined, {
       "/files/logo.png": {
         data: { path: "/files/*.png" },
-        params: { _0: "logo" },
+        params: { "0": "logo" },
       },
       "/files/icon.jpg": undefined,
     });
@@ -529,7 +529,7 @@ describe("Router lookup", function () {
     testRouter(["/files/file-*-*.png"], undefined, {
       "/files/file-a-b.png": {
         data: { path: "/files/file-*-*.png" },
-        params: { _0: "a", _1: "b" },
+        params: { "0": "a", "1": "b" },
       },
       "/files/file-a.png": undefined,
     });
@@ -537,7 +537,7 @@ describe("Router lookup", function () {
     testRouter(["/combo/*.png/*-v"], undefined, {
       "/combo/logo.png/abc-v": {
         data: { path: "/combo/*.png/*-v" },
-        params: { _0: "logo", _1: "abc" },
+        params: { "0": "logo", "1": "abc" },
       },
       "/combo/logo.png/v": undefined,
     });
@@ -783,10 +783,10 @@ describe("Router remove", function () {
     removeRoute(router, "GET", "/a/b");
     expect(findRoute(router, "GET", "/a/b")).to.deep.equal({
       data: { path: "/a/b/*" },
-      params: { _0: undefined },
+      params: { "0": undefined },
     });
     expect(findRoute(router, "GET", "/a/b/c")).to.deep.equal({
-      params: { _0: "c" },
+      params: { "0": "c" },
       data: { path: "/a/b/*" },
     });
     removeRoute(router, "GET", "/a/b/*");
@@ -851,7 +851,7 @@ describe("Router remove", function () {
 
     expect(findRoute(router, "GET", "/assets/logo.png")).toMatchObject({
       data: { path: route },
-      params: { _0: "logo" },
+      params: { "0": "logo" },
     });
 
     removeRoute(router, "GET", route);
