@@ -94,6 +94,84 @@ findRoute(router, "GET", "/");
 > [!TIP]
 > If you need to register a pattern containing literal `:` or `*`, you can escape them with `\\`. For example, `/static\\:path/\\*\\*` matches only the static `/static:path/**` route.
 
+## Route Patterns
+
+rou3 supports a variety of route patterns, including [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API)-compatible syntax.
+
+### Static
+
+```
+/path/to/resource
+```
+
+### Named Parameters
+
+`:name` matches a single path segment.
+
+```
+/users/:name        →  /users/foo        → { name: "foo" }
+```
+
+### Wildcards
+
+`**` matches zero or more segments. Use `**:name` to capture the matched path.
+
+```
+/path/**            →  /path/foo/bar     → {}
+/path/**:rest       →  /path/foo/bar     → { rest: "foo/bar" }
+```
+
+### Regex Constraints
+
+`:name(regex)` restricts a named parameter to match only the given pattern.
+
+```
+/users/:id(\d+)          →  /users/123     → { id: "123" }
+                          →  /users/abc     → (no match)
+/files/:ext(png|jpg|gif) →  /files/png     → { ext: "png" }
+                          →  /files/pdf     → (no match)
+```
+
+Regex-constrained and unconstrained params can coexist on the same path node (constrained routes are checked first):
+
+```
+/users/:id(\d+)   +   /users/:slug
+  /users/123  → { id: "123" }
+  /users/abc  → { slug: "abc" }
+```
+
+### Unnamed Regex Groups
+
+`(regex)` without a parameter name captures into auto-indexed keys `_0`, `_1`, etc.
+
+```
+/path/(\d+)              →  /path/123      → { _0: "123" }
+/files/(png|jpg|gif)     →  /files/png     → { _0: "png" }
+```
+
+### Modifiers
+
+- `:name?` — optional (zero or one segment)
+- `:name+` — one or more segments
+- `:name*` — zero or more segments
+
+```
+/users/:id?              →  /users/123     → { id: "123" }
+                          →  /users         → {}
+/files/:path+            →  /files/a/b/c   → { path: "a/b/c" }
+                          →  /files         → (no match)
+/files/:path*            →  /files/a/b/c   → { path: "a/b/c" }
+                          →  /files         → {}
+```
+
+Modifiers can be combined with regex constraints:
+
+```
+/users/:id(\d+)?         →  /users/123     → { id: "123" }
+                          →  /users         → {}
+                          →  /users/abc     → (no match)
+```
+
 ## Compiler
 
 <!-- automd:jsdocs src="./src/compiler.ts" -->
