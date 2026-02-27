@@ -14,7 +14,10 @@ function normalizeGroups(groups?: Record<string, string>) {
 
   const normalized: Record<string, string> = {};
   for (const key in groups) {
-    const normalizedKey = normalizeUnnamedGroupKey(key).replace(/^_(\d+)$/, "$1");
+    const normalizedKey = normalizeUnnamedGroupKey(key).replace(
+      /^_(\d+)$/,
+      "$1",
+    );
     normalized[normalizedKey] = groups[key];
   }
 

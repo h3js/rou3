@@ -1,5 +1,8 @@
 import { expandGroupDelimiters } from "./_group-delimiters.ts";
-import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcards.ts";
+import {
+  hasSegmentWildcard,
+  replaceSegmentWildcards,
+} from "./_segment-wildcards.ts";
 
 export function routeToRegExp(route: string = "/"): RegExp {
   const groupExpanded = expandGroupDelimiters(route);
