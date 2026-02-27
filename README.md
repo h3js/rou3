@@ -110,12 +110,16 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 | `/users/:id?` | `/users` or `/users/123` | `{}` or `{ id: "123" }` |
 | `/files/:path+` | `/files/a/b/c` | `{ path: "a/b/c" }` |
 | `/files/:path*` | `/files` or `/files/a/b` | `{}` or `{ path: "a/b" }` |
+| `/book{s}?` | `/book` or `/books` | `{}` |
+| `/blog/:id(\\d+){-:title}?` | `/blog/123` or `/blog/123-my-post` | `{ id: "123" }` or `{ id: "123", title: "my-post" }` |
 
 - **Named params** (`:name`) match a single segment.
 - **Wildcards** (`**`) match zero or more segments. Use `**:name` to capture.
 - **Regex constraints** (`:name(regex)`) restrict matching. Constrained and unconstrained params can coexist on the same node (constrained checked first).
 - **Unnamed groups** (`(regex)`) capture into auto-indexed keys `_0`, `_1`, etc.
 - **Modifiers:** `:name?` (optional), `:name+` (one or more), `:name*` (zero or more). Can combine with regex: `:id(\d+)?`.
+- **Non-capturing groups** (`{...}`): supported with inline (`/foo{bar}`) and optional (`/foo{bar}?`) forms.
+- **Current limitation:** repeating non-capturing groups (`{...}+`, `{...}*`) are supported only within a single segment (no `/` inside the group body).
 
 ## Compiler
 

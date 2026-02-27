@@ -581,6 +581,40 @@ describe("Router lookup", function () {
     });
   });
 
+  describe("non-capturing groups", function () {
+    testRouter(["/book{s}?"], undefined, {
+      "/book": {
+        data: { path: "/book{s}?" },
+      },
+      "/books": {
+        data: { path: "/book{s}?" },
+      },
+      "/bookss": undefined,
+    });
+
+    testRouter(["/blog/:id(\\d+){-:title}?"], undefined, {
+      "/blog/123": {
+        data: { path: "/blog/:id(\\d+){-:title}?" },
+        params: { id: "123" },
+      },
+      "/blog/123-my-post": {
+        data: { path: "/blog/:id(\\d+){-:title}?" },
+        params: { id: "123", title: "my-post" },
+      },
+      "/blog/my-post": undefined,
+    });
+
+    testRouter(["/foo{/bar}?"], undefined, {
+      "/foo": {
+        data: { path: "/foo{/bar}?" },
+      },
+      "/foo/bar": {
+        data: { path: "/foo{/bar}?" },
+      },
+      "/foo/baz": undefined,
+    });
+  });
+
   describe("should be able to match routes with trailing slash", function () {
     testRouter(
       ["/route/without/trailing/slash", "/route/with/trailing/slash/"],

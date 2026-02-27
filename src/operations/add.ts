@@ -1,3 +1,4 @@
+import { expandGroupDelimiters } from "../_group-delimiters.ts";
 import { NullProtoObj } from "../object.ts";
 import type { RouterContext, ParamsIndexMap } from "../types.ts";
 import { splitPath } from "./_utils.ts";
@@ -16,10 +17,20 @@ export function addRoute<T>(
     path = `/${path}`;
   }
 
+  const groupExpanded = expandGroupDelimiters(path);
+  if (groupExpanded) {
+    for (const expandedPath of groupExpanded) {
+      addRoute(ctx, method, expandedPath, data);
+    }
+    return;
+  }
+
   path = path
     .replace(/\\:/g, "%3A")
     .replace(/\\\(/g, "%28")
-    .replace(/\\\)/g, "%29");
+    .replace(/\\\)/g, "%29")
+    .replace(/\\\{/g, "%7B")
+    .replace(/\\\}/g, "%7D");
 
   const segments = splitPath(path);
 

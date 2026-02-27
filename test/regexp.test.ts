@@ -106,6 +106,22 @@ describe("routeToRegExp", () => {
       regex: /^\/path\/?(?<id>\d+(?:\/\d+)*)?\/?$/,
       match: [["/path/123", { id: "123" }], ["/path"]],
     },
+    "/book{s}?": {
+      regex: /^(?:\/books\/?|\/book\/?)$/,
+      match: [["/book"], ["/books"]],
+    },
+    "/blog/:id(\\d+){-:title}?": {
+      regex:
+        /^(?:\/blog\/(?<id>\d+)-(?<title>[^/]+)\/?|\/blog\/(?<id>\d+)\/?)$/,
+      match: [
+        ["/blog/123", { id: "123" }],
+        ["/blog/123-my-post", { id: "123", title: "my-post" }],
+      ],
+    },
+    "/foo{/bar}?": {
+      regex: /^(?:\/foo\/bar\/?|\/foo\/?)$/,
+      match: [["/foo"], ["/foo/bar"]],
+    },
   } as const;
 
   for (const [route, expected] of Object.entries(routes)) {

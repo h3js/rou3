@@ -13,6 +13,7 @@ src/
   types.ts            # TypeScript interfaces & param inference types
   context.ts          # createRouter() factory
   object.ts           # NullProtoObj (null-prototype object constructor)
+  _group-delimiters.ts# Non-capturing group ({...}) expansion helper
   regexp.ts           # routeToRegExp() utility
   compiler.ts         # JIT/AOT compiler (generates optimized match functions)
   operations/
@@ -79,6 +80,12 @@ interface Node<T> {
 - Unrolls segment checks into `split("/")`-based array access
 - Inlines regex patterns for param validation
 - Compare interpreter vs compiled output in tests
+
+### URLPattern group delimiters
+
+- `src/_group-delimiters.ts` expands non-capturing group delimiters before route insertion/removal/regexp generation.
+- Supported forms: `{...}` and `{...}?` (plus single-segment `{...}+` / `{...}*` converted to `(?:...)+/*` regex fragments).
+- Limitation: `{...}+` / `{...}*` are rejected when group body contains `/` (cross-segment repetition unsupported in radix tree).
 
 ## Build & Scripts
 

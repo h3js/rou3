@@ -1,8 +1,24 @@
+import { expandGroupDelimiters } from "./_group-delimiters.ts";
+
 export function routeToRegExp(route: string = "/"): RegExp {
+  const groupExpanded = expandGroupDelimiters(route);
+  if (groupExpanded) {
+    const sources = groupExpanded.map((expandedRoute) =>
+      routeToRegExp(expandedRoute).source.slice(1, -1),
+    );
+    return new RegExp(`^(?:${sources.join("|")})$`);
+  }
+
+  return _routeToRegExp(route);
+}
+
+function _routeToRegExp(route: string): RegExp {
   const reSegments = [];
   let idCtr = 0;
+
   for (const segment of route.split("/")) {
     if (!segment) continue;
+
     if (segment === "*") {
       reSegments.push(`(?<_${idCtr++}>[^/]*)`);
     } else if (segment.startsWith("**")) {
@@ -14,6 +30,7 @@ export function routeToRegExp(route: string = "/"): RegExp {
       if (modMatch) {
         const [, base, mod] = modMatch;
         const name = base.match(/:(\w+)/)?.[1] || `_${idCtr++}`;
+
         if (mod === "?") {
           const inner = base
             .replace(
@@ -24,6 +41,7 @@ export function routeToRegExp(route: string = "/"): RegExp {
           reSegments.push(`?${inner}?`);
           continue;
         }
+
         // + or * (preserve inline constraint when present)
         const pattern = base.match(/:(\w+)(?:\(([^)]*)\))?/)?.[2];
         if (pattern) {
@@ -36,8 +54,10 @@ export function routeToRegExp(route: string = "/"): RegExp {
         } else {
           reSegments.push(mod === "+" ? `?(?<${name}>.+)` : `?(?<${name}>.*)`);
         }
+
         continue;
       }
+
       reSegments.push(
         segment
           .replace(
@@ -51,5 +71,6 @@ export function routeToRegExp(route: string = "/"): RegExp {
       reSegments.push(segment);
     }
   }
+
   return new RegExp(`^/${reSegments.join("/")}/?$`);
 }

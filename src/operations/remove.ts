@@ -1,3 +1,4 @@
+import { expandGroupDelimiters } from "../_group-delimiters.ts";
 import type { RouterContext, Node } from "../types.ts";
 import { splitPath } from "./_utils.ts";
 
@@ -9,6 +10,14 @@ export function removeRoute<T>(
   method: string,
   path: string,
 ): void {
+  const groupExpanded = expandGroupDelimiters(path);
+  if (groupExpanded) {
+    for (const expandedPath of groupExpanded) {
+      removeRoute(ctx, method, expandedPath);
+    }
+    return;
+  }
+
   const segments = splitPath(path);
   return _remove(ctx.root, method || "", segments, 0);
 }
