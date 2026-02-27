@@ -2,7 +2,7 @@ import unjs from "eslint-config-unjs";
 
 // https://github.com/unjs/eslint-config
 export default unjs({
-  ignores: ["test/.snapshot"],
+  ignores: ["test/.snapshot", "AGENTS.md"],
   rules: {
     "unicorn/no-null": 0,
     "@typescript-eslint/no-non-null-assertion": 0,
