@@ -477,6 +477,64 @@ describe("Router lookup", function () {
     );
   });
 
+  describe("unnamed regex groups", function () {
+    testRouter(
+      ["/path/(\\d+)"],
+      undefined,
+      {
+        "/path/123": {
+          data: { path: "/path/(\\d+)" },
+          params: { _0: "123" },
+        },
+        "/path/abc": undefined,
+      },
+    );
+
+    testRouter(
+      ["/files/(png|jpg|gif)"],
+      undefined,
+      {
+        "/files/png": {
+          data: { path: "/files/(png|jpg|gif)" },
+          params: { _0: "png" },
+        },
+        "/files/jpg": {
+          data: { path: "/files/(png|jpg|gif)" },
+          params: { _0: "jpg" },
+        },
+        "/files/pdf": undefined,
+      },
+    );
+
+    testRouter(
+      ["/path/(\\d+)/foo"],
+      undefined,
+      {
+        "/path/123/foo": {
+          data: { path: "/path/(\\d+)/foo" },
+          params: { _0: "123" },
+        },
+        "/path/abc/foo": undefined,
+      },
+    );
+
+    // Coexistence: unnamed regex + unconstrained param
+    testRouter(
+      ["/path/(\\d+)", "/path/:slug"],
+      undefined,
+      {
+        "/path/123": {
+          data: { path: "/path/(\\d+)" },
+          params: { _0: "123" },
+        },
+        "/path/abc": {
+          data: { path: "/path/:slug" },
+          params: { slug: "abc" },
+        },
+      },
+    );
+  });
+
   describe("url pattern modifiers", function () {
     // :name? — optional single segment (last position)
     testRouter(

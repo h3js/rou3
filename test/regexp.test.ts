@@ -90,6 +90,14 @@ describe("routeToRegExp", () => {
         ["/path"],
       ],
     },
+    "/path/(\\d+)": {
+      regex: /^\/path\/(?<_0>\d+)\/?$/,
+      match: [["/path/123", { _0: "123" }]],
+    },
+    "/path/(png|jpg|gif)": {
+      regex: /^\/path\/(?<_0>png|jpg|gif)\/?$/,
+      match: [["/path/png", { _0: "png" }]],
+    },
   } as const;
 
   for (const [route, expected] of Object.entries(routes)) {

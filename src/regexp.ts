@@ -9,7 +9,7 @@ export function routeToRegExp(route: string = "/"): RegExp {
       reSegments.push(
         segment === "**" ? "?(?<_>.*)" : `?(?<${segment.slice(3)}>.+)`,
       );
-    } else if (segment.includes(":")) {
+    } else if (segment.includes(":") || segment.includes("(")) {
       const modMatch = segment.match(/^(.*:\w+(?:\([^)]*\))?)([?+*])$/);
       if (modMatch) {
         const [, base, mod] = modMatch;
@@ -34,6 +34,7 @@ export function routeToRegExp(route: string = "/"): RegExp {
           .replace(/:(\w+)(?:\(([^)]*)\))?/g, (_, id, pattern) =>
             `(?<${id}>${pattern || "[^/]+"})`,
           )
+          .replace(/\((?![?<])/g, () => `(?<_${idCtr++}>`)
           .replace(/\./g, "\\."),
       );
     } else {

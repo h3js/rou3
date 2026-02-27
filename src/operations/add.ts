@@ -54,7 +54,7 @@ export function addRoute<T>(
     }
 
     // Param
-    if (segment === "*" || segment.includes(":")) {
+    if (segment === "*" || segment.includes(":") || segment.includes("(")) {
       if (!node.param) {
         node.param = { key: "*" };
       }
@@ -128,10 +128,12 @@ function _expandModifiers(segments: string[]): string[] | undefined {
 }
 
 function getParamRegexp(segment: string): RegExp {
+  let _i = 0;
   const regex = segment
     .replace(/:(\w+)(?:\(([^)]*)\))?/g, (_, id, pattern) =>
       `(?<${id}>${pattern || "[^/]+"})`,
     )
+    .replace(/\((?![?<])/g, () => `(?<_${_i++}>`)
     .replace(/\./g, "\\.");
   return new RegExp(`^${regex}$`);
 }
