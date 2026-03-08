@@ -858,4 +858,54 @@ describe("Router remove", function () {
 
     expect(findRoute(router, "GET", "/assets/logo.png")).toBeUndefined();
   });
+
+  it("remove optional modifier routes (:name?)", function () {
+    const route = "/users/:id?";
+    const router = createRouter([route]);
+
+    expect(findRoute(router, "GET", "/users/123")).toMatchObject({
+      data: { path: route },
+      params: { id: "123" },
+    });
+    expect(findRoute(router, "GET", "/users")).toMatchObject({
+      data: { path: route },
+    });
+
+    removeRoute(router, "GET", route);
+
+    expect(findRoute(router, "GET", "/users/123")).toBeUndefined();
+    expect(findRoute(router, "GET", "/users")).toBeUndefined();
+  });
+
+  it("remove one-or-more modifier routes (:name+)", function () {
+    const route = "/files/:path+";
+    const router = createRouter([route]);
+
+    expect(findRoute(router, "GET", "/files/a/b/c")).toMatchObject({
+      data: { path: route },
+      params: { path: "a/b/c" },
+    });
+
+    removeRoute(router, "GET", route);
+
+    expect(findRoute(router, "GET", "/files/a/b/c")).toBeUndefined();
+  });
+
+  it("remove zero-or-more modifier routes (:name*)", function () {
+    const route = "/files/:path*";
+    const router = createRouter([route]);
+
+    expect(findRoute(router, "GET", "/files/a/b/c")).toMatchObject({
+      data: { path: route },
+      params: { path: "a/b/c" },
+    });
+    expect(findRoute(router, "GET", "/files")).toMatchObject({
+      data: { path: route },
+    });
+
+    removeRoute(router, "GET", route);
+
+    expect(findRoute(router, "GET", "/files/a/b/c")).toBeUndefined();
+    expect(findRoute(router, "GET", "/files")).toBeUndefined();
+  });
 });

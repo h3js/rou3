@@ -19,8 +19,24 @@ export function removeRoute<T>(
     return;
   }
 
+  path = path
+    .replace(/\\:/g, "%3A")
+    .replace(/\\\(/g, "%28")
+    .replace(/\\\)/g, "%29")
+    .replace(/\\\{/g, "%7B")
+    .replace(/\\\}/g, "%7D");
+
   const segments = splitPath(path);
-  return _remove(ctx.root, method || "", segments, 0);
+
+  const modExpanded = _expandModifiers(segments);
+  if (modExpanded) {
+    for (const expandedPath of modExpanded) {
+      removeRoute(ctx, method, expandedPath);
+    }
+    return;
+  }
+
+  _remove(ctx.root, method || "", segments, 0);
 }
 
 function _remove(
@@ -92,4 +108,23 @@ function _isEmptyNode(node: Node) {
     node.param === undefined &&
     node.wildcard === undefined
   );
+}
+
+function _expandModifiers(segments: string[]): string[] | undefined {
+  for (let i = 0; i < segments.length; i++) {
+    const m = segments[i].match(/^(.*:\w+(?:\([^)]*\))?)([?+*])$/);
+    if (!m) continue;
+    const pre = segments.slice(0, i);
+    const suf = segments.slice(i + 1);
+    if (m[2] === "?") {
+      return [
+        "/" + pre.concat(m[1]).concat(suf).join("/"),
+        "/" + pre.concat(suf).join("/"),
+      ];
+    }
+    const name = m[1].match(/:(\w+)/)?.[1] || "_";
+    const wc = "/" + [...pre, `**:${name}`, ...suf].join("/");
+    const without = "/" + [...pre, ...suf].join("/");
+    return m[2] === "+" ? [wc] : [wc, without];
+  }
 }

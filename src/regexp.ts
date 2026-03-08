@@ -10,6 +10,9 @@ export function routeToRegExp(route: string = "/"): RegExp {
     const sources = groupExpanded.map((expandedRoute) =>
       routeToRegExp(expandedRoute).source.slice(1, -1),
     );
+    // Note: alternation branches may contain duplicate named capture groups
+    // (e.g. `(?<id>a)|(?<id>b)`). This is valid in modern engines (Node 22+,
+    // Chrome 125+, Firefox 129+, Safari 17+) per TC39 proposal.
     return new RegExp(`^(?:${sources.join("|")})$`);
   }
 
