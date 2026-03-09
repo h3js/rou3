@@ -44,7 +44,8 @@ describe("find-matchAll: basic", () => {
 
   it("snapshot (compiled - empty)", async () => {
     await expect(
-      (await format("snapshot.mjs", compileRouter(createRouter([]), { matchAll: true }).toString())).code,
+      (await format("snapshot.mjs", compileRouter(createRouter([]), { matchAll: true }).toString()))
+        .code,
     ).toMatchFileSnapshot(".snapshot/compiled-all-empty.mjs");
   });
 

@@ -50,9 +50,9 @@ describe("route matching", () => {
   });
 
   it("snapshot (compiled)", async () => {
-    await expect(((await format("snapshot.mjs", compiledLookup.toString())).code)).toMatchFileSnapshot(
-      ".snapshot/compiled-jit.mjs",
-    );
+    await expect(
+      (await format("snapshot.mjs", compiledLookup.toString())).code,
+    ).toMatchFileSnapshot(".snapshot/compiled-jit.mjs");
 
     await expect(
       (await format("snapshot.mjs", compileRouterToString(router, "findRoute"))).code,
