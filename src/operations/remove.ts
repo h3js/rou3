@@ -1,5 +1,12 @@
+import { expandGroupDelimiters } from "../_group-delimiters.ts";
+import { hasSegmentWildcard } from "../_segment-wildcards.ts";
 import type { RouterContext, Node } from "../types.ts";
-import { splitPath } from "./_utils.ts";
+import {
+  decodeEscaped,
+  encodeEscapes,
+  expandModifiers,
+  splitPath,
+} from "./_utils.ts";
 
 /**
  * Remove a route from the router context.
@@ -9,8 +16,27 @@ export function removeRoute<T>(
   method: string,
   path: string,
 ): void {
+  const groupExpanded = expandGroupDelimiters(path);
+  if (groupExpanded) {
+    for (const expandedPath of groupExpanded) {
+      removeRoute(ctx, method, expandedPath);
+    }
+    return;
+  }
+
+  path = encodeEscapes(path);
+
   const segments = splitPath(path);
-  return _remove(ctx.root, method || "", segments, 0);
+
+  const modExpanded = expandModifiers(segments);
+  if (modExpanded) {
+    for (const expandedPath of modExpanded) {
+      removeRoute(ctx, method, expandedPath);
+    }
+    return;
+  }
+
+  _remove(ctx.root, method || "", segments, 0);
 }
 
 function _remove(
@@ -31,17 +57,6 @@ function _remove(
 
   const segment = segments[index];
 
-  // Param
-  if (segment === "*") {
-    if (node.param) {
-      _remove(node.param, method, segments, index + 1);
-      if (_isEmptyNode(node.param)) {
-        node.param = undefined;
-      }
-    }
-    return;
-  }
-
   // Wildcard
   if (segment.startsWith("**")) {
     if (node.wildcard) {
@@ -53,17 +68,38 @@ function _remove(
     return;
   }
 
+  // Param
+  if (_isParamSegment(segment)) {
+    if (node.param) {
+      _remove(node.param, method, segments, index + 1);
+      if (_isEmptyNode(node.param)) {
+        node.param = undefined;
+      }
+    }
+    return;
+  }
+
   // Static
-  const childNode = node.static?.[segment];
+  const decodedSegment = decodeEscaped(segment);
+  const childNode = node.static?.[decodedSegment];
   if (childNode) {
     _remove(childNode, method, segments, index + 1);
     if (_isEmptyNode(childNode)) {
-      delete node.static![segment];
+      delete node.static![decodedSegment];
       if (Object.keys(node.static!).length === 0) {
         node.static = undefined;
       }
     }
   }
+}
+
+function _isParamSegment(segment: string): boolean {
+  return (
+    segment === "*" ||
+    segment.includes(":") ||
+    segment.includes("(") ||
+    hasSegmentWildcard(segment)
+  );
 }
 
 function _isEmptyNode(node: Node) {

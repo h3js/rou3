@@ -1,6 +1,17 @@
+import { expandGroupDelimiters } from "../_group-delimiters.ts";
+import {
+  hasSegmentWildcard,
+  replaceSegmentWildcards,
+  toUnnamedGroupKey,
+} from "../_segment-wildcards.ts";
 import { NullProtoObj } from "../object.ts";
 import type { RouterContext, ParamsIndexMap } from "../types.ts";
-import { splitPath } from "./_utils.ts";
+import {
+  decodeEscaped,
+  encodeEscapes,
+  expandModifiers,
+  splitPath,
+} from "./_utils.ts";
 
 /**
  * Add a route to the router context.
@@ -16,9 +27,26 @@ export function addRoute<T>(
     path = `/${path}`;
   }
 
-  path = path.replace(/\\:/g, "%3A");
+  const groupExpanded = expandGroupDelimiters(path);
+  if (groupExpanded) {
+    for (const expandedPath of groupExpanded) {
+      addRoute(ctx, method, expandedPath, data);
+    }
+    return;
+  }
+
+  path = encodeEscapes(path);
 
   const segments = splitPath(path);
+
+  // Expand modifiers (:name?, :name+, :name*) into multiple route entries
+  const expanded = expandModifiers(segments);
+  if (expanded) {
+    for (const p of expanded) {
+      addRoute(ctx, method, p, data);
+    }
+    return;
+  }
 
   let node = ctx.root;
 
@@ -45,22 +73,31 @@ export function addRoute<T>(
     }
 
     // Param
-    if (segment === "*" || segment.includes(":")) {
+    if (
+      segment === "*" ||
+      segment.includes(":") ||
+      segment.includes("(") ||
+      hasSegmentWildcard(segment)
+    ) {
       if (!node.param) {
         node.param = { key: "*" };
       }
       node = node.param;
       if (segment === "*") {
-        paramsMap.push([i, `_${_unnamedParamIndex++}`, true /* optional */]);
+        paramsMap.push([i, String(_unnamedParamIndex++), true /* optional */]);
+      } else if (
+        segment.includes(":", 1) ||
+        segment.includes("(") ||
+        hasSegmentWildcard(segment) ||
+        !/^:\w+$/.test(segment)
+      ) {
+        const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex);
+        _unnamedParamIndex = nextIndex;
+        paramsRegexp[i] = regexp;
+        node.hasRegexParam = true;
+        paramsMap.push([i, regexp, false]);
       } else {
-        if (segment.includes(":", 1)) {
-          const regexp = getParamRegexp(segment);
-          paramsRegexp[i] = regexp;
-          node.hasRegexParam = true;
-          paramsMap.push([i, regexp, false]);
-        } else {
-          paramsMap.push([i, segment.slice(1), false]);
-        }
+        paramsMap.push([i, segment.slice(1), false]);
       }
       continue;
     }
@@ -71,6 +108,7 @@ export function addRoute<T>(
     } else if (segment === "\\*\\*") {
       segment = segments[i] = "**";
     }
+    segment = segments[i] = decodeEscaped(segment);
     const child = node.static?.[segment];
     if (child) {
       node = child;
@@ -102,9 +140,37 @@ export function addRoute<T>(
   }
 }
 
-function getParamRegexp(segment: string): RegExp {
-  const regex = segment
-    .replace(/:(\w+)/g, (_, id) => `(?<${id}>[^/]+)`)
-    .replace(/\./g, "\\.");
-  return new RegExp(`^${regex}$`);
+function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
+  let _i = unnamedStart;
+  // Replace URLPattern \x escapes outside (...) with \uFFFE placeholder
+  let _s = "",
+    _d = 0;
+  for (let j = 0; j < segment.length; j++) {
+    const c = segment.charCodeAt(j);
+    if (c === 40) _d++;
+    else if (c === 41 && _d > 0) _d--;
+    else if (c === 92 && _d === 0 && j + 1 < segment.length) {
+      const n = segment[j + 1];
+      if (n !== ":" && n !== "(" && n !== "*" && n !== "\\") {
+        _s += "\uFFFE" + n;
+        j++;
+        continue;
+      }
+    }
+    _s += segment[j];
+  }
+  [_s, _i] = replaceSegmentWildcards(_s, _i);
+
+  const regex = _s
+    .replace(
+      /:(\w+)(?:\(([^)]*)\))?/g,
+      (_, id, p) => `(?<${id}>${p || "[^/]+"})`,
+    )
+    .replace(/\((?![?<])/g, () => `(?<${toUnnamedGroupKey(_i++)}>`)
+    .replace(/\./g, "\\.")
+    .replace(/\uFFFE(.)/g, (_, c) =>
+      /[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c,
+    );
+
+  return [new RegExp(`^${regex}$`), _i];
 }

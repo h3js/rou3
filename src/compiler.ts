@@ -1,7 +1,9 @@
+import { UNNAMED_GROUP_PREFIX } from "./_segment-wildcards.ts";
 import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 
 export interface RouterCompilerOptions<T = any> {
   matchAll?: boolean;
+  normalize?: boolean;
   serialize?: (data: T) => string;
 }
 
@@ -106,7 +108,15 @@ function compileRouteMatch(ctx: CompilerContext): string {
     return ctx.opts?.matchAll ? `return [];` : "";
   }
 
-  return `${ctx.opts?.matchAll ? `let r=[];` : ""}if(p.charCodeAt(p.length-1)===47)p=p.slice(0,-1)||"/";${code}${ctx.opts?.matchAll ? "return r;" : ""}`;
+  const normalizeHelper = code.includes("_normalizeGroups(")
+    ? `const _prefix=${JSON.stringify(UNNAMED_GROUP_PREFIX)},_prefixLen=${UNNAMED_GROUP_PREFIX.length};const _normalizeGroups=(g)=>{if(!g)return g;for(const k in g){if(k.startsWith(_prefix)){g[k.slice(_prefixLen)]=g[k];delete g[k]}}return g;};`
+    : "";
+
+  const normalizePathHelper = ctx.opts?.normalize
+    ? `if(p.includes("/.")){let _r=[];for(let _v of p.split("/")){if(_v===".")continue;_v===".."&&_r.length>1?_r.pop():_r.push(_v)}p=_r.join("/")||"/"}`
+    : "";
+
+  return `${ctx.opts?.matchAll ? `let r=[];` : ""}${normalizeHelper}${normalizePathHelper}if(p.charCodeAt(p.length-1)===47)p=p.slice(0,-1)||"/";${code}${ctx.opts?.matchAll ? "return r;" : ""}`;
 }
 
 function compileMethodMatch(
@@ -166,7 +176,7 @@ function compileFinalMatch(
       ret +=
         typeof map[1] === "string"
           ? `${JSON.stringify(map[1])}:${params[i]},`
-          : `...(${map[1].toString()}.exec(${params[i]}))?.groups,`;
+          : `..._normalizeGroups((${map[1].toString()}.exec(${params[i]}))?.groups),`;
     }
     ret += "}";
   }

@@ -7,7 +7,7 @@ import * as rou3CLatest from "rou3-latest/compiler";
 
 export function createInstances() {
   const router = rou3.createRouter();
-  const routerLatest = rou3.createRouter();
+  const routerLatest = rou3Latest.createRouter();
   for (const route of routes) {
     rou3.addRoute(
       router,
@@ -46,6 +46,39 @@ export function createInstances() {
     ],
     process.argv.includes("--max") && ["maximum", createFastestRouter()],
   ].filter(Boolean) as [string, (method: string, path: string) => any][];
+}
+
+export function createAddRouteInstances() {
+  return [
+    [
+      "addRoute",
+      () => {
+        const router = rou3.createRouter();
+        for (const route of routes) {
+          rou3.addRoute(
+            router,
+            route.method,
+            route.path,
+            `[${route.method}] ${route.path}`,
+          );
+        }
+      },
+    ],
+    [
+      "addRouteLatest",
+      () => {
+        const router = rou3Latest.createRouter();
+        for (const route of routes) {
+          rou3Latest.addRoute(
+            router,
+            route.method,
+            route.path,
+            `[${route.method}] ${route.path}`,
+          );
+        }
+      },
+    ],
+  ] as [string, () => void][];
 }
 
 function createFastestRouter(): (method: string, path: string) => any {

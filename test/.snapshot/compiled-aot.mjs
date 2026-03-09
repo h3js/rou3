@@ -27,7 +27,7 @@ const findRoute = /* @__PURE__ */ (() => {
       if (m === "GET") return { data: $4 };
     } else if (p === "/another/path") {
       if (m === "GET") return { data: $5 };
-    } else if (p === "/static%3Apath/*/**") {
+    } else if (p === "/static:path/*/**") {
       if (m === "GET") return { data: $6 };
     }
     let s = p.split("/"),
@@ -37,7 +37,7 @@ const findRoute = /* @__PURE__ */ (() => {
         if (l > 2) {
           if (s[2] === "foo") {
             if (l === 4 || l === 3) {
-              if (m === "GET") return { data: $7, params: { _0: s[3] } };
+              if (m === "GET") return { data: $7, params: { 0: s[3] } };
             }
             if (m === "GET")
               return { data: $8, params: { _: s.slice(3).join("/") } };

@@ -39,7 +39,7 @@ type ExtractWildcards<
   : TPath extends `${string}*${infer Rest}` // Wildcard patterns
     ? Rest extends `*` // Double wildcard (**) -> "_"
       ? `_`
-      : `_${Count["length"]}` | ExtractWildcards<Rest, [...Count, unknown]> // Single wildcard (*) -> "_0", "_1", etc.
+      : `${Count["length"]}` | ExtractWildcards<Rest, [...Count, unknown]> // Single wildcard (*) -> "0", "1", etc.
     : TPath extends `${string}/${infer Rest}` // Continue parsing path segments
       ? ExtractWildcards<Rest, Count>
       : never; // No more wildcards found

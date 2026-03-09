@@ -15,7 +15,7 @@
       if (l > 3) {
         if (s[3] === "baz") {
           if (l === 4) {
-            if (m === "GET") r.unshift({ data: $3, params: { _0: s[2] } });
+            if (m === "GET") r.unshift({ data: $3, params: { 0: s[2] } });
           }
         }
       }

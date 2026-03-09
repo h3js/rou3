@@ -94,6 +94,72 @@ findRoute(router, "GET", "/");
 > [!TIP]
 > If you need to register a pattern containing literal `:` or `*`, you can escape them with `\\`. For example, `/static\\:path/\\*\\*` matches only the static `/static:path/**` route.
 
+## Route Patterns
+
+rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API)-compatible syntax.
+
+| Pattern | Example Match | Params |
+| --- | --- | --- |
+| `/path/to/resource` | `/path/to/resource` | `{}` |
+| `/users/:name` | `/users/foo` | `{ name: "foo" }` |
+| `/path/**` | `/path/foo/bar` | `{}` |
+| `/path/**:rest` | `/path/foo/bar` | `{ rest: "foo/bar" }` |
+| `/files/*.png` | `/files/icon.png` | `{ "0": "icon" }` |
+| `/files/file-*-*.png` | `/files/file-a-b.png` | `{ "0": "a", "1": "b" }` |
+| `/users/:id(\\d+)` | `/users/123` | `{ id: "123" }` |
+| `/files/:ext(png\|jpg)` | `/files/png` | `{ ext: "png" }` |
+| `/path/(\\d+)` | `/path/123` | `{ "0": "123" }` |
+| `/users/:id?` | `/users` or `/users/123` | `{}` or `{ id: "123" }` |
+| `/files/:path+` | `/files/a/b/c` | `{ path: "a/b/c" }` |
+| `/files/:path*` | `/files` or `/files/a/b` | `{}` or `{ path: "a/b" }` |
+| `/book{s}?` | `/book` or `/books` | `{}` |
+| `/blog/:id(\\d+){-:title}?` | `/blog/123` or `/blog/123-my-post` | `{ id: "123" }` or `{ id: "123", title: "my-post" }` |
+
+- **Named params** (`:name`) match a single segment.
+- **Single-segment wildcards** (`*`) capture unnamed params (`0`, `1`, ...) and can be used as full or mid-segment tokens (for example `/*` or `/*.png`).
+- **Wildcards** (`**`) match zero or more segments. Use `**:name` to capture.
+- **Regex constraints** (`:name(regex)`) restrict matching. Constrained and unconstrained params can coexist on the same node (constrained checked first).
+- **Unnamed groups** (`(regex)`) capture into auto-indexed keys `0`, `1`, etc.
+- **Modifiers:** `:name?` (optional), `:name+` (one or more), `:name*` (zero or more). Can combine with regex: `:id(\d+)?`.
+- **Non-capturing groups** (`{...}`): supported with inline (`/foo{bar}`) and optional (`/foo{bar}?`) forms.
+- **Current limitation:** repeating non-capturing groups (`{...}+`, `{...}*`) are supported only within a single segment (no `/` inside the group body).
+- **Backslash escaping** (`\`): escape special characters like `:`, `*`, `(`, `)`, `{`, `}` with a backslash (e.g., `/static\:path` matches literal `/static:path`).
+
+### Differences from URLPattern
+
+rou3 aims for URLPattern-compatible syntax but has intentional differences due to its radix-tree design:
+
+| Feature | URLPattern | rou3 |
+| --- | --- | --- |
+| `*` (single star) | Greedy catch-all `(.*)` across `/` | Single-segment unnamed param `([^/]*)` |
+| `**` (double star) | Literal `**` | Catch-all wildcard (zero or more segments) |
+| `(.*)` in segment | Greedy match across `/` | Segment-scoped (does not cross `/`) |
+| `{...}+` / `{...}*` groups | Cross-segment group repetition | Only supported within a single segment (no `/` in group body) |
+| Path normalization (`.`/`..`) | Resolves `.`/`..` in input paths | Not done by default (opt-in with `{ normalize: true }`) |
+| Case sensitivity | Can be case-insensitive | Always case-sensitive |
+| Non-`/`-prefixed paths | Supported | Paths must start with `/` |
+| Unicode param names | Supports Unicode identifiers | Params use `\w` (ASCII word chars only) |
+| Percent-encoding | Normalizes `%xx` sequences | Does not decode percent-encoded input |
+
+### Path normalization
+
+By default, `findRoute` and `findAllRoutes` do **not** resolve `.`/`..` segments in input paths. If your input paths may contain relative segments, enable normalization:
+
+```js
+findRoute(router, "GET", "/foo/bar/../baz", { normalize: true });
+// Matches "/foo/baz"
+
+findAllRoutes(router, "GET", "/foo/./bar", { normalize: true });
+// Matches "/foo/bar"
+```
+
+The compiled router also supports this via the `normalize` option:
+
+```js
+const match = compileRouter(router, { normalize: true });
+match("GET", "/foo/bar/../baz"); // Matches "/foo/baz"
+```
+
 ## Compiler
 
 <!-- automd:jsdocs src="./src/compiler.ts" -->

@@ -1,8 +1,9 @@
 import { bench, group, summary, compact, run, do_not_optimize } from "mitata";
 import { requests } from "./input.ts";
-import { createInstances } from "./impl.ts";
+import { createInstances, createAddRouteInstances } from "./impl.ts";
 
 const instances = createInstances();
+const addRouteInstances = createAddRouteInstances();
 
 const createCase = <T>(name: string, requests: T, fn: (requests: T) => any) =>
   bench(name, function* () {
@@ -11,6 +12,18 @@ const createCase = <T>(name: string, requests: T, fn: (requests: T) => any) =>
       bench: fn,
     };
   });
+
+group("addRoute", () => {
+  summary(() => {
+    compact(() => {
+      for (const [name, _addRoutes] of addRouteInstances) {
+        bench(name, () => {
+          do_not_optimize(_addRoutes());
+        });
+      }
+    });
+  });
+});
 
 group("dynamic routes", () => {
   summary(() => {
