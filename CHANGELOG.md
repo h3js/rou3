@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.8.1
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.8.0...v0.8.1)
+
+### 🚀 Enhancements
+
+- Support hyphens in route parameter names ([8dfaa48](https://github.com/h3js/rou3/commit/8dfaa48))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.8.0
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.7.12...v0.8.0)
