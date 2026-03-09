@@ -1,5 +1,9 @@
 import { expandGroupDelimiters } from "./_group-delimiters.ts";
 import {
+  replaceEscapesOutsideGroups,
+  resolveEscapePlaceholders,
+} from "./_escape.ts";
+import {
   hasSegmentWildcard,
   replaceSegmentWildcards,
 } from "./_segment-wildcards.ts";
@@ -49,27 +53,54 @@ function _routeToRegExp(route: string): RegExp {
               (_, id, pattern) => `(?<${id}>${pattern || "[^/]+"})`,
             )
             .replace(/\./g, "\\.");
-          reSegments.push(`?${inner}?`);
+          if (reSegments.length > 0) {
+            // Append optional group to previous segment: /foo(?:/<inner>)?
+            const prevQ: string = reSegments.pop()!;
+            reSegments.push(`${prevQ}(?:/${inner})?`);
+          } else {
+            reSegments.push(`?${inner}?`);
+          }
           continue;
         }
 
         // + or * (preserve inline constraint when present)
         const pattern = base.match(/:(\w+)(?:\(([^)]*)\))?/)?.[2];
-        if (pattern) {
-          const repeated = `${pattern}(?:/${pattern})*`;
-          reSegments.push(
-            mod === "+"
-              ? `?(?<${name}>${repeated})`
-              : `?(?<${name}>${repeated})?`,
-          );
+        if (reSegments.length > 0) {
+          const prevMod: string = reSegments.pop()!;
+          if (pattern) {
+            const repeated = `${pattern}(?:/${pattern})*`;
+            reSegments.push(
+              mod === "+"
+                ? `${prevMod}/(?<${name}>${repeated})`
+                : `${prevMod}(?:/(?<${name}>${repeated}))?`,
+            );
+          } else {
+            reSegments.push(
+              mod === "+"
+                ? `${prevMod}/(?<${name}>.+)`
+                : `${prevMod}(?:/(?<${name}>.*))?`,
+            );
+          }
         } else {
-          reSegments.push(mod === "+" ? `?(?<${name}>.+)` : `?(?<${name}>.*)`);
+          if (pattern) {
+            const repeated = `${pattern}(?:/${pattern})*`;
+            reSegments.push(
+              mod === "+"
+                ? `?(?<${name}>${repeated})`
+                : `?(?<${name}>${repeated})?`,
+            );
+          } else {
+            reSegments.push(
+              mod === "+" ? `?(?<${name}>.+)` : `?(?<${name}>.*)`,
+            );
+          }
         }
 
         continue;
       }
 
-      let dynamicSegment = segment;
+      // Strip URLPattern backslash escapes before regex processing
+      let dynamicSegment = replaceEscapesOutsideGroups(segment);
       [dynamicSegment, idCtr] = replaceSegmentWildcards(
         dynamicSegment,
         idCtr,
@@ -77,19 +108,23 @@ function _routeToRegExp(route: string): RegExp {
       );
 
       reSegments.push(
-        dynamicSegment
-          .replace(
-            /:(\w+)(?:\(([^)]*)\))?/g,
-            (_, id, pattern) => `(?<${id}>${pattern || "[^/]+"})`,
-          )
-          .replace(
-            /(^|[^\\])\((?![?<])/g,
-            (_, p) => `${p}(?<${toRegExpUnnamedKey(idCtr++)}>`,
-          )
-          .replace(/\./g, "\\."),
+        resolveEscapePlaceholders(
+          dynamicSegment
+            .replace(
+              /:(\w+)(?:\(([^)]*)\))?/g,
+              (_, id, pattern) => `(?<${id}>${pattern || "[^/]+"})`,
+            )
+            .replace(
+              /(^|[^\\])\((?![?<])/g,
+              (_, p) => `${p}(?<${toRegExpUnnamedKey(idCtr++)}>`,
+            )
+            .replace(/\./g, "\\."),
+        ),
       );
     } else {
-      reSegments.push(segment);
+      reSegments.push(
+        segment.replace(/\\(.)/g, "$1").replace(/[.*+?^${}()|[\]]/g, "\\$&"),
+      );
     }
   }
 

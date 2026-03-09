@@ -13,7 +13,9 @@ src/
   types.ts            # TypeScript interfaces & param inference types
   context.ts          # createRouter() factory
   object.ts           # NullProtoObj (null-prototype object constructor)
+  _escape.ts          # URLPattern backslash escape handling (placeholder approach)
   _group-delimiters.ts# Non-capturing group ({...}) expansion helper
+  _segment-wildcards.ts# Wildcard segment capture handling
   regexp.ts           # routeToRegExp() utility
   compiler.ts         # JIT/AOT compiler (generates optimized match functions)
   operations/
@@ -21,7 +23,7 @@ src/
     find.ts           # findRoute() - single-match lookup
     find-all.ts       # findAllRoutes() - multi-match lookup
     remove.ts         # removeRoute() - remove routes from tree
-    _utils.ts         # Shared internal utilities
+    _utils.ts         # Shared utilities (escaping, path splitting, normalization)
 test/
   router.test.ts      # Core router tests
   find.test.ts        # Route matching tests (interpreter vs compiled)
@@ -87,6 +89,20 @@ interface Node<T> {
 - Supported forms: `{...}` and `{...}?` (plus single-segment `{...}+` / `{...}*` converted to `(?:...)+/*` regex fragments).
 - Limitation: `{...}+` / `{...}*` are rejected when group body contains `/` (cross-segment repetition unsupported in radix tree).
 
+### URLPattern backslash escaping
+
+Two separate escape systems handle `\x` in route patterns:
+
+1. **Router escape encoding** (`_utils.ts`): `encodeEscapes()` converts `\:`, `\(`, `\)`, `\{`, `\}` to `\uFFFD` + single-char placeholders (A-E) before segment splitting, preventing these chars from being interpreted as route syntax. `decodeEscaped()` converts them back for static node keys. Other `\x` (like `\*`) are left for existing `segment === "\\*"` handling.
+
+2. **Regex escape handling** (`_escape.ts`): `replaceEscapesOutsideGroups()` replaces `\x` outside `(...)` groups with `\uFFFE` placeholder, preserving regex syntax inside groups (e.g., `\d` in `(\d+)`). `resolveEscapePlaceholders()` then converts placeholders to regex-safe literals. Used by `routeToRegExp()` and `getParamRegexp()` in `add.ts`.
+
+Key invariant: `\uFFFD` (U+FFFD) is used for router-level escaping, `\uFFFE` (U+FFFE) for regex-level escaping — they must not collide.
+
+### Input path normalization
+
+`normalizePath()` in `_utils.ts` resolves `.` and `..` segments in lookup paths (fast-path: skip if no `/.` found). Both `findRoute()` and `findAllRoutes()` normalize before matching. The compiler inlines equivalent logic in generated code.
+
 ### Wildcard segment captures
 
 - **Breaking change:** unnamed captures now use URLPattern-style numeric keys (`"0"`, `"1"`, ...) instead of legacy `_0`, `_1`, ...
@@ -119,6 +135,7 @@ pnpm bench:deno        # Benchmarks (deno)
 - **Snapshots:** Tree structure and compiled code snapshots
 - **Type tests:** `vitest typecheck` via `types.test-d.ts`
 - Run a single test: `pnpm vitest run test/<file>.test.ts`
+- **WPT compat tests:** `test/wpt.test.ts` validates URLPattern compatibility using Web Platform Test data. Known diffs are tracked in `KNOWN_DIFFS`, `REGEXP_ONLY_KNOWN_DIFFS`, and `ROUTER_KNOWN_DIFFS` sets with reason comments.
 
 ## Code Conventions
 

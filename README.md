@@ -123,6 +123,42 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 - **Modifiers:** `:name?` (optional), `:name+` (one or more), `:name*` (zero or more). Can combine with regex: `:id(\d+)?`.
 - **Non-capturing groups** (`{...}`): supported with inline (`/foo{bar}`) and optional (`/foo{bar}?`) forms.
 - **Current limitation:** repeating non-capturing groups (`{...}+`, `{...}*`) are supported only within a single segment (no `/` inside the group body).
+- **Backslash escaping** (`\`): escape special characters like `:`, `*`, `(`, `)`, `{`, `}` with a backslash (e.g., `/static\:path` matches literal `/static:path`).
+
+### Differences from URLPattern
+
+rou3 aims for URLPattern-compatible syntax but has intentional differences due to its radix-tree design:
+
+| Feature | URLPattern | rou3 |
+| --- | --- | --- |
+| `*` (single star) | Greedy catch-all `(.*)` across `/` | Single-segment unnamed param `([^/]*)` |
+| `**` (double star) | Literal `**` | Catch-all wildcard (zero or more segments) |
+| `(.*)` in segment | Greedy match across `/` | Segment-scoped (does not cross `/`) |
+| `{...}+` / `{...}*` groups | Cross-segment group repetition | Only supported within a single segment (no `/` in group body) |
+| Path normalization (`.`/`..`) | Resolves `.`/`..` in input paths | Not done by default (opt-in with `{ normalize: true }`) |
+| Case sensitivity | Can be case-insensitive | Always case-sensitive |
+| Non-`/`-prefixed paths | Supported | Paths must start with `/` |
+| Unicode param names | Supports Unicode identifiers | Params use `\w` (ASCII word chars only) |
+| Percent-encoding | Normalizes `%xx` sequences | Does not decode percent-encoded input |
+
+### Path normalization
+
+By default, `findRoute` and `findAllRoutes` do **not** resolve `.`/`..` segments in input paths. If your input paths may contain relative segments, enable normalization:
+
+```js
+findRoute(router, "GET", "/foo/bar/../baz", { normalize: true });
+// Matches "/foo/baz"
+
+findAllRoutes(router, "GET", "/foo/./bar", { normalize: true });
+// Matches "/foo/bar"
+```
+
+The compiled router also supports this via the `normalize` option:
+
+```js
+const match = compileRouter(router, { normalize: true });
+match("GET", "/foo/bar/../baz"); // Matches "/foo/baz"
+```
 
 ## Compiler
 

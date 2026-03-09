@@ -27,7 +27,7 @@ const findRoute = /* @__PURE__ */ (() => {
       if (m === "GET") return { data: $4 };
     } else if (p === "/another/path") {
       if (m === "GET") return { data: $5 };
-    } else if (p === "/static%3Apath/*/**") {
+    } else if (p === "/static:path/*/**") {
       if (m === "GET") return { data: $6 };
     }
     let s = p.split("/"),

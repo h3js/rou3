@@ -739,7 +739,7 @@ describe("Router insert", () => {
           │       ├── /v1 ┈> [GET] /api/v1
           │       ├── /v2 ┈> [GET] /api/v2
           │       ├── /v3 ┈> [GET] /api/v3, [*] /api/v3(overridden)
-          ├── /static%3Apath
+          ├── /static:path
           │       ├── /** ┈> [GET] /static\\:path/\\*\\*"
     `);
   });

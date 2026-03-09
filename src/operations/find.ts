@@ -4,7 +4,7 @@ import type {
   Node,
   MethodData,
 } from "../types.ts";
-import { getMatchParams, splitPath } from "./_utils.ts";
+import { getMatchParams, normalizePath, splitPath } from "./_utils.ts";
 
 /**
  * Find a route by path.
@@ -13,8 +13,11 @@ export function findRoute<T = unknown>(
   ctx: RouterContext<T>,
   method: string = "",
   path: string,
-  opts?: { params?: boolean },
+  opts?: { params?: boolean; normalize?: boolean },
 ): MatchedRoute<T> | undefined {
+  if (opts?.normalize) {
+    path = normalizePath(path);
+  }
   if (path.charCodeAt(path.length - 1) === 47 /* '/' */) {
     path = path.slice(0, -1);
   }

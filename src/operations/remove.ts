@@ -1,7 +1,12 @@
 import { expandGroupDelimiters } from "../_group-delimiters.ts";
 import { hasSegmentWildcard } from "../_segment-wildcards.ts";
 import type { RouterContext, Node } from "../types.ts";
-import { splitPath } from "./_utils.ts";
+import {
+  decodeEscaped,
+  encodeEscapes,
+  expandModifiers,
+  splitPath,
+} from "./_utils.ts";
 
 /**
  * Remove a route from the router context.
@@ -19,16 +24,11 @@ export function removeRoute<T>(
     return;
   }
 
-  path = path
-    .replace(/\\:/g, "%3A")
-    .replace(/\\\(/g, "%28")
-    .replace(/\\\)/g, "%29")
-    .replace(/\\\{/g, "%7B")
-    .replace(/\\\}/g, "%7D");
+  path = encodeEscapes(path);
 
   const segments = splitPath(path);
 
-  const modExpanded = _expandModifiers(segments);
+  const modExpanded = expandModifiers(segments);
   if (modExpanded) {
     for (const expandedPath of modExpanded) {
       removeRoute(ctx, method, expandedPath);
@@ -80,11 +80,12 @@ function _remove(
   }
 
   // Static
-  const childNode = node.static?.[segment];
+  const decodedSegment = decodeEscaped(segment);
+  const childNode = node.static?.[decodedSegment];
   if (childNode) {
     _remove(childNode, method, segments, index + 1);
     if (_isEmptyNode(childNode)) {
-      delete node.static![segment];
+      delete node.static![decodedSegment];
       if (Object.keys(node.static!).length === 0) {
         node.static = undefined;
       }
@@ -108,23 +109,4 @@ function _isEmptyNode(node: Node) {
     node.param === undefined &&
     node.wildcard === undefined
   );
-}
-
-function _expandModifiers(segments: string[]): string[] | undefined {
-  for (let i = 0; i < segments.length; i++) {
-    const m = segments[i].match(/^(.*:\w+(?:\([^)]*\))?)([?+*])$/);
-    if (!m) continue;
-    const pre = segments.slice(0, i);
-    const suf = segments.slice(i + 1);
-    if (m[2] === "?") {
-      return [
-        "/" + pre.concat(m[1]).concat(suf).join("/"),
-        "/" + pre.concat(suf).join("/"),
-      ];
-    }
-    const name = m[1].match(/:(\w+)/)?.[1] || "_";
-    const wc = "/" + [...pre, `**:${name}`, ...suf].join("/");
-    const without = "/" + [...pre, ...suf].join("/");
-    return m[2] === "+" ? [wc] : [wc, without];
-  }
 }

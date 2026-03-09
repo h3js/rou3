@@ -6,7 +6,12 @@ import {
 } from "../_segment-wildcards.ts";
 import { NullProtoObj } from "../object.ts";
 import type { RouterContext, ParamsIndexMap } from "../types.ts";
-import { splitPath } from "./_utils.ts";
+import {
+  decodeEscaped,
+  encodeEscapes,
+  expandModifiers,
+  splitPath,
+} from "./_utils.ts";
 
 /**
  * Add a route to the router context.
@@ -30,17 +35,12 @@ export function addRoute<T>(
     return;
   }
 
-  path = path
-    .replace(/\\:/g, "%3A")
-    .replace(/\\\(/g, "%28")
-    .replace(/\\\)/g, "%29")
-    .replace(/\\\{/g, "%7B")
-    .replace(/\\\}/g, "%7D");
+  path = encodeEscapes(path);
 
   const segments = splitPath(path);
 
   // Expand modifiers (:name?, :name+, :name*) into multiple route entries
-  const expanded = _expandModifiers(segments);
+  const expanded = expandModifiers(segments);
   if (expanded) {
     for (const p of expanded) {
       addRoute(ctx, method, p, data);
@@ -88,7 +88,8 @@ export function addRoute<T>(
       } else if (
         segment.includes(":", 1) ||
         segment.includes("(") ||
-        hasSegmentWildcard(segment)
+        hasSegmentWildcard(segment) ||
+        !/^:\w+$/.test(segment)
       ) {
         const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex);
         _unnamedParamIndex = nextIndex;
@@ -107,6 +108,7 @@ export function addRoute<T>(
     } else if (segment === "\\*\\*") {
       segment = segments[i] = "**";
     }
+    segment = segments[i] = decodeEscaped(segment);
     const child = node.static?.[segment];
     if (child) {
       node = child;
@@ -138,36 +140,37 @@ export function addRoute<T>(
   }
 }
 
-function _expandModifiers(segments: string[]): string[] | undefined {
-  for (let i = 0; i < segments.length; i++) {
-    const m = segments[i].match(/^(.*:\w+(?:\([^)]*\))?)([?+*])$/);
-    if (!m) continue;
-    const pre = segments.slice(0, i);
-    const suf = segments.slice(i + 1);
-    if (m[2] === "?") {
-      return [
-        "/" + pre.concat(m[1]).concat(suf).join("/"),
-        "/" + pre.concat(suf).join("/"),
-      ];
-    }
-    const name = m[1].match(/:(\w+)/)?.[1] || "_";
-    const wc = "/" + [...pre, `**:${name}`, ...suf].join("/");
-    const without = "/" + [...pre, ...suf].join("/");
-    return m[2] === "+" ? [wc] : [wc, without];
-  }
-}
-
 function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
   let _i = unnamedStart;
-  [segment, _i] = replaceSegmentWildcards(segment, _i);
+  // Replace URLPattern \x escapes outside (...) with \uFFFE placeholder
+  let _s = "",
+    _d = 0;
+  for (let j = 0; j < segment.length; j++) {
+    const c = segment.charCodeAt(j);
+    if (c === 40) _d++;
+    else if (c === 41 && _d > 0) _d--;
+    else if (c === 92 && _d === 0 && j + 1 < segment.length) {
+      const n = segment[j + 1];
+      if (n !== ":" && n !== "(" && n !== "*" && n !== "\\") {
+        _s += "\uFFFE" + n;
+        j++;
+        continue;
+      }
+    }
+    _s += segment[j];
+  }
+  [_s, _i] = replaceSegmentWildcards(_s, _i);
 
-  const regex = segment
+  const regex = _s
     .replace(
       /:(\w+)(?:\(([^)]*)\))?/g,
-      (_, id, pattern) => `(?<${id}>${pattern || "[^/]+"})`,
+      (_, id, p) => `(?<${id}>${p || "[^/]+"})`,
     )
     .replace(/\((?![?<])/g, () => `(?<${toUnnamedGroupKey(_i++)}>`)
-    .replace(/\./g, "\\.");
+    .replace(/\./g, "\\.")
+    .replace(/\uFFFE(.)/g, (_, c) =>
+      /[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c,
+    );
 
   return [new RegExp(`^${regex}$`), _i];
 }

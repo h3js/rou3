@@ -42,7 +42,7 @@ describe("route matching", () => {
           │       ├── /path ┈> [GET] /another/path
           ├── /wildcard
           │       ├── /** ┈> [GET] /wildcard/**
-          ├── /static%3Apath
+          ├── /static:path
           │       ├── /*
           │       │       ├── /** ┈> [GET] /static\\:path/\\*/\\*\\*
           ├── /** ┈> [GET] /**"
@@ -139,11 +139,8 @@ describe("route matching", () => {
         params: { _: "any/deep/path" },
       });
       // Escaped characters
-      expect(match("GET", "/static%3Apath/*/**")).toMatchObject({
+      expect(match("GET", "/static:path/*/**")).toMatchObject({
         data: { path: "/static\\:path/\\*/\\*\\*" },
-      });
-      expect(match("GET", "/static:path/some/deep/path")).toMatchObject({
-        data: { path: "/**" }, // should not match static route
       });
     });
   }
@@ -169,7 +166,7 @@ describe("route matching", () => {
           │       ├── /path ┈> [GET] /another/path
           ├── /wildcard
           │       ├── /** ┈> [GET] /wildcard/**
-          ├── /static%3Apath
+          ├── /static:path
           │       ├── /*
           │       │       ├── /** ┈> [GET] /static\\:path/\\*/\\*\\*"
     `);

@@ -7,6 +7,7 @@ import {
 } from "../src/index.ts";
 import { compileRouter } from "../src/compiler.ts";
 import { normalizeUnnamedGroupKey } from "../src/_segment-wildcards.ts";
+import { normalizePath } from "../src/operations/_utils.ts";
 
 // https://github.com/web-platform-tests/wpt/blob/master/urlpattern/resources/urlpatterntestdata.json
 import testData from "./wpt/urlpatterntestdata.json" with { type: "json" };
@@ -165,15 +166,8 @@ const KNOWN_DIFFS = new Set([
   "/foo{/bar}* → /foo/ [match]",
   "/foo{/bar}* → /foo/ [no match]",
 
-  // Input path normalization (`.` / `..`) — rou3 matches literally
-  "/foo/bar → /foo/./bar [match]",
-  "/foo/baz → /foo/bar/../baz [match]",
-
   // Non-`/`-prefixed input — URLPattern normalizes input paths
   "/foo/bar → foo/bar [match]",
-
-  // Backslash escaping — URLPattern `\b` = literal `b`; rou3 keeps `\b` (regex word boundary)
-  "/:foo\\bar → /bazbar [match]",
 
   // Case-insensitive match — rou3 is case-sensitive
   "/foo/bar → /FOO/BAR [match]",
@@ -214,16 +208,12 @@ const KNOWN_DIFFS = new Set([
 // These patterns use syntax that routeToRegExp handles but the radix tree cannot represent
 // Known diffs that only apply to routeToRegExp (router handles these correctly)
 const REGEXP_ONLY_KNOWN_DIFFS = new Set([
-  // `:bar?` / `:bar*` without `/` separator — routeToRegExp generates regex
-  // that differs from URLPattern, but the router's radix tree handles these correctly
-  "/foo/:bar? → /foobar [no match]",
-  "/foo/:bar+ → /foobar [no match]",
-  "/foo/:bar* → /foo [match]",
-  "/foo/:bar* → /foobar [no match]",
-
   // `**` as literal — routeToRegExp treats `**` as catch-all;
   // router also treats `**` as catch-all but doesn't match `/foobar`
   "/foo/** → /foobar [no match]",
+
+  // Non-`/`-prefixed input — router prepends `/` for lookup
+  "/foo/bar → foo/bar [match]",
 ]);
 
 // Patterns that cannot be tested via the router (no leading `/`, unsupported syntax, etc.)
@@ -271,15 +261,6 @@ const ROUTER_KNOWN_DIFFS = new Set([
   "/foo/(.*)+ → /foo/ [match]",
   "/foo/*+ → /foo/ [match]",
   "/foo/(.*)* → /foo/ [match]",
-
-  // Backslash escaping — router doesn't support `\:`, `\{`, `\(` escape syntax
-  "/foo\\: → /foo: [match]",
-  "/foo\\{ → /foo{ [match]",
-  "/foo\\( → /foo( [match]",
-
-  // Dot-suffixed params — router matches differently
-  "/:foo. → /bar. [match]",
-  "/:foo.. → /bar.. [match]",
 ]);
 
 type MatchStrategy = {
@@ -296,7 +277,7 @@ const strategies: MatchStrategy[] = [
     name: "routeToRegExp",
     match(pattern, input) {
       const re = routeToRegExp(pattern);
-      const match = input.match(re);
+      const match = normalizePath(input).match(re);
       if (!match) return { matched: false, params: {} };
       return { matched: true, params: normalizeGroups(match.groups) };
     },
@@ -307,7 +288,7 @@ const strategies: MatchStrategy[] = [
     match(pattern, input) {
       const router = createRouter<{ path: string }>();
       addRoute(router, "GET", pattern, { path: pattern });
-      const result = findRoute(router, "GET", input);
+      const result = findRoute(router, "GET", input, { normalize: true });
       if (!result) return { matched: false, params: {} };
       return { matched: true, params: result.params ?? {} };
     },
@@ -318,7 +299,7 @@ const strategies: MatchStrategy[] = [
     match(pattern, input) {
       const router = createRouter<{ path: string }>();
       addRoute(router, "GET", pattern, { path: pattern });
-      const lookup = compileRouter(router);
+      const lookup = compileRouter(router, { normalize: true });
       const result = lookup("GET", input);
       if (!result) return { matched: false, params: {} };
       return { matched: true, params: result.params ?? {} };

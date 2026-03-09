@@ -95,22 +95,22 @@ describe("routeToRegExp", () => {
       match: [["/path/v2/users", { version: "v2", resource: "users" }]],
     },
     "/path/:id?": {
-      regex: /^\/path\/?(?<id>[^/]+)?\/?$/,
+      regex: /^\/path(?:\/(?<id>[^/]+))?\/?$/,
       match: [["/path/123", { id: "123" }], ["/path"]],
     },
     "/path/:id(\\d+)?": {
-      regex: /^\/path\/?(?<id>\d+)?\/?$/,
+      regex: /^\/path(?:\/(?<id>\d+))?\/?$/,
       match: [["/path/123", { id: "123" }], ["/path"]],
     },
     "/path/:rest+": {
-      regex: /^\/path\/?(?<rest>.+)\/?$/,
+      regex: /^\/path\/(?<rest>.+)\/?$/,
       match: [
         ["/path/a/b", { rest: "a/b" }],
         ["/path/a", { rest: "a" }],
       ],
     },
     "/path/:rest*": {
-      regex: /^\/path\/?(?<rest>.*)\/?$/,
+      regex: /^\/path(?:\/(?<rest>.*))?\/?$/,
       match: [["/path/a/b", { rest: "a/b" }], ["/path"]],
     },
     "/path/(\\d+)": {
@@ -122,14 +122,14 @@ describe("routeToRegExp", () => {
       match: [["/path/png", { "0": "png" }]],
     },
     "/path/:id(\\d+)+": {
-      regex: /^\/path\/?(?<id>\d+(?:\/\d+)*)\/?$/,
+      regex: /^\/path\/(?<id>\d+(?:\/\d+)*)\/?$/,
       match: [
         ["/path/123", { id: "123" }],
         ["/path/123/456", { id: "123/456" }],
       ],
     },
     "/path/:id(\\d+)*": {
-      regex: /^\/path\/?(?<id>\d+(?:\/\d+)*)?\/?$/,
+      regex: /^\/path(?:\/(?<id>\d+(?:\/\d+)*))?\/?$/,
       match: [["/path/123", { id: "123" }], ["/path"]],
     },
     "/book{s}?": {
