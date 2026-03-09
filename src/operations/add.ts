@@ -80,7 +80,7 @@ export function addRoute<T>(
         segment.includes(":", 1) ||
         segment.includes("(") ||
         hasSegmentWildcard(segment) ||
-        !/^:\w+$/.test(segment)
+        !/^:[\w-]+$/.test(segment)
       ) {
         const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex);
         _unnamedParamIndex = nextIndex;
@@ -153,7 +153,7 @@ function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
   [_s, _i] = replaceSegmentWildcards(_s, _i);
 
   const regex = _s
-    .replace(/:(\w+)(?:\(([^)]*)\))?/g, (_, id, p) => `(?<${id}>${p || "[^/]+"})`)
+    .replace(/:([\w-]+)(?:\(([^)]*)\))?/g, (_, id, p) => `(?<${id}>${p || "[^/]+"})`)
     .replace(/\((?![?<])/g, () => `(?<${toUnnamedGroupKey(_i++)}>`)
     .replace(/\./g, "\\.")
     .replace(/\uFFFE(.)/g, (_, c) => (/[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c));

@@ -20,14 +20,14 @@ export function decodeEscaped(segment: string): string {
 
 export function expandModifiers(segments: string[]): string[] | undefined {
   for (let i = 0; i < segments.length; i++) {
-    const m = segments[i].match(/^(.*:\w+(?:\([^)]*\))?)([?+*])$/);
+    const m = segments[i].match(/^(.*:[\w-]+(?:\([^)]*\))?)([?+*])$/);
     if (!m) continue;
     const pre = segments.slice(0, i);
     const suf = segments.slice(i + 1);
     if (m[2] === "?") {
       return ["/" + pre.concat(m[1]).concat(suf).join("/"), "/" + pre.concat(suf).join("/")];
     }
-    const name = m[1].match(/:(\w+)/)?.[1] || "_";
+    const name = m[1].match(/:([\w-]+)/)?.[1] || "_";
     const wc = "/" + [...pre, `**:${name}`, ...suf].join("/");
     const without = "/" + [...pre, ...suf].join("/");
     return m[2] === "+" ? [wc] : [wc, without];

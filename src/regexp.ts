@@ -33,15 +33,15 @@ function _routeToRegExp(route: string): RegExp {
       /(^|[^\\])\(/.test(segment) ||
       hasSegmentWildcard(segment)
     ) {
-      const modMatch = segment.match(/^(.*:\w+(?:\([^)]*\))?)([?+*])$/);
+      const modMatch = segment.match(/^(.*:[\w-]+(?:\([^)]*\))?)([?+*])$/);
       if (modMatch) {
         const [, base, mod] = modMatch;
-        const name = base.match(/:(\w+)/)?.[1] || `_${idCtr++}`;
+        const name = base.match(/:([\w-]+)/)?.[1] || `_${idCtr++}`;
 
         if (mod === "?") {
           const inner = base
             .replace(
-              /:(\w+)(?:\(([^)]*)\))?/g,
+              /:([\w-]+)(?:\(([^)]*)\))?/g,
               (_, id, pattern) => `(?<${id}>${pattern || "[^/]+"})`,
             )
             .replace(/\./g, "\\.");
@@ -91,7 +91,7 @@ function _routeToRegExp(route: string): RegExp {
         resolveEscapePlaceholders(
           dynamicSegment
             .replace(
-              /:(\w+)(?:\(([^)]*)\))?/g,
+              /:([\w-]+)(?:\(([^)]*)\))?/g,
               (_, id, pattern) => `(?<${id}>${pattern || "[^/]+"})`,
             )
             .replace(/(^|[^\\])\((?![?<])/g, (_, p) => `${p}(?<${toRegExpUnnamedKey(idCtr++)}>`)

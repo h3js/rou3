@@ -169,3 +169,45 @@ describe("route matching", () => {
     expect(findRoute(router, "GET", "/test")).toBeUndefined();
   });
 });
+
+describe("hyphenated param names", () => {
+  const router = createRouter([
+    "/users/:user-id",
+    "/users/:user-id/posts/:post-id",
+    "/items/:item-name/details",
+  ]);
+
+  const compiledLookup = compileRouter(router);
+
+  const lookups = [
+    {
+      name: "findRoute",
+      match: (method: string, path: string) => findRoute(router, method, path),
+    },
+    {
+      name: "compiledLookup",
+      match: (method: string, path: string) => compiledLookup(method, path),
+    },
+  ];
+
+  for (const { name, match } of lookups) {
+    it(`match hyphenated params with ${name}`, () => {
+      expect(match("GET", "/users/123")).toMatchObject({
+        data: { path: "/users/:user-id" },
+        params: { "user-id": "123" },
+      });
+      expect(match("GET", "/users/abc/posts/456")).toMatchObject({
+        data: { path: "/users/:user-id/posts/:post-id" },
+        params: { "user-id": "abc", "post-id": "456" },
+      });
+      expect(match("GET", "/items/widget/details")).toMatchObject({
+        data: { path: "/items/:item-name/details" },
+        params: { "item-name": "widget" },
+      });
+      // Hyphenated param should still be single-segment
+      expect(match("GET", "/users/foo/bar")).not.toMatchObject({
+        data: { path: "/users/:user-id" },
+      });
+    });
+  }
+});
