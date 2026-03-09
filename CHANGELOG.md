@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.8.0
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.7.12...v0.8.0)
+
+### 🚀 Enhancements
+
+- ⚠️  Url pattern compatibility ([#178](https://github.com/h3js/rou3/pull/178))
+
+### 🔥 Performance
+
+- Compiler - check `params.length > 0` instead of using a `Set` to deduplicate static nodes - prevent deopts from accessing `s` out of bound for some cases in compiler output - use `.concat` instead of spread syntax for faster `params` array cloning and disable the lint rule that prefer spread ([3575022](https://github.com/h3js/rou3/commit/3575022))
+- Avoid +1 a lot of time by changing startIdx to 1 ([285aa05](https://github.com/h3js/rou3/commit/285aa05))
+
+### 🩹 Fixes
+
+- HasIf should only be set to true if an if clause was appended before ([208262c](https://github.com/h3js/rou3/commit/208262c))
+
+### 🏡 Chore
+
+- Apply automated updates ([5ae135a](https://github.com/h3js/rou3/commit/5ae135a))
+- Init agents.md ([2ec1bd8](https://github.com/h3js/rou3/commit/2ec1bd8))
+- Ignore agents.md from linter ([3b23ad1](https://github.com/h3js/rou3/commit/3b23ad1))
+- Update deps and lint ([ce88d82](https://github.com/h3js/rou3/commit/ce88d82))
+- Apply automated updates ([b0617cb](https://github.com/h3js/rou3/commit/b0617cb))
+
+#### ⚠️ Breaking Changes
+
+- ⚠️  Url pattern compatibility ([#178](https://github.com/h3js/rou3/pull/178))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+- Aquapi ([@aquapi](https://github.com/aquapi))
+
 ## v0.7.12
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.7.11...v0.7.12)
