@@ -1,10 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  routeToRegExp,
-  createRouter,
-  addRoute,
-  findRoute,
-} from "../src/index.ts";
+import { routeToRegExp, createRouter, addRoute, findRoute } from "../src/index.ts";
 import { compileRouter } from "../src/compiler.ts";
 import { normalizeUnnamedGroupKey } from "../src/_segment-wildcards.ts";
 import { normalizePath } from "../src/operations/_utils.ts";
@@ -16,15 +11,10 @@ type WptEntry = {
   pattern: Array<Record<string, string> | string>;
   inputs: Array<Record<string, string>>;
   expected_obj?: string | Record<string, string>;
-  expected_match: null | Record<
-    string,
-    { input: string; groups: Record<string, string | null> }
-  >;
+  expected_match: null | Record<string, { input: string; groups: Record<string, string | null> }>;
 };
 
-function normalizeGroups(
-  groups: Record<string, string> | undefined,
-): Record<string, string> {
+function normalizeGroups(groups: Record<string, string> | undefined): Record<string, string> {
   if (!groups) return {};
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(groups)) {
@@ -265,10 +255,7 @@ const ROUTER_KNOWN_DIFFS = new Set([
 
 type MatchStrategy = {
   name: string;
-  match: (
-    pattern: string,
-    input: string,
-  ) => { matched: boolean; params: Record<string, string> };
+  match: (pattern: string, input: string) => { matched: boolean; params: Record<string, string> };
   shouldSkip?: (pattern: string) => boolean;
 };
 
@@ -320,10 +307,7 @@ describe("wpt urlpattern compatibility", () => {
           labelCounts.set(baseLabel, count + 1);
           const label = count > 0 ? `${baseLabel} #${count + 1}` : baseLabel;
 
-          if (
-            SKIP_PATTERNS.has(test.pattern) ||
-            strategy.shouldSkip?.(test.pattern)
-          ) {
+          if (SKIP_PATTERNS.has(test.pattern) || strategy.shouldSkip?.(test.pattern)) {
             it.skip(label, () => {});
             continue;
           }
@@ -349,32 +333,22 @@ describe("wpt urlpattern compatibility", () => {
           const testFn = isKnownDiff ? it.fails : it;
 
           testFn(label, () => {
-            const { matched, params } = strategy.match(
-              test.pattern,
-              test.input!,
-            );
+            const { matched, params } = strategy.match(test.pattern, test.input!);
 
             if (!test.expectedMatch) {
               // rou3 allows trailing slash — acceptable difference
               if (matched && test.input!.endsWith("/")) return;
-              expect(
-                matched,
-                `"${test.input}" should not match pattern "${test.pattern}"`,
-              ).toBe(false);
+              expect(matched, `"${test.input}" should not match pattern "${test.pattern}"`).toBe(
+                false,
+              );
               return;
             }
 
-            expect(
-              matched,
-              `"${test.input}" should match pattern "${test.pattern}"`,
-            ).toBe(true);
+            expect(matched, `"${test.input}" should match pattern "${test.pattern}"`).toBe(true);
 
             for (const [key, value] of Object.entries(test.expectedGroups)) {
               if (value === null) {
-                expect(
-                  params[key],
-                  `group "${key}" should be undefined/missing`,
-                ).toBeUndefined();
+                expect(params[key], `group "${key}" should be undefined/missing`).toBeUndefined();
               } else {
                 expect(params[key], `group "${key}"`).toBe(value);
               }

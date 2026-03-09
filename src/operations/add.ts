@@ -6,12 +6,7 @@ import {
 } from "../_segment-wildcards.ts";
 import { NullProtoObj } from "../object.ts";
 import type { RouterContext, ParamsIndexMap } from "../types.ts";
-import {
-  decodeEscaped,
-  encodeEscapes,
-  expandModifiers,
-  splitPath,
-} from "./_utils.ts";
+import { decodeEscaped, encodeEscapes, expandModifiers, splitPath } from "./_utils.ts";
 
 /**
  * Add a route to the router context.
@@ -64,11 +59,7 @@ export function addRoute<T>(
         node.wildcard = { key: "**" };
       }
       node = node.wildcard;
-      paramsMap.push([
-        -(i + 1),
-        segment.split(":")[1] || "_",
-        segment.length === 2 /* no id */,
-      ]);
+      paramsMap.push([-(i + 1), segment.split(":")[1] || "_", segment.length === 2 /* no id */]);
       break;
     }
 
@@ -162,15 +153,10 @@ function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
   [_s, _i] = replaceSegmentWildcards(_s, _i);
 
   const regex = _s
-    .replace(
-      /:(\w+)(?:\(([^)]*)\))?/g,
-      (_, id, p) => `(?<${id}>${p || "[^/]+"})`,
-    )
+    .replace(/:(\w+)(?:\(([^)]*)\))?/g, (_, id, p) => `(?<${id}>${p || "[^/]+"})`)
     .replace(/\((?![?<])/g, () => `(?<${toUnnamedGroupKey(_i++)}>`)
     .replace(/\./g, "\\.")
-    .replace(/\uFFFE(.)/g, (_, c) =>
-      /[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c,
-    );
+    .replace(/\uFFFE(.)/g, (_, c) => (/[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c));
 
   return [new RegExp(`^${regex}$`), _i];
 }

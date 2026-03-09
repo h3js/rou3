@@ -2,46 +2,47 @@
   "name": "rou3",
   "version": "0.7.12",
   "description": "Lightweight and fast router for JavaScript.",
-  "repository": "h3js/rou3",
   "license": "MIT",
-  "sideEffects": false,
+  "repository": "h3js/rou3",
+  "files": [
+    "dist"
+  ],
   "type": "module",
+  "sideEffects": false,
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": "./dist/index.mjs",
     "./compiler": "./dist/compiler.mjs"
   },
-  "types": "./dist/index.d.mts",
-  "files": [
-    "dist"
-  ],
   "scripts": {
     "bench:bun": "bun ./test/bench",
     "bench:deno": "deno run -A ./test/bench/index.ts",
     "bench:node": "node --expose-gc --allow-natives-syntax --disable-warning=ExperimentalWarning --experimental-strip-types ./test/bench/index.ts",
     "build": "obuild",
     "dev": "vitest",
-    "lint": "eslint . && prettier -c src test",
-    "lint:fix": "automd && eslint --fix . && prettier -w src test",
+    "lint": "oxlint . && oxfmt --check src test",
+    "lint:fix": "automd && oxlint --fix . && oxfmt src test",
     "release": "pnpm test && pnpm build && changelogen --release && git push --follow-tags && npm publish",
     "test": "pnpm lint && pnpm test:types && vitest run --coverage",
-    "test:types": "tsc --noEmit"
+    "test:types": "tsgo --noEmit"
   },
   "devDependencies": {
     "0x": "^6.0.0",
     "@mitata/counters": "^0.0.8",
-    "@types/node": "^25.0.2",
-    "@vitest/coverage-v8": "^4.0.15",
-    "automd": "^0.4.2",
+    "@types/node": "^25.3.5",
+    "@typescript/native-preview": "7.0.0-dev.20260308.1",
+    "@vitest/coverage-v8": "^4.0.18",
+    "automd": "^0.4.3",
     "changelogen": "^0.6.2",
-    "esbuild": "^0.27.1",
-    "eslint": "^9.39.2",
-    "eslint-config-unjs": "^0.5.0",
+    "esbuild": "^0.27.3",
+    "eslint-config-unjs": "^0.6.2",
     "mitata": "^1.0.34",
-    "obuild": "^0.4.8",
-    "prettier": "^3.7.4",
-    "rou3-latest": "npm:rou3@^0.7.11",
+    "obuild": "^0.4.32",
+    "oxfmt": "^0.36.0",
+    "oxlint": "^1.51.0",
+    "rou3-latest": "npm:rou3@^0.7.12",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.15"
+    "vitest": "^4.0.18"
   },
-  "packageManager": "pnpm@10.26.0"
+  "packageManager": "pnpm@10.31.0"
 }

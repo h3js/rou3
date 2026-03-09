@@ -1,9 +1,4 @@
-import type {
-  RouterContext,
-  Node,
-  MatchedRoute,
-  MethodData,
-} from "../types.ts";
+import type { RouterContext, Node, MatchedRoute, MethodData } from "../types.ts";
 import { getMatchParams, normalizePath, splitPath } from "./_utils.ts";
 
 /**
@@ -22,7 +17,7 @@ export function findAllRoutes<T>(
     path = path.slice(0, -1);
   }
   const segments = splitPath(path);
-  const matches = _findAll(ctx, ctx.root, method, segments, 0);
+  const matches = _findAll(ctx.root, method, segments, 0);
 
   if (opts?.params === false) {
     return matches;
@@ -37,7 +32,6 @@ export function findAllRoutes<T>(
 }
 
 function _findAll<T>(
-  ctx: RouterContext<T>,
   node: Node<T>,
   method: string,
   segments: string[],
@@ -56,7 +50,7 @@ function _findAll<T>(
 
   // 2. Param
   if (node.param) {
-    _findAll(ctx, node.param, method, segments, index + 1, matches);
+    _findAll(node.param, method, segments, index + 1, matches);
     if (index === segments.length && node.param.methods) {
       const match = node.param.methods[method] || node.param.methods[""];
       if (match) {
@@ -71,7 +65,7 @@ function _findAll<T>(
   // 3. Static
   const staticChild = node.static?.[segment];
   if (staticChild) {
-    _findAll(ctx, staticChild, method, segments, index + 1, matches);
+    _findAll(staticChild, method, segments, index + 1, matches);
   }
 
   // 4. End of path

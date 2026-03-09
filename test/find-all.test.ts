@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createRouter, formatTree } from "./_utils.ts";
 import { findAllRoutes, type RouterContext } from "../src/index.ts";
 import { compileRouter } from "../src/compiler.ts";
-import { format } from "prettier";
+import { format } from "oxfmt";
 
 // Helper to make snapsots more readable
 const _findAllRoutes = (
@@ -21,14 +21,7 @@ const _findAllRoutes = (
 };
 
 describe("find-matchAll: basic", () => {
-  const router = createRouter([
-    "/foo",
-    "/foo/**",
-    "/foo/bar",
-    "/foo/bar/baz",
-    "/foo/*/baz",
-    "/**",
-  ]);
+  const router = createRouter(["/foo", "/foo/**", "/foo/bar", "/foo/bar/baz", "/foo/*/baz", "/**"]);
 
   it("snapshot", () => {
     expect(formatTree(router.root)).toMatchInlineSnapshot(`
@@ -45,20 +38,13 @@ describe("find-matchAll: basic", () => {
 
   it("snapshot (compiled)", async () => {
     await expect(
-      await format(compileRouter(router, { matchAll: true }).toString(), {
-        parser: "acorn",
-      }),
+      (await format("snapshot.mjs", compileRouter(router, { matchAll: true }).toString())).code,
     ).toMatchFileSnapshot(".snapshot/compiled-all.mjs");
   });
 
   it("snapshot (compiled - empty)", async () => {
     await expect(
-      await format(
-        compileRouter(createRouter([]), { matchAll: true }).toString(),
-        {
-          parser: "acorn",
-        },
-      ),
+      (await format("snapshot.mjs", compileRouter(createRouter([]), { matchAll: true }).toString())).code,
     ).toMatchFileSnapshot(".snapshot/compiled-all-empty.mjs");
   });
 
@@ -137,8 +123,7 @@ describe("matcher: complex", () => {
           "/foo/baz",
         ]
       `);
-    expect(_findAllRoutes(router, "GET", "/foo/123/sub")).to
-      .toMatchInlineSnapshot(`
+    expect(_findAllRoutes(router, "GET", "/foo/123/sub")).to.toMatchInlineSnapshot(`
         [
           "/foo/**",
           "/foo/*/sub",
@@ -154,8 +139,7 @@ describe("matcher: complex", () => {
 
   it("trailing slash", () => {
     // Defined with trailing slash
-    expect(_findAllRoutes(router, "GET", "/with-trailing")).to
-      .toMatchInlineSnapshot(`
+    expect(_findAllRoutes(router, "GET", "/with-trailing")).to.toMatchInlineSnapshot(`
         [
           "/with-trailing/",
         ]
@@ -165,8 +149,7 @@ describe("matcher: complex", () => {
     );
 
     // Defined without trailing slash
-    expect(_findAllRoutes(router, "GET", "/without-trailing")).to
-      .toMatchInlineSnapshot(`
+    expect(_findAllRoutes(router, "GET", "/without-trailing")).to.toMatchInlineSnapshot(`
         [
           "/without-trailing",
         ]
@@ -202,12 +185,7 @@ describe("matcher: complex", () => {
 });
 
 describe("matcher: order", () => {
-  const router = createRouter([
-    "/hello",
-    "/hello/world",
-    "/hello/*",
-    "/hello/**",
-  ]);
+  const router = createRouter(["/hello", "/hello/world", "/hello/*", "/hello/**"]);
 
   it("snapshot", () => {
     expect(formatTree(router.root)).toMatchInlineSnapshot(`

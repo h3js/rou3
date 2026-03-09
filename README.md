@@ -98,21 +98,21 @@ findRoute(router, "GET", "/");
 
 rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API)-compatible syntax.
 
-| Pattern | Example Match | Params |
-| --- | --- | --- |
-| `/path/to/resource` | `/path/to/resource` | `{}` |
-| `/users/:name` | `/users/foo` | `{ name: "foo" }` |
-| `/path/**` | `/path/foo/bar` | `{}` |
-| `/path/**:rest` | `/path/foo/bar` | `{ rest: "foo/bar" }` |
-| `/files/*.png` | `/files/icon.png` | `{ "0": "icon" }` |
-| `/files/file-*-*.png` | `/files/file-a-b.png` | `{ "0": "a", "1": "b" }` |
-| `/users/:id(\\d+)` | `/users/123` | `{ id: "123" }` |
-| `/files/:ext(png\|jpg)` | `/files/png` | `{ ext: "png" }` |
-| `/path/(\\d+)` | `/path/123` | `{ "0": "123" }` |
-| `/users/:id?` | `/users` or `/users/123` | `{}` or `{ id: "123" }` |
-| `/files/:path+` | `/files/a/b/c` | `{ path: "a/b/c" }` |
-| `/files/:path*` | `/files` or `/files/a/b` | `{}` or `{ path: "a/b" }` |
-| `/book{s}?` | `/book` or `/books` | `{}` |
+| Pattern                     | Example Match                      | Params                                               |
+| --------------------------- | ---------------------------------- | ---------------------------------------------------- |
+| `/path/to/resource`         | `/path/to/resource`                | `{}`                                                 |
+| `/users/:name`              | `/users/foo`                       | `{ name: "foo" }`                                    |
+| `/path/**`                  | `/path/foo/bar`                    | `{}`                                                 |
+| `/path/**:rest`             | `/path/foo/bar`                    | `{ rest: "foo/bar" }`                                |
+| `/files/*.png`              | `/files/icon.png`                  | `{ "0": "icon" }`                                    |
+| `/files/file-*-*.png`       | `/files/file-a-b.png`              | `{ "0": "a", "1": "b" }`                             |
+| `/users/:id(\\d+)`          | `/users/123`                       | `{ id: "123" }`                                      |
+| `/files/:ext(png\|jpg)`     | `/files/png`                       | `{ ext: "png" }`                                     |
+| `/path/(\\d+)`              | `/path/123`                        | `{ "0": "123" }`                                     |
+| `/users/:id?`               | `/users` or `/users/123`           | `{}` or `{ id: "123" }`                              |
+| `/files/:path+`             | `/files/a/b/c`                     | `{ path: "a/b/c" }`                                  |
+| `/files/:path*`             | `/files` or `/files/a/b`           | `{}` or `{ path: "a/b" }`                            |
+| `/book{s}?`                 | `/book` or `/books`                | `{}`                                                 |
 | `/blog/:id(\\d+){-:title}?` | `/blog/123` or `/blog/123-my-post` | `{ id: "123" }` or `{ id: "123", title: "my-post" }` |
 
 - **Named params** (`:name`) match a single segment.
@@ -129,17 +129,17 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 
 rou3 aims for URLPattern-compatible syntax but has intentional differences due to its radix-tree design:
 
-| Feature | URLPattern | rou3 |
-| --- | --- | --- |
-| `*` (single star) | Greedy catch-all `(.*)` across `/` | Single-segment unnamed param `([^/]*)` |
-| `**` (double star) | Literal `**` | Catch-all wildcard (zero or more segments) |
-| `(.*)` in segment | Greedy match across `/` | Segment-scoped (does not cross `/`) |
-| `{...}+` / `{...}*` groups | Cross-segment group repetition | Only supported within a single segment (no `/` in group body) |
-| Path normalization (`.`/`..`) | Resolves `.`/`..` in input paths | Not done by default (opt-in with `{ normalize: true }`) |
-| Case sensitivity | Can be case-insensitive | Always case-sensitive |
-| Non-`/`-prefixed paths | Supported | Paths must start with `/` |
-| Unicode param names | Supports Unicode identifiers | Params use `\w` (ASCII word chars only) |
-| Percent-encoding | Normalizes `%xx` sequences | Does not decode percent-encoded input |
+| Feature                       | URLPattern                         | rou3                                                          |
+| ----------------------------- | ---------------------------------- | ------------------------------------------------------------- |
+| `*` (single star)             | Greedy catch-all `(.*)` across `/` | Single-segment unnamed param `([^/]*)`                        |
+| `**` (double star)            | Literal `**`                       | Catch-all wildcard (zero or more segments)                    |
+| `(.*)` in segment             | Greedy match across `/`            | Segment-scoped (does not cross `/`)                           |
+| `{...}+` / `{...}*` groups    | Cross-segment group repetition     | Only supported within a single segment (no `/` in group body) |
+| Path normalization (`.`/`..`) | Resolves `.`/`..` in input paths   | Not done by default (opt-in with `{ normalize: true }`)       |
+| Case sensitivity              | Can be case-insensitive            | Always case-sensitive                                         |
+| Non-`/`-prefixed paths        | Supported                          | Paths must start with `/`                                     |
+| Unicode param names           | Supports Unicode identifiers       | Params use `\w` (ASCII word chars only)                       |
+| Percent-encoding              | Normalizes `%xx` sequences         | Does not decode percent-encoded input                         |
 
 ### Path normalization
 

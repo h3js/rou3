@@ -1,0 +1,10 @@
+{
+  "$schema": "https://unpkg.com/oxlint/configuration_schema.json",
+  "plugins": [
+    "unicorn",
+    "typescript",
+    "oxc"
+  ],
+  "ignorePatterns": ["test/.snapshot"],
+  "rules": {}
+}

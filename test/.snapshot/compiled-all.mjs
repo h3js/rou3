@@ -19,8 +19,7 @@
           }
         }
       }
-      if (m === "GET")
-        r.unshift({ data: $4, params: { _: s.slice(2).join("/") } });
+      if (m === "GET") r.unshift({ data: $4, params: { _: s.slice(2).join("/") } });
     }
   }
   if (m === "GET") r.unshift({ data: $5, params: { _: s.slice(1).join("/") } });

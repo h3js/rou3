@@ -25,10 +25,7 @@ export function expandModifiers(segments: string[]): string[] | undefined {
     const pre = segments.slice(0, i);
     const suf = segments.slice(i + 1);
     if (m[2] === "?") {
-      return [
-        "/" + pre.concat(m[1]).concat(suf).join("/"),
-        "/" + pre.concat(suf).join("/"),
-      ];
+      return ["/" + pre.concat(m[1]).concat(suf).join("/"), "/" + pre.concat(suf).join("/")];
     }
     const name = m[1].match(/:(\w+)/)?.[1] || "_";
     const wc = "/" + [...pre, `**:${name}`, ...suf].join("/");
@@ -59,8 +56,7 @@ export function getMatchParams(
 ): MatchedRoute["params"] {
   const params = new NullProtoObj();
   for (const [index, name] of paramsMap) {
-    const segment =
-      index < 0 ? segments.slice(-(index + 1)).join("/") : segments[index];
+    const segment = index < 0 ? segments.slice(-(index + 1)).join("/") : segments[index];
     if (typeof name === "string") {
       params[name] = segment;
     } else {

@@ -23,24 +23,18 @@ export interface RouterCompilerOptions<T = any> {
  *
  * @param router - The router context to compile.
  */
-export function compileRouter<
-  T,
-  O extends RouterCompilerOptions<T> = RouterCompilerOptions<T>,
->(
+export function compileRouter<T, O extends RouterCompilerOptions<T> = RouterCompilerOptions<T>>(
   router: RouterContext<T>,
   opts?: O,
 ): (
   method: string,
   path: string,
-) => O["matchAll"] extends true
-  ? MatchedRoute<T>[]
-  : MatchedRoute<T> | undefined {
+) => O["matchAll"] extends true ? MatchedRoute<T>[] : MatchedRoute<T> | undefined {
   const ctx: CompilerContext = { opts: opts || {}, router, data: [] };
   const compiled = compileRouteMatch(ctx);
-  return new Function(
-    ...ctx.data!.map((_, i) => `$${i}`),
-    `return(m,p)=>{${compiled}}`,
-  )(...ctx.data!);
+  return new Function(...ctx.data!.map((_, i) => `$${i}`), `return(m,p)=>{${compiled}}`)(
+    ...ctx.data!,
+  );
 }
 
 /**
@@ -129,8 +123,7 @@ function compileMethodMatch(
   for (const key in methods) {
     const matchers = methods[key];
     if (matchers && matchers.length > 0) {
-      if (key !== "")
-        code += `if(m==="${key}")${matchers.length > 1 ? "{" : ""}`;
+      if (key !== "") code += `if(m==="${key}")${matchers.length > 1 ? "{" : ""}`;
       const _matchers = matchers
         .map((m) => compileFinalMatch(ctx, m, currentIdx, params))
         .sort((a, b) => b.weight - a.weight);
@@ -223,10 +216,7 @@ function compileNode(
       }
     }
 
-    if (staticCode)
-      code += notNeedBoundCheck
-        ? staticCode
-        : `if(l>${currentIdx}){${staticCode}}`;
+    if (staticCode) code += notNeedBoundCheck ? staticCode : `if(l>${currentIdx}){${staticCode}}`;
   }
 
   if (node.param) {

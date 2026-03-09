@@ -51,29 +51,22 @@ function testRouter(
   }
 
   for (const path in tests) {
-    it.skipIf(tests[path]?.skip)(
-      `lookup ${path} should be ${JSON.stringify(tests[path])}`,
-      () => {
-        expect(
-          findRoute(router, "GET", path),
-          `findRoute(GET, ${path})`,
-        ).to.toMatchObject(tests[path]!);
+    it.skipIf(tests[path]?.skip)(`lookup ${path} should be ${JSON.stringify(tests[path])}`, () => {
+      expect(findRoute(router, "GET", path), `findRoute(GET, ${path})`).to.toMatchObject(
+        tests[path]!,
+      );
 
-        expect(
-          compiledMatch("GET", path),
-          `compiledMatch(GET, ${path})`,
-        ).to.toMatchObject(tests[path]!);
-      },
-    );
+      expect(compiledMatch("GET", path), `compiledMatch(GET, ${path})`).to.toMatchObject(
+        tests[path]!,
+      );
+    });
   }
 }
 
 describe("Router lookup", function () {
   describe("static routes", () => {
-    testRouter(
-      ["/", "/route", "/another-router", "/this/is/yet/another/route"],
-      (router) =>
-        expect(formatTree(router.root)).toMatchInlineSnapshot(`
+    testRouter(["/", "/route", "/another-router", "/this/is/yet/another/route"], (router) =>
+      expect(formatTree(router.root)).toMatchInlineSnapshot(`
           "<root> ┈> [GET] /
               ├── /route ┈> [GET] /route
               ├── /another-router ┈> [GET] /another-router
@@ -227,11 +220,7 @@ describe("Router lookup", function () {
 
   describe("should be able to perform wildcard lookups", () => {
     testRouter(
-      [
-        "/polymer/**:id",
-        "/polymer/another/route",
-        "/route/:p1/something/**:rest",
-      ],
+      ["/polymer/**:id", "/polymer/another/route", "/route/:p1/something/**:rest"],
       (router) =>
         expect(formatTree(router.root)).toMatchInlineSnapshot(`
           "<root>
@@ -794,10 +783,7 @@ describe("Router remove", function () {
   });
 
   it("should be able to remove placeholder routes", function () {
-    const router = createRouter([
-      "/placeholder/:choo",
-      "/placeholder/:choo/:choo2",
-    ]);
+    const router = createRouter(["/placeholder/:choo", "/placeholder/:choo/:choo2"]);
 
     expect(findRoute(router, "GET", "/placeholder/route")).to.deep.equal({
       data: { path: "/placeholder/:choo" },
@@ -810,15 +796,13 @@ describe("Router remove", function () {
     // removeRoute(router, "GET", "/placeholder/:choo");
     // expect(findRoute(router,"/placeholder/route")).to.deep.equal(undefined);
 
-    expect(findRoute(router, "GET", "/placeholder/route/route2")).to.deep.equal(
-      {
-        data: { path: "/placeholder/:choo/:choo2" },
-        params: {
-          choo: "route",
-          choo2: "route2",
-        },
+    expect(findRoute(router, "GET", "/placeholder/route/route2")).to.deep.equal({
+      data: { path: "/placeholder/:choo/:choo2" },
+      params: {
+        choo: "route",
+        choo2: "route2",
       },
-    );
+    });
   });
 
   it("should be able to remove wildcard routes", function () {

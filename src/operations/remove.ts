@@ -1,21 +1,12 @@
 import { expandGroupDelimiters } from "../_group-delimiters.ts";
 import { hasSegmentWildcard } from "../_segment-wildcards.ts";
 import type { RouterContext, Node } from "../types.ts";
-import {
-  decodeEscaped,
-  encodeEscapes,
-  expandModifiers,
-  splitPath,
-} from "./_utils.ts";
+import { decodeEscaped, encodeEscapes, expandModifiers, splitPath } from "./_utils.ts";
 
 /**
  * Remove a route from the router context.
  */
-export function removeRoute<T>(
-  ctx: RouterContext<T>,
-  method: string,
-  path: string,
-): void {
+export function removeRoute<T>(ctx: RouterContext<T>, method: string, path: string): void {
   const groupExpanded = expandGroupDelimiters(path);
   if (groupExpanded) {
     for (const expandedPath of groupExpanded) {
@@ -95,10 +86,7 @@ function _remove(
 
 function _isParamSegment(segment: string): boolean {
   return (
-    segment === "*" ||
-    segment.includes(":") ||
-    segment.includes("(") ||
-    hasSegmentWildcard(segment)
+    segment === "*" || segment.includes(":") || segment.includes("(") || hasSegmentWildcard(segment)
   );
 }
 

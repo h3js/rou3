@@ -21,7 +21,5 @@ export function replaceEscapesOutsideGroups(segment: string): string {
 }
 
 export function resolveEscapePlaceholders(str: string): string {
-  return str.replace(/\uFFFE(.)/g, (_, c: string) =>
-    /[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c,
-  );
+  return str.replace(/\uFFFE(.)/g, (_, c: string) => (/[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c));
 }

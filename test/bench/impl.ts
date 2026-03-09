@@ -9,41 +9,21 @@ export function createInstances() {
   const router = rou3.createRouter();
   const routerLatest = rou3Latest.createRouter();
   for (const route of routes) {
-    rou3.addRoute(
-      router,
-      route.method,
-      route.path,
-      `[${route.method}] ${route.path}`,
-    );
-    rou3Latest.addRoute(
-      routerLatest,
-      route.method,
-      route.path,
-      `[${route.method}] ${route.path}`,
-    );
+    rou3.addRoute(router, route.method, route.path, `[${route.method}] ${route.path}`);
+    rou3Latest.addRoute(routerLatest, route.method, route.path, `[${route.method}] ${route.path}`);
   }
 
   const compiledLookup = rou3C.compileRouter(router);
   const compiledLookupLatest = rou3CLatest.compileRouter(routerLatest);
 
   return [
-    [
-      "findRoute",
-      (method: string, path: string) => rou3.findRoute(router, method, path),
-    ],
-    [
-      "compileRouter",
-      (method: string, path: string) => compiledLookup(method, path),
-    ],
+    ["findRoute", (method: string, path: string) => rou3.findRoute(router, method, path)],
+    ["compileRouter", (method: string, path: string) => compiledLookup(method, path)],
     [
       "findRouteLatest",
-      (method: string, path: string) =>
-        rou3Latest.findRoute(routerLatest, method, path),
+      (method: string, path: string) => rou3Latest.findRoute(routerLatest, method, path),
     ],
-    [
-      "compileRouterLatest",
-      (method: string, path: string) => compiledLookupLatest(method, path),
-    ],
+    ["compileRouterLatest", (method: string, path: string) => compiledLookupLatest(method, path)],
     process.argv.includes("--max") && ["maximum", createFastestRouter()],
   ].filter(Boolean) as [string, (method: string, path: string) => any][];
 }
@@ -55,12 +35,7 @@ export function createAddRouteInstances() {
       () => {
         const router = rou3.createRouter();
         for (const route of routes) {
-          rou3.addRoute(
-            router,
-            route.method,
-            route.path,
-            `[${route.method}] ${route.path}`,
-          );
+          rou3.addRoute(router, route.method, route.path, `[${route.method}] ${route.path}`);
         }
       },
     ],
@@ -69,12 +44,7 @@ export function createAddRouteInstances() {
       () => {
         const router = rou3Latest.createRouter();
         for (const route of routes) {
-          rou3Latest.addRoute(
-            router,
-            route.method,
-            route.path,
-            `[${route.method}] ${route.path}`,
-          );
+          rou3Latest.addRoute(router, route.method, route.path, `[${route.method}] ${route.path}`);
         }
       },
     ],

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createRouter, formatTree } from "./_utils.ts";
 import { findRoute, removeRoute } from "../src/index.ts";
 import { compileRouter, compileRouterToString } from "../src/compiler.ts";
-import { format } from "prettier";
+import { format } from "oxfmt";
 
 describe("route matching", () => {
   const router = createRouter([
@@ -50,22 +50,18 @@ describe("route matching", () => {
   });
 
   it("snapshot (compiled)", async () => {
-    await expect(
-      await format(compiledLookup.toString(), { parser: "acorn" }),
-    ).toMatchFileSnapshot(".snapshot/compiled-jit.mjs");
+    await expect(((await format("snapshot.mjs", compiledLookup.toString())).code)).toMatchFileSnapshot(
+      ".snapshot/compiled-jit.mjs",
+    );
 
     await expect(
-      await format(compileRouterToString(router, "findRoute"), {
-        parser: "acorn",
-      }),
+      (await format("snapshot.mjs", compileRouterToString(router, "findRoute"))).code,
     ).toMatchFileSnapshot(".snapshot/compiled-aot.mjs");
   });
 
   it("snapshot (compiled - empty)", async () => {
     await expect(
-      await format(compileRouter(createRouter([])).toString(), {
-        parser: "acorn",
-      }),
+      (await format("snapshot.mjs", compileRouterToString(createRouter([]), "findRoute"))).code,
     ).toMatchFileSnapshot(".snapshot/compiled-empty.mjs");
   });
 

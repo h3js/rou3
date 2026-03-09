@@ -24,8 +24,7 @@
           if (l === 4 || l === 3) {
             if (m === "GET") return { data: $7, params: { 0: s[3] } };
           }
-          if (m === "GET")
-            return { data: $8, params: { _: s.slice(3).join("/") } };
+          if (m === "GET") return { data: $8, params: { _: s.slice(3).join("/") } };
         }
       }
       if (l === 3 || l === 2) {
@@ -40,8 +39,7 @@
         }
       }
     } else if (s[1] === "wildcard") {
-      if (m === "GET")
-        return { data: $12, params: { _: s.slice(2).join("/") } };
+      if (m === "GET") return { data: $12, params: { _: s.slice(2).join("/") } };
     }
   }
   if (m === "GET") return { data: $13, params: { _: s.slice(1).join("/") } };

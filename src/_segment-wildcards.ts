@@ -74,7 +74,5 @@ export function toUnnamedGroupKey(index: number): string {
 }
 
 export function normalizeUnnamedGroupKey(key: string): string {
-  return key.startsWith(UNNAMED_GROUP_PREFIX)
-    ? key.slice(_unnamedGroupPrefixLength)
-    : key;
+  return key.startsWith(UNNAMED_GROUP_PREFIX) ? key.slice(_unnamedGroupPrefixLength) : key;
 }

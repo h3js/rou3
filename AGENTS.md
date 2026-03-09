@@ -78,6 +78,7 @@ interface Node<T> {
 ### Compiler
 
 `compileRouter()` generates an optimized function via `new Function()`:
+
 - Inlines static routes for O(1) lookup
 - Unrolls segment checks into `split("/")`-based array access
 - Inlines regex patterns for param validation

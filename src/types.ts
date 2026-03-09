@@ -3,9 +3,7 @@ export interface RouterContext<T = unknown> {
   static: Record<string, Node<T> | undefined>;
 }
 
-export type ParamsIndexMap = Array<
-  [Index: number, name: string | RegExp, optional: boolean]
->;
+export type ParamsIndexMap = Array<[Index: number, name: string | RegExp, optional: boolean]>;
 export type MethodData<T = unknown> = {
   data: T;
   paramsMap?: ParamsIndexMap;
@@ -44,16 +42,15 @@ type ExtractWildcards<
       ? ExtractWildcards<Rest, Count>
       : never; // No more wildcards found
 
-type ExtractNamedParams<TPath extends string> =
-  TPath extends `${infer _Start}:${infer Rest}` // Found named parameter (:name)
-    ? Rest extends `${infer Param}/${infer Tail}` // Parameter followed by path
+type ExtractNamedParams<TPath extends string> = TPath extends `${infer _Start}:${infer Rest}` // Found named parameter (:name)
+  ? Rest extends `${infer Param}/${infer Tail}` // Parameter followed by path
+    ? Param | ExtractNamedParams<`/${Tail}`>
+    : Rest extends `${infer Param}*${infer Tail}` // Parameter followed by wildcard
       ? Param | ExtractNamedParams<`/${Tail}`>
-      : Rest extends `${infer Param}*${infer Tail}` // Parameter followed by wildcard
-        ? Param | ExtractNamedParams<`/${Tail}`>
-        : Rest // Final parameter
-    : TPath extends `/${infer Rest}` // Continue parsing path
-      ? ExtractNamedParams<Rest>
-      : never; // No parameters found
+      : Rest // Final parameter
+  : TPath extends `/${infer Rest}` // Continue parsing path
+    ? ExtractNamedParams<Rest>
+    : never; // No parameters found
 
 export type InferRouteParams<TPath extends string> = {
   [K in ExtractNamedParams<TPath> | ExtractWildcards<TPath>]: string;
