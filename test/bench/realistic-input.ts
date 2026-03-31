@@ -172,13 +172,29 @@ export const ecommerceRequests: Request[] = [
   { method: "PUT", path: "/products/prod_99xyz", description: "param: PUT" },
 
   // Multi param routes
-  { method: "PUT", path: "/users/usr_42abc/addresses/addr_1", description: "multi-param: 2 params" },
-  { method: "GET", path: "/products/prod_99xyz/reviews/rev_555", description: "multi-param: nested" },
-  { method: "DELETE", path: "/products/prod_99xyz/variants/var_3", description: "multi-param: delete" },
+  {
+    method: "PUT",
+    path: "/users/usr_42abc/addresses/addr_1",
+    description: "multi-param: 2 params",
+  },
+  {
+    method: "GET",
+    path: "/products/prod_99xyz/reviews/rev_555",
+    description: "multi-param: nested",
+  },
+  {
+    method: "DELETE",
+    path: "/products/prod_99xyz/variants/var_3",
+    description: "multi-param: delete",
+  },
   { method: "GET", path: "/orders/ord_12345/items/item_1", description: "multi-param: order item" },
 
   // Param with static siblings (tests priority)
-  { method: "GET", path: "/products/prod_99xyz/reviews", description: "param+static: reviews list" },
+  {
+    method: "GET",
+    path: "/products/prod_99xyz/reviews",
+    description: "param+static: reviews list",
+  },
   { method: "GET", path: "/products/prod_99xyz/related", description: "param+static: related" },
   { method: "GET", path: "/users/usr_42abc/orders", description: "param+static: user orders" },
   { method: "GET", path: "/users/usr_42abc/wishlist", description: "param+static: user wishlist" },
@@ -381,18 +397,50 @@ export const githubLikeRequests: Request[] = [
   { method: "GET", path: "/repos/denoland/deno/hooks/hook_1", description: "3-param: hook" },
 
   // 3-param + static suffix (deepest common paths)
-  { method: "GET", path: "/repos/facebook/react/issues/1234/comments", description: "3-param+static: comments" },
-  { method: "GET", path: "/repos/vercel/next.js/pulls/5678/files", description: "3-param+static: PR files" },
-  { method: "GET", path: "/repos/nodejs/node/pulls/9999/reviews", description: "3-param+static: PR reviews" },
-  { method: "GET", path: "/repos/denoland/deno/actions/runs/12345/jobs", description: "deep: CI jobs" },
-  { method: "POST", path: "/repos/myorg/myrepo/actions/runs/99/cancel", description: "deep: cancel run" },
+  {
+    method: "GET",
+    path: "/repos/facebook/react/issues/1234/comments",
+    description: "3-param+static: comments",
+  },
+  {
+    method: "GET",
+    path: "/repos/vercel/next.js/pulls/5678/files",
+    description: "3-param+static: PR files",
+  },
+  {
+    method: "GET",
+    path: "/repos/nodejs/node/pulls/9999/reviews",
+    description: "3-param+static: PR reviews",
+  },
+  {
+    method: "GET",
+    path: "/repos/denoland/deno/actions/runs/12345/jobs",
+    description: "deep: CI jobs",
+  },
+  {
+    method: "POST",
+    path: "/repos/myorg/myrepo/actions/runs/99/cancel",
+    description: "deep: cancel run",
+  },
 
   // 4-param routes
-  { method: "DELETE", path: "/repos/facebook/react/issues/1234/labels/bug", description: "4-param: remove label" },
-  { method: "GET", path: "/repos/facebook/react/deployments/dep1/statuses", description: "4-param: deploy status" },
+  {
+    method: "DELETE",
+    path: "/repos/facebook/react/issues/1234/labels/bug",
+    description: "4-param: remove label",
+  },
+  {
+    method: "GET",
+    path: "/repos/facebook/react/deployments/dep1/statuses",
+    description: "4-param: deploy status",
+  },
 
   // Miss scenarios
-  { method: "GET", path: "/repos/facebook/react/unknown", description: "miss: unknown sub-resource" },
+  {
+    method: "GET",
+    path: "/repos/facebook/react/unknown",
+    description: "miss: unknown sub-resource",
+  },
   { method: "DELETE", path: "/notifications", description: "miss: wrong method" },
   { method: "GET", path: "/v2/repos/facebook/react", description: "miss: wrong prefix" },
 ];
@@ -400,24 +448,58 @@ export const githubLikeRequests: Request[] = [
 // --- Utility: generate route scale sets ---
 
 const RESOURCE_NAMES = [
-  "users", "posts", "comments", "tags", "categories", "files",
-  "projects", "tasks", "events", "teams", "roles", "permissions",
-  "invoices", "subscriptions", "plans", "coupons", "notifications",
-  "messages", "channels", "threads", "reactions", "bookmarks",
-  "settings", "preferences", "tokens", "sessions", "logs",
-  "metrics", "alerts", "rules", "workflows", "pipelines",
+  "users",
+  "posts",
+  "comments",
+  "tags",
+  "categories",
+  "files",
+  "projects",
+  "tasks",
+  "events",
+  "teams",
+  "roles",
+  "permissions",
+  "invoices",
+  "subscriptions",
+  "plans",
+  "coupons",
+  "notifications",
+  "messages",
+  "channels",
+  "threads",
+  "reactions",
+  "bookmarks",
+  "settings",
+  "preferences",
+  "tokens",
+  "sessions",
+  "logs",
+  "metrics",
+  "alerts",
+  "rules",
+  "workflows",
+  "pipelines",
 ];
 
 const API_PREFIXES = ["", "/api/v1", "/api/v2", "/internal"];
 
-const ACTIONS = ["archive", "restore", "publish", "unpublish", "duplicate", "export", "import", "sync"];
+const ACTIONS = [
+  "archive",
+  "restore",
+  "publish",
+  "unpublish",
+  "duplicate",
+  "export",
+  "import",
+  "sync",
+];
 
 export function generateScaleRoutes(count: number): { routes: Route[]; requests: Request[] } {
   const routes: Route[] = [];
   const requests: Request[] = [];
 
-  outer:
-  for (const prefix of API_PREFIXES) {
+  outer: for (const prefix of API_PREFIXES) {
     for (const resource of RESOURCE_NAMES) {
       const p = `${prefix}/${resource}`;
 
@@ -446,8 +528,16 @@ export function generateScaleRoutes(count: number): { routes: Route[]; requests:
         requests.push(
           { method: "GET", path: p, description: `static: ${resource} list` },
           { method: "GET", path: `${p}/item_42`, description: `param: ${resource} detail` },
-          { method: "GET", path: `${p}/item_42/comments`, description: `param+static: ${resource} comments` },
-          { method: "GET", path: `${p}/item_42/comments/c_1`, description: `multi-param: ${resource} comment` },
+          {
+            method: "GET",
+            path: `${p}/item_42/comments`,
+            description: `param+static: ${resource} comments`,
+          },
+          {
+            method: "GET",
+            path: `${p}/item_42/comments/c_1`,
+            description: `multi-param: ${resource} comment`,
+          },
         );
       }
 

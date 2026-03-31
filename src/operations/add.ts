@@ -67,12 +67,7 @@ export function addRoute<T>(
 
     // Param
     const isWildcardSeg = hasSegmentWildcard(segment);
-    if (
-      segment === "*" ||
-      segment.includes(":") ||
-      segment.includes("(") ||
-      isWildcardSeg
-    ) {
+    if (segment === "*" || segment.includes(":") || segment.includes("(") || isWildcardSeg) {
       if (!node.param) {
         node.param = { key: "*" };
       }
