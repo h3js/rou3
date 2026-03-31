@@ -201,6 +201,57 @@ const compilerCode = compileRouterToString(router, "findRoute");
 
 <!--/automd -->
 
+## Benchmarks
+
+Performance benchmarks on **Apple M3 Max** with **Node.js 24** (using [mitata](https://github.com/evanwashere/mitata)):
+
+### Realistic API Workloads
+
+| Scenario | Compiled | Interpreter | Speedup |
+|---|---|---|---|
+| E-commerce API (108 routes, 33 requests) | **1.46 µs** | 3.67 µs | 2.5x |
+| GitHub-like API (119 routes, 29 requests) | **886 ns** | 4.90 µs | 5.5x |
+| findAllRoutes (overlapping, 6 requests) | **995 ns** | 1.58 µs | 1.6x |
+
+### Route Type Latency (compiled, single lookup)
+
+| Route Type | Avg Latency |
+|---|---|
+| Miss (not found) | **93 ns** |
+| Static | **98 ns** |
+| Wildcard | **253 ns** |
+| Param (`:id`) | **528 ns** |
+
+### Scaling
+
+| Route Count | Compiled Lookup | Memory |
+|---|---|---|
+| 50 routes | 1.78 µs | ~31 KB |
+| 200 routes | 8.53 µs | ~126 KB |
+| 500 routes | 16.47 µs | ~322 KB |
+
+### Build Performance
+
+| Operation | 108 routes | 200 routes |
+|---|---|---|
+| `addRoute` | 78 µs | 143 µs |
+| `compileRouter` | 58 µs | 106 µs |
+
+### Running Benchmarks
+
+```bash
+# Existing micro-benchmarks
+pnpm bench:node
+pnpm bench:bun
+pnpm bench:deno
+
+# Realistic workload benchmarks
+pnpm bench:realistic                # Node.js (default: 6 groups)
+pnpm bench:realistic -- --full      # All groups (+ single latency, removeRoute, deep params)
+pnpm bench:realistic:bun            # Bun
+pnpm bench:realistic:deno           # Deno
+```
+
 ## License
 
 <!-- automd:contributors license=MIT author="pi0" -->
