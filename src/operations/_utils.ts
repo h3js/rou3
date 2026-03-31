@@ -3,6 +3,7 @@ import { NullProtoObj } from "../object.ts";
 import type { MatchedRoute, ParamsIndexMap } from "../types.ts";
 
 export function encodeEscapes(path: string): string {
+  if (!path.includes("\\")) return path;
   return path
     .replace(/\\:/g, "\uFFFDA")
     .replace(/\\\(/g, "\uFFFDB")
@@ -46,8 +47,16 @@ export function normalizePath(path: string): string {
 }
 
 export function splitPath(path: string): string[] {
-  const [_, ...s] = path.split("/");
-  return s[s.length - 1] === "" ? s.slice(0, -1) : s;
+  const end = path.charCodeAt(path.length - 1) === 47 /* / */ ? path.length - 1 : path.length;
+  const result: string[] = [];
+  let start = 1;
+  for (let i = 1; i <= end; i++) {
+    if (i === end || path.charCodeAt(i) === 47 /* / */) {
+      result.push(path.substring(start, i));
+      start = i + 1;
+    }
+  }
+  return result;
 }
 
 export function getMatchParams(
@@ -55,7 +64,10 @@ export function getMatchParams(
   paramsMap: ParamsIndexMap,
 ): MatchedRoute["params"] {
   const params = new NullProtoObj();
-  for (const [index, name] of paramsMap) {
+  for (let i = 0; i < paramsMap.length; i++) {
+    const entry = paramsMap[i];
+    const index = entry[0];
+    const name = entry[1];
     const segment = index < 0 ? segments.slice(-(index + 1)).join("/") : segments[index];
     if (typeof name === "string") {
       params[name] = segment;

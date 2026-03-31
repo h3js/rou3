@@ -22,12 +22,14 @@ export function addRoute<T>(
     path = `/${path}`;
   }
 
-  const groupExpanded = expandGroupDelimiters(path);
-  if (groupExpanded) {
-    for (const expandedPath of groupExpanded) {
-      addRoute(ctx, method, expandedPath, data);
+  if (path.includes("{")) {
+    const groupExpanded = expandGroupDelimiters(path);
+    if (groupExpanded) {
+      for (const expandedPath of groupExpanded) {
+        addRoute(ctx, method, expandedPath, data);
+      }
+      return;
     }
-    return;
   }
 
   path = encodeEscapes(path);
@@ -64,12 +66,8 @@ export function addRoute<T>(
     }
 
     // Param
-    if (
-      segment === "*" ||
-      segment.includes(":") ||
-      segment.includes("(") ||
-      hasSegmentWildcard(segment)
-    ) {
+    const isWildcardSeg = hasSegmentWildcard(segment);
+    if (segment === "*" || segment.includes(":") || segment.includes("(") || isWildcardSeg) {
       if (!node.param) {
         node.param = { key: "*" };
       }
@@ -79,7 +77,7 @@ export function addRoute<T>(
       } else if (
         segment.includes(":", 1) ||
         segment.includes("(") ||
-        hasSegmentWildcard(segment) ||
+        isWildcardSeg ||
         !/^:[\w-]+$/.test(segment)
       ) {
         const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex);

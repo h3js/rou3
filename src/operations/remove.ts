@@ -7,12 +7,14 @@ import { decodeEscaped, encodeEscapes, expandModifiers, splitPath } from "./_uti
  * Remove a route from the router context.
  */
 export function removeRoute<T>(ctx: RouterContext<T>, method: string, path: string): void {
-  const groupExpanded = expandGroupDelimiters(path);
-  if (groupExpanded) {
-    for (const expandedPath of groupExpanded) {
-      removeRoute(ctx, method, expandedPath);
+  if (path.includes("{")) {
+    const groupExpanded = expandGroupDelimiters(path);
+    if (groupExpanded) {
+      for (const expandedPath of groupExpanded) {
+        removeRoute(ctx, method, expandedPath);
+      }
+      return;
     }
-    return;
   }
 
   path = encodeEscapes(path);
@@ -39,7 +41,7 @@ function _remove(
   if (index === segments.length) {
     if (node.methods && method in node.methods) {
       delete node.methods[method];
-      if (Object.keys(node.methods).length === 0) {
+      if (_isEmptyObj(node.methods)) {
         node.methods = undefined;
       }
     }
@@ -77,7 +79,7 @@ function _remove(
     _remove(childNode, method, segments, index + 1);
     if (_isEmptyNode(childNode)) {
       delete node.static![decodedSegment];
-      if (Object.keys(node.static!).length === 0) {
+      if (_isEmptyObj(node.static!)) {
         node.static = undefined;
       }
     }
@@ -88,6 +90,11 @@ function _isParamSegment(segment: string): boolean {
   return (
     segment === "*" || segment.includes(":") || segment.includes("(") || hasSegmentWildcard(segment)
   );
+}
+
+function _isEmptyObj(obj: Record<string, unknown>): boolean {
+  for (const _ in obj) return false;
+  return true;
 }
 
 function _isEmptyNode(node: Node) {

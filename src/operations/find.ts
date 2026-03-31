@@ -39,9 +39,24 @@ export function findRoute<T = unknown>(
     return match;
   }
 
+  if (!match.paramsMap) {
+    return { data: match.data };
+  }
+
+  // Fast path: single string param (covers most real-world routes like /users/:id)
+  const pMap = match.paramsMap;
+  if (pMap.length === 1) {
+    const index = pMap[0][0];
+    const name = pMap[0][1];
+    if (typeof name === "string") {
+      const segment = index < 0 ? segments.slice(-(index + 1)).join("/") : segments[index];
+      return { data: match.data, params: { [name]: segment } };
+    }
+  }
+
   return {
     data: match.data,
-    params: match.paramsMap ? getMatchParams(segments, match.paramsMap) : undefined,
+    params: getMatchParams(segments, pMap),
   };
 }
 
@@ -99,10 +114,16 @@ function _lookupTree<T>(
     const match = _lookupTree(node.param, method, segments, index + 1);
     if (match) {
       if (node.param.hasRegexParam) {
-        const exactMatch =
-          match.find((m) => m.paramsRegexp[index]?.test(segment)) ||
-          match.find((m) => !m.paramsRegexp[index]);
-        return exactMatch ? [exactMatch] : undefined;
+        let fallback: MethodData<T> | undefined;
+        for (let i = 0; i < match.length; i++) {
+          const re = match[i].paramsRegexp[index];
+          if (re) {
+            if (re.test(segment)) return [match[i]];
+          } else {
+            fallback ??= match[i];
+          }
+        }
+        return fallback ? [fallback] : undefined;
       }
       return match;
     }
