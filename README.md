@@ -209,33 +209,33 @@ Performance benchmarks on **Apple M3 Max** with **Node.js 24** (using [mitata](h
 
 | Scenario | Compiled | Interpreter | Speedup |
 |---|---|---|---|
-| E-commerce API (108 routes, 33 requests) | **1.46 µs** | 3.67 µs | 2.5x |
-| GitHub-like API (119 routes, 29 requests) | **886 ns** | 4.90 µs | 5.5x |
-| findAllRoutes (overlapping, 6 requests) | **995 ns** | 1.58 µs | 1.6x |
+| E-commerce API (108 routes, 33 requests) | **1.48 µs** | 5.61 µs | 3.8x |
+| GitHub-like API (119 routes, 29 requests) | **844 ns** | 7.64 µs | 9x |
+| findAllRoutes (overlapping, 6 requests) | **972 ns** | 2.16 µs | 2.2x |
 
 ### Route Type Latency (compiled, single lookup)
 
 | Route Type | Avg Latency |
 |---|---|
-| Miss (not found) | **93 ns** |
-| Static | **98 ns** |
-| Wildcard | **253 ns** |
-| Param (`:id`) | **528 ns** |
+| Static | **96 ns** |
+| Miss (not found) | **98 ns** |
+| Wildcard | **251 ns** |
+| Param (`:id`) | **527 ns** |
 
 ### Scaling
 
 | Route Count | Compiled Lookup | Memory |
 |---|---|---|
-| 50 routes | 1.78 µs | ~31 KB |
-| 200 routes | 8.53 µs | ~126 KB |
-| 500 routes | 16.47 µs | ~322 KB |
+| 50 routes | 1.77 µs | ~31 KB |
+| 200 routes | 8.40 µs | ~126 KB |
+| 500 routes | 16.51 µs | ~316 KB |
 
 ### Build Performance
 
 | Operation | 108 routes | 200 routes |
 |---|---|---|
-| `addRoute` | 78 µs | 143 µs |
-| `compileRouter` | 58 µs | 106 µs |
+| `addRoute` | 56 µs | 96 µs |
+| `compileRouter` | 62 µs | 115 µs |
 
 ### Running Benchmarks
 

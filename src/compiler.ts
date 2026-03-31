@@ -119,20 +119,49 @@ function compileMethodMatch(
   params: string[],
   currentIdx: number, // Set to -1 for non-param node
 ): string {
-  let code = "";
+  const methodKeys: string[] = [];
+  const catchAll: string[] = [];
   for (const key in methods) {
     const matchers = methods[key];
     if (matchers && matchers.length > 0) {
-      if (key !== "") code += `if(m==="${key}")${matchers.length > 1 ? "{" : ""}`;
-      const _matchers = matchers
-        .map((m) => compileFinalMatch(ctx, m, currentIdx, params))
-        .sort((a, b) => b.weight - a.weight);
-      for (const matcher of _matchers) {
-        code += matcher.code;
+      if (key === "") {
+        catchAll.push(key);
+      } else {
+        methodKeys.push(key);
       }
-      if (key !== "") code += matchers.length > 1 ? "}" : "";
     }
   }
+
+  const compileMatchers = (key: string) => {
+    const matchers = methods[key]!;
+    return matchers
+      .map((m) => compileFinalMatch(ctx, m, currentIdx, params))
+      .sort((a, b) => b.weight - a.weight)
+      .map((m) => m.code)
+      .join("");
+  };
+
+  let code = "";
+
+  // Use switch for 3+ methods (V8 compiles string switch to hash dispatch)
+  if (methodKeys.length >= 3) {
+    code += `switch(m){`;
+    for (const key of methodKeys) {
+      code += `case"${key}":${compileMatchers(key)}break;`;
+    }
+    code += `}`;
+  } else {
+    for (const key of methodKeys) {
+      const body = compileMatchers(key);
+      code += `if(m==="${key}")${methods[key]!.length > 1 ? `{${body}}` : body}`;
+    }
+  }
+
+  // Catch-all method (empty string key)
+  for (const key of catchAll) {
+    code += compileMatchers(key);
+  }
+
   return code;
 }
 
@@ -205,18 +234,34 @@ function compileNode(
   }
 
   if (node.static) {
-    let staticCode = "";
     const notNeedBoundCheck = hasIf;
+    const staticEntries: [string, string][] = [];
 
     for (const key in node.static) {
       const match = compileNode(ctx, node.static[key], params, currentIdx + 1);
       if (match) {
-        staticCode += `${hasIf ? "else " : ""}if(s[${currentIdx}]===${JSON.stringify(key)}){${match}}`;
-        hasIf = true;
+        staticEntries.push([key, match]);
       }
     }
 
-    if (staticCode) code += notNeedBoundCheck ? staticCode : `if(l>${currentIdx}){${staticCode}}`;
+    if (staticEntries.length > 0) {
+      let staticCode: string;
+      // Use switch for 4+ static children (V8 compiles string switch to hash dispatch)
+      if (staticEntries.length >= 4) {
+        staticCode = `switch(s[${currentIdx}]){`;
+        for (const [key, match] of staticEntries) {
+          staticCode += `case ${JSON.stringify(key)}:{${match}}break;`;
+        }
+        staticCode += `}`;
+      } else {
+        staticCode = "";
+        for (const [key, match] of staticEntries) {
+          staticCode += `${hasIf ? "else " : ""}if(s[${currentIdx}]===${JSON.stringify(key)}){${match}}`;
+          hasIf = true;
+        }
+      }
+      code += notNeedBoundCheck ? staticCode : `if(l>${currentIdx}){${staticCode}}`;
+    }
   }
 
   if (node.param) {
