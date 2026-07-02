@@ -222,6 +222,21 @@ routeToRegExp("/blog/:id(\\d+){-:title}?");
 > [!NOTE]
 > Multi-group or mid-route optionals that cannot be inlined fall back to an alternation and may contain duplicate named groups. That output is valid in JavaScript (per the TC39 duplicate-named-groups proposal) and Perl, but requires `PCRE2_DUPNAMES` on strict PCRE2 engines.
 
+`regExpToRoute(regexp)` is the inverse: it parses an anchored, PCRE-compatible `RegExp` (or its `source` string) back into a route pattern. Pass either a `RegExp` or a source string:
+
+```js
+import { regExpToRoute } from "rou3";
+
+regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
+regExpToRoute(/^\/path\/(?<param>[^/]+)\/?$/); // "/path/:param"
+regExpToRoute(/^\/base\/?(?<path>.+)\/?$/); // "/base/**:path"
+regExpToRoute("^\\/files\\/(?<_0>[^/]*)\\.png\\/?$"); // "/files/*.png"
+```
+
+It targets the dialect `routeToRegExp()` emits — named groups `(?<name>...)`, `[^/]+`/`[^/]*` segment matchers, `.*`/`.+` catch-alls, and `(?:/...)?` optional groups. Every reversible output round-trips exactly: `routeToRegExp(regExpToRoute(regexp)).source === regexp.source`.
+
+Constructs outside that dialect — the alternation fallback described above, or an inline constraint that can't be expressed as a route (e.g. one containing `/`) — throw rather than returning a corrupt pattern.
+
 ## Compiler
 
 <!-- automd:jsdocs src="./src/compiler.ts" -->
