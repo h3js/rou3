@@ -17,6 +17,7 @@ describe("benchmark", () => {
     // Budget bumped from 5.9kb/2.26kb (+~270B/+~115B): findAllRoutes now orders
     // same-node siblings by specificity so it agrees with compiled matchAll
     // regardless of insertion order (#187). Previous bump was for #184.
+    // regExpToRoute() is tree-shakeable, so it does not affect this budget.
     expect(bytes).toBeLessThanOrEqual(6200); // <6.2kb
     expect(gzipSize).toBeLessThanOrEqual(2385); // <2.39kb
   });

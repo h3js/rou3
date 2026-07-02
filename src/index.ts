@@ -8,5 +8,6 @@ export { removeRoute } from "./operations/remove.ts";
 export { findAllRoutes } from "./operations/find-all.ts";
 export { routesOverlap, findOverlappingRoutes } from "./operations/overlap.ts";
 export { routeToRegExp } from "./regexp.ts";
+export { regExpToRoute } from "./regexp-to-route.ts";
 
 export { NullProtoObj } from "./object.ts";
