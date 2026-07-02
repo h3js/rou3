@@ -18,6 +18,7 @@ src/
   _segment-wildcards.ts# Wildcard segment capture handling
   _overlap.ts         # Pattern-overlap shape model (tree entry -> RouteShape, shape intersection)
   regexp.ts           # routeToRegExp() utility
+  regexp-to-route.ts  # regExpToRoute() utility (inverse of routeToRegExp)
   compiler.ts         # JIT/AOT compiler (generates optimized match functions)
   operations/
     add.ts            # addRoute() - insert routes into the radix tree
@@ -53,6 +54,7 @@ findAllRoutes(ctx, method, path, opts?) -> MatchedRoute<T>[]
 routesOverlap(patternA, patternB) -> boolean
 findOverlappingRoutes(ctx, method, pattern) -> MatchedRoute<T>[]
 routeToRegExp(route) -> RegExp
+regExpToRoute(regexp) -> string
 
 // rou3/compiler
 compileRouter<T>(router, opts?) -> (method, path) => MatchedRoute<T> | undefined
@@ -107,6 +109,13 @@ Two separate escape systems handle `\x` in route patterns:
 2. **Regex escape handling** (`_escape.ts`): `replaceEscapesOutsideGroups()` replaces `\x` outside `(...)` groups with `\uFFFE` placeholder, preserving regex syntax inside groups (e.g., `\d` in `(\d+)`). `resolveEscapePlaceholders()` then converts placeholders to regex-safe literals. Used by `routeToRegExp()` and `getParamRegexp()` in `add.ts`.
 
 Key invariant: `\uFFFD` (U+FFFD) is used for router-level escaping, `\uFFFE` (U+FFFE) for regex-level escaping — they must not collide.
+
+### RegExp → route (`regExpToRoute`)
+
+- `src/regexp-to-route.ts` is the inverse of `routeToRegExp()`: it parses an anchored, PCRE-compatible `RegExp` (or its `source` string) back into a rou3 route pattern. Tree-shakeable — zero impact on the core bundle (only pulled in when imported).
+- Targets the dialect `routeToRegExp()` emits. The parser strips `^`/`$` and the trailing `\/?`, then walks the body recognizing: static separators (`\/`) + segments, catch-alls (`\/?(?<_>.*)` → `**`, `\/?(?<name>.+)` → `**:name`), and optional-group units (`(?:\/…)?`). Segment-internal parsing maps `(?<name>[^/]+)` → `:name`, `(?<_N>[^/]*)` → `*`, `(?<_N>pat)` → `(pat)`, `(?<name>pat)` → `:name(pat)`, and re-escapes literal route-syntax chars (`: ( ) { } * \`).
+- Optional units classify by inner shape: a whole-segment param → `:name?` / `:name*` / `:name(pat)?|*` (repeat form `pat(?:\/pat)*` → `+`/`*`); a literal/mixed inner → `{…}?` merged onto the previous segment (`(?:s)?` → `{s}?`, `(?:\/bar)?` → `{/bar}?`). Whole-segment `.+` → `:name+`.
+- **Round-trip:** `routeToRegExp(regExpToRoute(regexp)).source === regexp.source` holds for every non-fallback fixture (`test/regexp-to-route.test.ts` asserts this over `_regexp-cases.ts`). The **alternation fallback** forms (`PCRE2_DUPLICATE_NAME_ROUTES`, e.g. `/media/*{.webp}?` → `^(?:…|…)$`) are not reversible and throw.
 
 ### Pattern overlap (`routesOverlap` / `findOverlappingRoutes`)
 
