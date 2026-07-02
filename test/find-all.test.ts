@@ -282,25 +282,25 @@ describe("matcher: root path parity", () => {
 describe("matcher: regression #184", () => {
   // `_findAllRoutes` asserts interpreter and compiled matchAll agree.
 
-  it("Bug A: regex-constrained param rejects non-matching segments", () => {
+  it("regex-constrained param rejects non-matching segments", () => {
     const router = createRouter(["/user/:id(\\d+)"]);
     expect(_findAllRoutes(router, "GET", "/user/abc")).toEqual([]);
     expect(_findAllRoutes(router, "GET", "/user/42")).toEqual(["/user/:id(\\d+)"]);
   });
 
-  it("Bug A: unnamed regex group param is validated", () => {
+  it("unnamed regex group param is validated", () => {
     const router = createRouter(["/(\\d+)"]);
     expect(_findAllRoutes(router, "GET", "/abc")).toEqual([]);
     expect(_findAllRoutes(router, "GET", "/42")).toEqual(["/(\\d+)"]);
   });
 
-  it("Bug A: segment-wildcard param is validated", () => {
+  it("segment-wildcard param is validated", () => {
     const router = createRouter(["/*.png"]);
     expect(_findAllRoutes(router, "GET", "/logo.jpg")).toEqual([]);
     expect(_findAllRoutes(router, "GET", "/logo.png")).toEqual(["/*.png"]);
   });
 
-  it("Bug B: required param before a wildcard does not match zero segments", () => {
+  it("required param before a wildcard does not match zero segments", () => {
     const router = createRouter(["/:id/**"]);
     expect(_findAllRoutes(router, "GET", "/")).toEqual([]);
     expect(_findAllRoutes(router, "GET", "")).toEqual([]);
@@ -308,7 +308,7 @@ describe("matcher: regression #184", () => {
     expect(_findAllRoutes(router, "GET", "/a/b")).toEqual(["/:id/**"]);
   });
 
-  it("Bug C: regex param before a wildcard does not crash on a short path", () => {
+  it("regex param before a wildcard does not crash on a short path", () => {
     const router = createRouter(["/(\\d+)/**"]);
     expect(_findAllRoutes(router, "GET", "/")).toEqual([]);
     expect(_findAllRoutes(router, "GET", "/abc")).toEqual([]);
@@ -328,7 +328,11 @@ describe("matcher: regression #184", () => {
     ]);
   });
 
-  it("optional `**` and required `**:name` on one node keep least→most order", () => {
+  // Regression #186: the optional-`**` presence guard (`l>currentIdx-1`) must
+  // not inflate the compiled match weight, or the compiler reorders the optional
+  // `**` sibling behind the required `**:name` and disagrees with the
+  // interpreter (which emits same-node siblings in insertion order).
+  it("optional `**` sibling is not reordered past required `**:name` (compiled)", () => {
     const router = createRouter(["/:id/**", "/:id/**:rest"]);
     expect(_findAllRoutes(router, "GET", "/a/b")).toEqual(["/:id/**", "/:id/**:rest"]);
     expect(_findAllRoutes(router, "GET", "/a/b/c")).toEqual(["/:id/**", "/:id/**:rest"]);
