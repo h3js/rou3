@@ -35,6 +35,13 @@ const ROUTE_SPECIAL = new Set([
  * regExpToRoute(/^\/base\/?(?<path>.+)\/?$/); // "/base/**:path"
  */
 export function regExpToRoute(regexp: RegExp | string): string {
+  // Routes carry no flags, so a match-affecting flag (`i`/`m`/`s`) would be
+  // silently dropped and change matching semantics. Reject rather than lie;
+  // `g`/`y`/`u`/`v`/`d` don't affect a fully-anchored match and are ignored.
+  if (typeof regexp !== "string" && /[ims]/.test(regexp.flags)) {
+    throw new Error(`rou3: cannot represent regexp flag(s) "${regexp.flags}" as a route`);
+  }
+
   let src = typeof regexp === "string" ? regexp : regexp.source;
 
   // Strip anchors and the trailing optional-slash `routeToRegExp` appends.
@@ -102,20 +109,54 @@ function reverseSegment(seg: string): string {
   let out = "";
   let i = 0;
   while (i < seg.length) {
-    if (seg.startsWith("(?<", i)) {
-      const g = matchNamedGroup(seg, i)!;
-      out += paramToken(g.name, g.body);
-      i = g.end;
-    } else if (seg[i] === "\\") {
-      out += escapeLiteral(seg[i + 1]);
-      i += 2;
-    } else {
-      out += escapeLiteral(seg[i]);
-      i += 1;
+    const c = seg[i];
+    if (c === "(") {
+      const g = matchNamedGroup(seg, i);
+      if (g) {
+        out += paramToken(g.name, g.body);
+        i = g.end;
+        continue;
+      }
+      if (!seg.startsWith("(?", i)) {
+        // Bare capturing group `(...)` -> unnamed param (route `(pat)` / `*`).
+        const end = readGroup(seg, i);
+        out += paramToken("_0", seg.slice(i + 1, end - 1));
+        i = end;
+        continue;
+      }
+      // `(?:`, `(?=`, `(?!`, `(?<=`, `(?<!`, inline flags, ...: no route form.
+      throw new Error(`rou3: unsupported group construct in "${seg}"`);
     }
+    if (c === "\\") {
+      const next = seg[i + 1];
+      if (next === undefined) {
+        throw new Error(`rou3: dangling escape in "${seg}"`);
+      }
+      // Outside a constraint, only escaped punctuation is a literal. An
+      // alphanumeric escape is a regex metaclass or backreference (`\d`, `\w`,
+      // `\b`, `\k<x>`, `\1`) with no route representation. (Inside a `(...)`
+      // constraint these are opaque and preserved verbatim.)
+      if (/[a-z0-9]/i.test(next)) {
+        throw new Error(`rou3: unsupported escape "\\${next}" in "${seg}"`);
+      }
+      out += escapeLiteral(next);
+      i += 2;
+      continue;
+    }
+    // A bare (unescaped) regex operator at segment level is out of dialect: it
+    // means alternation/quantifier/anchor/char-class/any-char, none of which a
+    // route can express. `routeToRegExp` only emits these escaped (literal) or
+    // inside a `(...)` group, so reject rather than silently literalize them.
+    if (BARE_META.has(c)) {
+      throw new Error(`rou3: unsupported metacharacter "${c}" in "${seg}"`);
+    }
+    out += escapeLiteral(c);
+    i += 1;
   }
   return out;
 }
+
+const BARE_META = new Set([".", "^", "$", "*", "+", "?", "|", "[", "]", "{", "}", ")"]);
 
 /** Reverse a `(?:...)?` optional unit into route syntax, appending to `segments`. */
 function applyOptional(segments: string[], inner: string): void {
@@ -204,6 +245,11 @@ interface NamedGroup {
 /** Parse `(?<name>...)` at `start`, returning its name, body and end index. */
 function matchNamedGroup(src: string, start: number): NamedGroup | undefined {
   if (!src.startsWith("(?<", start)) {
+    return undefined;
+  }
+  // `(?<=` / `(?<!` are look-behind assertions, not `(?<name>...)` groups.
+  const after = src[start + 3];
+  if (after === "=" || after === "!") {
     return undefined;
   }
   const gt = src.indexOf(">", start);

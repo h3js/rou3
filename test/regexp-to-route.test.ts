@@ -70,4 +70,43 @@ describe("regExpToRoute", () => {
   it("throws when an optional group has no preceding segment", () => {
     expect(() => regExpToRoute(/^(?:foo)?\/?$/)).toThrow(/preceding segment/);
   });
+
+  it("rejects out-of-dialect constructs instead of corrupting", () => {
+    // Each of these was previously literalized into a wrong route (or crashed
+    // with an internal TypeError); they must now throw a clear rou3: error.
+    for (const re of [
+      /^\/(?<a>[^/]+)\k<a>\/?$/, // backreference
+      /^\/p(?=x)\/?$/, // lookahead
+      /^\/p(?!x)\/?$/, // negative lookahead
+      /^\/(?<=a)p\/?$/, // lookbehind (was: Cannot read properties of undefined)
+      /^\/(?<!a)p\/?$/, // negative lookbehind
+      /^\/\w+\/?$/, // bare metaclass escape outside a constraint
+      /^\/a\d\/?$/, // metaclass escape sharing a segment with a literal
+      /^\/x|y\/?$/, // bare alternation
+      /^\/a.b\/?$/, // bare "any char"
+      /^\/ab+\/?$/, // bare quantifier
+    ]) {
+      expect(() => regExpToRoute(re), re.source).toThrow(/^rou3:/);
+    }
+  });
+
+  it("rejects match-affecting regexp flags", () => {
+    expect(() => regExpToRoute(/^\/path\/?$/i)).toThrow(/flag/);
+    expect(() => regExpToRoute(/^\/path\/?$/m)).toThrow(/flag/);
+    expect(() => regExpToRoute(/^\/path\/?$/s)).toThrow(/flag/);
+    // Flags that don't change matching semantics are accepted.
+    expect(regExpToRoute(/^\/path\/?$/u)).toBe("/path");
+    expect(regExpToRoute(/^\/path\/?$/g)).toBe("/path");
+  });
+
+  it("supports bare (unnamed) capturing groups", () => {
+    // routeToRegExp emits `(?<_N>…)` for unnamed groups, but a hand-written bare
+    // group following the same conventions should map too.
+    expect(regExpToRoute(/^\/path\/(\d+)\/?$/)).toBe("/path/(\\d+)");
+    expect(regExpToRoute(/^\/path\/(png|jpg)\/?$/)).toBe("/path/(png|jpg)");
+    expect(regExpToRoute(/^\/path\/([^/]*)\/?$/)).toBe("/path/*");
+    expect(regExpToRoute(/^\/path\/(\d+)-x\/?$/)).toBe("/path/(\\d+)-x");
+    // A bare group that can't survive path splitting still throws.
+    expect(() => regExpToRoute(/^\/path\/([^/]+)\/?$/)).toThrow(/cannot contain/);
+  });
 });
