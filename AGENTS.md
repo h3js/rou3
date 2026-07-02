@@ -16,18 +16,21 @@ src/
   _escape.ts          # URLPattern backslash escape handling (placeholder approach)
   _group-delimiters.ts# Non-capturing group ({...}) expansion helper
   _segment-wildcards.ts# Wildcard segment capture handling
+  _overlap.ts         # Pattern-overlap segment-matcher model (route<->shape, shape intersection)
   regexp.ts           # routeToRegExp() utility
   compiler.ts         # JIT/AOT compiler (generates optimized match functions)
   operations/
     add.ts            # addRoute() - insert routes into the radix tree
     find.ts           # findRoute() - single-match lookup
     find-all.ts       # findAllRoutes() - multi-match lookup
+    overlap.ts        # routesOverlap() / findOverlappingRoutes() - pattern-vs-pattern overlap
     remove.ts         # removeRoute() - remove routes from tree
     _utils.ts         # Shared utilities (escaping, path splitting, normalization)
 test/
   router.test.ts      # Core router tests
   find.test.ts        # Route matching tests (interpreter vs compiled)
   find-all.test.ts    # Multi-match tests
+  overlap.test.ts     # Pattern-overlap tests (routesOverlap / findOverlappingRoutes)
   regexp.test.ts      # RegExp conversion tests
   types.test-d.ts     # TypeScript type-level tests
   bench/              # Performance benchmarks (mitata)
@@ -45,6 +48,8 @@ addRoute(ctx, method, path, data?) -> void
 removeRoute(ctx, method, path) -> void
 findRoute(ctx, method, path, opts?) -> MatchedRoute<T> | undefined
 findAllRoutes(ctx, method, path, opts?) -> MatchedRoute<T>[]
+routesOverlap(patternA, patternB) -> boolean
+findOverlappingRoutes(ctx, method, pattern) -> MatchedRoute<T>[]
 routeToRegExp(route) -> RegExp
 
 // rou3/compiler
@@ -99,6 +104,15 @@ Two separate escape systems handle `\x` in route patterns:
 2. **Regex escape handling** (`_escape.ts`): `replaceEscapesOutsideGroups()` replaces `\x` outside `(...)` groups with `\uFFFE` placeholder, preserving regex syntax inside groups (e.g., `\d` in `(\d+)`). `resolveEscapePlaceholders()` then converts placeholders to regex-safe literals. Used by `routeToRegExp()` and `getParamRegexp()` in `add.ts`.
 
 Key invariant: `\uFFFD` (U+FFFD) is used for router-level escaping, `\uFFFE` (U+FFFE) for regex-level escaping — they must not collide.
+
+### Pattern overlap (`routesOverlap` / `findOverlappingRoutes`)
+
+- `src/_overlap.ts` models a route as a `RouteShape`: an array of fixed single-segment matchers (`static` | `any` | `regex`) plus a variable-length tail `[tailMin, tailMax]` (trailing `*` -> `[0,1]`, `**` -> `[0,∞]`, `**:name` -> `[1,∞]`, none -> `[0,0]`). The tail matches any values, so it constrains only segment **count**, never contents.
+- `routeToShapes()` reuses the exact `addRoute` pipeline (`expandGroupDelimiters` -> `encodeEscapes`/`splitPath` -> `expandModifiers` -> `getParamRegexp`), so a pattern with optional/group syntax yields several shapes; patterns overlap when **any** shape pair overlaps.
+- `methodDataToShape()` rebuilds a shape from a matched radix-tree branch (accumulated node keys + `MethodData.paramsMap`), so registered routes are classified identically to insertion.
+- `shapesOverlap()`: check the shared fixed prefix (`segmentsCanOverlap`) then test that total-length ranges `[fixed+tailMin, fixed+tailMax]` intersect. Value check is length-independent because any valid common length ≥ `max(fixedA, fixedB)`.
+- **Overlap = "∃ concrete path matched by both,"** not subset containment. `static`/`static` and `static`/`regex` are precise; `any`-vs-anything and `regex`/`regex` are **over-approximated to overlap** (conservative default — regex intersection is undecidable). `getParamRegexp` is exported from `add.ts` for reuse.
+- `findOverlappingRoutes` traverses the tree in `findAllRoutes` order (wildcard, param, static, self) so results are least→most specific; returns `data` only (a scope has no single concrete path → no `params`).
 
 ### Input path normalization
 
