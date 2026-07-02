@@ -279,6 +279,44 @@ describe("matcher: root path parity", () => {
   });
 });
 
+describe("matcher: regression #184", () => {
+  // `_findAllRoutes` asserts interpreter and compiled matchAll agree.
+
+  it("Bug A: regex-constrained param rejects non-matching segments", () => {
+    const router = createRouter(["/user/:id(\\d+)"]);
+    expect(_findAllRoutes(router, "GET", "/user/abc")).toEqual([]);
+    expect(_findAllRoutes(router, "GET", "/user/42")).toEqual(["/user/:id(\\d+)"]);
+  });
+
+  it("Bug A: unnamed regex group param is validated", () => {
+    const router = createRouter(["/(\\d+)"]);
+    expect(_findAllRoutes(router, "GET", "/abc")).toEqual([]);
+    expect(_findAllRoutes(router, "GET", "/42")).toEqual(["/(\\d+)"]);
+  });
+
+  it("Bug A: segment-wildcard param is validated", () => {
+    const router = createRouter(["/*.png"]);
+    expect(_findAllRoutes(router, "GET", "/logo.jpg")).toEqual([]);
+    expect(_findAllRoutes(router, "GET", "/logo.png")).toEqual(["/*.png"]);
+  });
+
+  it("Bug B: required param before a wildcard does not match zero segments", () => {
+    const router = createRouter(["/:id/**"]);
+    expect(_findAllRoutes(router, "GET", "/")).toEqual([]);
+    expect(_findAllRoutes(router, "GET", "")).toEqual([]);
+    expect(_findAllRoutes(router, "GET", "/a")).toEqual(["/:id/**"]);
+    expect(_findAllRoutes(router, "GET", "/a/b")).toEqual(["/:id/**"]);
+  });
+
+  it("Bug C: regex param before a wildcard does not crash on a short path", () => {
+    const router = createRouter(["/(\\d+)/**"]);
+    expect(_findAllRoutes(router, "GET", "/")).toEqual([]);
+    expect(_findAllRoutes(router, "GET", "/abc")).toEqual([]);
+    expect(_findAllRoutes(router, "GET", "/42")).toEqual(["/(\\d+)/**"]);
+    expect(_findAllRoutes(router, "GET", "/42/x")).toEqual(["/(\\d+)/**"]);
+  });
+});
+
 describe("matcher: named", () => {
   const router = createRouter(["/foo", "/foo/:bar", "/foo/:bar/:qaz"]);
 

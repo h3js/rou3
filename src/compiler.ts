@@ -161,9 +161,15 @@ function compileFinalMatch(
   const { paramsMap, paramsRegexp } = data;
   if (paramsMap && paramsMap.length > 0) {
     // Check for optional end parameters
-    const required = !paramsMap[paramsMap.length - 1][2] && currentIdx !== -1;
-    if (required) {
-      conditions.push(`l>${currentIdx}`);
+    const lastParam = paramsMap[paramsMap.length - 1];
+    if (currentIdx !== -1) {
+      if (!lastParam[2]) {
+        // Last segment is required (a param or a `**:name` wildcard)
+        conditions.push(`l>${currentIdx}`);
+      } else if (lastParam[0] < 0 && paramsMap.length > 1) {
+        // Optional `**` tail, but the required leading param(s) must be present
+        conditions.push(`l>${currentIdx - 1}`);
+      }
     }
     for (let i = 0; i < paramsRegexp.length; i++) {
       const regexp = paramsRegexp[i];

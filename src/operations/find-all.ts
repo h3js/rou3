@@ -60,12 +60,22 @@ function _findAll<T>(
 
   // 2. Param
   if (node.param) {
-    _findAll(node.param, method, segments, index + 1, matches);
-    if (index === segments.length && node.param.methods) {
+    if (index < segments.length) {
+      // Consume this segment as the param, then validate regex constraints on
+      // the newly collected matches (mirrors `_lookupTree` in find.ts).
+      const start = matches.length;
+      _findAll(node.param, method, segments, index + 1, matches);
+      if (node.param.hasRegexParam) {
+        for (let r = matches.length - 1; r >= start; r--) {
+          if (matches[r].paramsRegexp[index]?.test(segment) === false) matches.splice(r, 1);
+        }
+      }
+    } else if (node.param.methods) {
+      // End of path: only an optional trailing param matches (e.g. `/*` matches `/`)
       const match = node.param.methods[method] || node.param.methods[""];
       if (match) {
         const pMap = match[0].paramsMap;
-        if (pMap?.[pMap?.length - 1]?.[2]) {
+        if (pMap?.[pMap?.length - 1]?.[2] /* optional */) {
           matches.push(...match);
         }
       }
