@@ -86,7 +86,7 @@ function compileRouteMatch(ctx: CompilerContext): string {
     for (const key in ctx.router.static) {
       const node = ctx.router.static[key];
       if (node?.methods) {
-        code += `${hasIf ? "else " : ""}if(p===${JSON.stringify(key.replace(/\/$/, "") || "/")}){${compileMethodMatch(ctx, node.methods, [], -1)}}`;
+        code += `${hasIf ? "else " : ""}if(p===${JSON.stringify(key.replace(/\/$/, ""))}){${compileMethodMatch(ctx, node.methods, [], -1)}}`;
         hasIf = true;
       }
     }
@@ -95,10 +95,7 @@ function compileRouteMatch(ctx: CompilerContext): string {
   const match = compileNode(ctx, ctx.router.root, [], 1);
   // Empty root node emit an empty bound check
   if (match) {
-    // Drop the trailing empty segment root "/" splits into (["",""]) so its
-    // segment count matches `splitPath`; otherwise required root wildcards/params
-    // (`/**:name`, `/:x`) would wrongly match "/" (mirrors findRoute/findAllRoutes).
-    code += `let s=p.split("/");if(s[s.length-1]==="")s.pop();let l=s.length;${match}`;
+    code += `let s=p.split("/"),l=s.length;${match}`;
   }
 
   if (!code) {
@@ -113,7 +110,10 @@ function compileRouteMatch(ctx: CompilerContext): string {
     ? `if(p.includes("/.")){let _r=[];for(let _v of p.split("/")){if(_v===".")continue;_v===".."&&_r.length>1?_r.pop():_r.push(_v)}p=_r.join("/")||"/"}`
     : "";
 
-  return `${ctx.opts?.matchAll ? `let r=[];` : ""}${normalizeHelper}${normalizePathHelper}if(p.charCodeAt(p.length-1)===47)p=p.slice(0,-1)||"/";${code}${ctx.opts?.matchAll ? "return r;" : ""}`;
+  // Trailing slash is stripped; root "/" collapses to "" (0 segments) so its
+  // split has no phantom trailing segment and required root wildcards/params
+  // (`/**:name`, `/:x`) don't match "/" — matching findRoute/findAllRoutes.
+  return `${ctx.opts?.matchAll ? `let r=[];` : ""}${normalizeHelper}${normalizePathHelper}if(p.charCodeAt(p.length-1)===47)p=p.slice(0,-1);${code}${ctx.opts?.matchAll ? "return r;" : ""}`;
 }
 
 function compileMethodMatch(
