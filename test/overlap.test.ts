@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { addRoute, createRouter, findOverlappingRoutes, routesOverlap } from "../src/index.ts";
+import {
+  addRoute,
+  createRouter,
+  findAllRoutes,
+  findOverlappingRoutes,
+  routesOverlap,
+} from "../src/index.ts";
 
 describe("routesOverlap", () => {
   // [patternA, patternB, expectedOverlap, label]
@@ -134,6 +140,38 @@ describe("findOverlappingRoutes", () => {
     expect(findOverlappingRoutes(router, "DELETE", "/api/users").map((m) => m.data)).toEqual([
       "any",
     ]);
+  });
+
+  it("classifies escaped-literal routes as static", () => {
+    const router = createRouter<string>();
+    addRoute(router, "GET", "/a/\\*", "star");
+    addRoute(router, "GET", "/b/\\*\\*", "dstar");
+    addRoute(router, "GET", "/c/\\*\\*/d", "mid");
+
+    expect(findOverlappingRoutes(router, "GET", "/a/x").map((m) => m.data)).toEqual([]);
+    expect(findOverlappingRoutes(router, "GET", "/a/\\*").map((m) => m.data)).toEqual(["star"]);
+    expect(findOverlappingRoutes(router, "GET", "/b/x/y/z").map((m) => m.data)).toEqual([]);
+    expect(findOverlappingRoutes(router, "GET", "/b/\\*\\*").map((m) => m.data)).toEqual(["dstar"]);
+    expect(findOverlappingRoutes(router, "GET", "/c/x/y/z").map((m) => m.data)).toEqual([]);
+    expect(findOverlappingRoutes(router, "GET", "/c/\\*\\*/d").map((m) => m.data)).toEqual(["mid"]);
+  });
+
+  it("returns each registered route once (expanded modifiers/groups)", () => {
+    const router = createRouter<string>();
+    addRoute(router, "GET", "/a/:x?", "opt");
+    addRoute(router, "GET", "/b{/c}?", "grp");
+
+    expect(findOverlappingRoutes(router, "GET", "/a/**").map((m) => m.data)).toEqual(["opt"]);
+    expect(findOverlappingRoutes(router, "GET", "/b/**").map((m) => m.data)).toEqual(["grp"]);
+  });
+
+  it("named wildcard scope requires at least one segment (matches findAllRoutes)", () => {
+    const router = createRouter<string>();
+    addRoute(router, "GET", "/a/**:rest", "wc");
+
+    expect(findOverlappingRoutes(router, "GET", "/a").map((m) => m.data)).toEqual([]);
+    expect(findAllRoutes(router, "GET", "/a").map((m) => m.data)).toEqual([]);
+    expect(findOverlappingRoutes(router, "GET", "/a/b").map((m) => m.data)).toEqual(["wc"]);
   });
 
   it("treats regex-constrained routes conservatively but precisely against literals", () => {

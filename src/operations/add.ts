@@ -131,7 +131,7 @@ export function addRoute<T>(
   }
 }
 
-export function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
+function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
   let _i = unnamedStart;
   // Replace URLPattern \x escapes outside (...) with \uFFFE placeholder
   let _s = "",

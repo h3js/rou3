@@ -16,7 +16,6 @@ src/
   _escape.ts          # URLPattern backslash escape handling (placeholder approach)
   _group-delimiters.ts# Non-capturing group ({...}) expansion helper
   _segment-wildcards.ts# Wildcard segment capture handling
-  _overlap.ts         # Pattern-overlap segment-matcher model (route<->shape, shape intersection)
   regexp.ts           # routeToRegExp() utility
   compiler.ts         # JIT/AOT compiler (generates optimized match functions)
   operations/
@@ -107,12 +106,12 @@ Key invariant: `\uFFFD` (U+FFFD) is used for router-level escaping, `\uFFFE` (U+
 
 ### Pattern overlap (`routesOverlap` / `findOverlappingRoutes`)
 
-- `src/_overlap.ts` models a route as a `RouteShape`: an array of fixed single-segment matchers (`static` | `any` | `regex`) plus a variable-length tail `[tailMin, tailMax]` (trailing `*` -> `[0,1]`, `**` -> `[0,∞]`, `**:name` -> `[1,∞]`, none -> `[0,0]`). The tail matches any values, so it constrains only segment **count**, never contents.
-- `routeToShapes()` reuses the exact `addRoute` pipeline (`expandGroupDelimiters` -> `encodeEscapes`/`splitPath` -> `expandModifiers` -> `getParamRegexp`), so a pattern with optional/group syntax yields several shapes; patterns overlap when **any** shape pair overlaps.
-- `methodDataToShape()` rebuilds a shape from a matched radix-tree branch (accumulated node keys + `MethodData.paramsMap`), so registered routes are classified identically to insertion.
-- `shapesOverlap()`: check the shared fixed prefix (`segmentsCanOverlap`) then test that total-length ranges `[fixed+tailMin, fixed+tailMax]` intersect. Value check is length-independent because any valid common length ≥ `max(fixedA, fixedB)`.
-- **Overlap = "∃ concrete path matched by both,"** not subset containment. `static`/`static` and `static`/`regex` are precise; `any`-vs-anything and `regex`/`regex` are **over-approximated to overlap** (conservative default — regex intersection is undecidable). `getParamRegexp` is exported from `add.ts` for reuse.
-- `findOverlappingRoutes` traverses the tree in `findAllRoutes` order (wildcard, param, static, self) so results are least→most specific; returns `data` only (a scope has no single concrete path → no `params`).
+- `src/operations/overlap.ts` is self-contained and tree-shakeable (the core bundle is unaffected; see `test/bench/bundle.test.ts`). It models a route as a `RouteShape`: an array of fixed single-segment matchers (`string` literal | `RegExp` constraint | `undefined` = any) plus a variable-length tail `[tailMin, tailMax]` (trailing `*` -> `[0,1]`, `**` -> `[0,∞]`, `**:name` -> `[1,∞]`, none -> `[0,0]`). The tail matches any values, so it constrains only segment **count**, never contents.
+- Shapes are built from radix-tree entries (`_shapeOf`): kind-tagged edges (static key | param | wildcard) plus the entry's own `paramsMap`. Carrying the node kind keeps escaped-literal static keys (`\*` -> static `"*"`) distinguishable from dynamic segments. Per-entry shapes are cached in a `WeakMap`.
+- Query patterns are inserted into a throwaway router via the real `addRoute` (`_routeToShapes`), so queries and registered routes are classified by the exact same pipeline (`expandGroupDelimiters` -> `encodeEscapes`/`splitPath` -> `expandModifiers` -> regex params). A pattern with optional/group syntax yields several shapes; patterns overlap when **any** shape pair overlaps.
+- `_shapesOverlap()`: check the shared fixed prefix (`_segmentsCanOverlap`) then test that total-length ranges `[fixed+tailMin, fixed+tailMax]` intersect. Value check is length-independent because any valid common length ≥ `max(fixedA, fixedB)`.
+- **Overlap = "∃ concrete path matched by both,"** not subset containment. `static`/`static` and `static`/`regex` are precise; `any`-vs-anything and `regex`/`regex` are **over-approximated to overlap** (conservative default — regex intersection is undecidable).
+- `findOverlappingRoutes` traverses the tree in `findAllRoutes` order (wildcard, param, static, self) so results are least→most specific, prunes static subtrees the query can't reach, and returns each matched `data` value at most once; matches carry `data` only (a scope has no single concrete path → no `params`).
 
 ### Input path normalization
 
