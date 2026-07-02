@@ -171,7 +171,7 @@ match("GET", "/foo/bar/../baz"); // Matches "/foo/baz"
 Two utilities cover this:
 
 ```js
-import { routesOverlap, findOverlappingRoutes } from "rou3";
+import { createRouter, addRoute, routesOverlap, findOverlappingRoutes } from "rou3";
 
 // Do two patterns share at least one concrete path? (pure, router-free)
 routesOverlap("/**", "/protected/feed/**"); // true
