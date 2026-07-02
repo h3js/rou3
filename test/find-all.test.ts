@@ -262,6 +262,21 @@ describe("matcher: root path parity", () => {
     expect(_findAllRoutes(router, "GET", "/")).toEqual([]);
     expect(_findAllRoutes(router, "GET", "/a")).toEqual(["/:x"]);
   });
+
+  it("optional trailing param still matches root", () => {
+    const router = createRouter(["/*"]);
+    expect(_findAllRoutes(router, "GET", "/")).toEqual(["/*"]);
+    expect(_findAllRoutes(router, "GET", "/a")).toEqual(["/*"]);
+  });
+
+  it("collapses a trailing empty segment like splitPath (`//`, `/a//`)", () => {
+    // Required wildcards/params must not see the phantom segment `//` splits into.
+    expect(_findAllRoutes(createRouter(["/**:all"]), "GET", "//")).toEqual([]);
+    expect(_findAllRoutes(createRouter(["/:x"]), "GET", "//")).toEqual([]);
+    expect(_findAllRoutes(createRouter(["/a/**:x"]), "GET", "/a//")).toEqual([]);
+    // But a root static route matches `//` via the un-split fast path.
+    expect(_findAllRoutes(createRouter(["/"]), "GET", "//")).toEqual(["/"]);
+  });
 });
 
 describe("matcher: named", () => {

@@ -100,7 +100,10 @@ function compileRouteMatch(ctx: CompilerContext): string {
   const match = compileNode(ctx, ctx.router.root, [], 1);
   // Empty root node emit an empty bound check
   if (match) {
-    code += `let s=p.split("/"),l=s.length;${match}`;
+    // Mirror splitPath(): drop a trailing empty segment so "//", "/a//" etc.
+    // count segments like the interpreter (the raw-stripped `p` still feeds the
+    // ctx.static fast path above, which matches on the un-split string).
+    code += `let s=p.split("/");if(s.length>1&&s[s.length-1]==="")s.pop();let l=s.length;${match}`;
   }
 
   if (!code) {
