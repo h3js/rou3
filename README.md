@@ -33,6 +33,8 @@ import {
   findRoute,
   removeRoute,
   findAllRoutes,
+  routesOverlap,
+  findOverlappingRoutes,
   routeToRegExp,
   NullProtoObj,
 } from "rou3";
@@ -47,6 +49,8 @@ import {
   findRoute,
   removeRoute,
   findAllRoutes,
+  routesOverlap,
+  findOverlappingRoutes,
   routeToRegExp,
   NullProtoObj,
 } from "https://esm.sh/rou3";
@@ -159,6 +163,41 @@ The compiled router also supports this via the `normalize` option:
 const match = compileRouter(router, { normalize: true });
 match("GET", "/foo/bar/../baz"); // Matches "/foo/baz"
 ```
+
+### Pattern overlap
+
+`findRoute`/`findAllRoutes` match a **concrete path** against registered patterns. Sometimes you instead need to reason about **patterns against patterns** — e.g. to resolve an "effective" merged config over a whole scope, you need to know when two patterns can match a common concrete path.
+
+Two utilities cover this:
+
+```js
+import { createRouter, addRoute, routesOverlap, findOverlappingRoutes } from "rou3";
+
+// Do two patterns share at least one concrete path? (pure, router-free)
+routesOverlap("/**", "/protected/feed/**"); // true
+routesOverlap("/a/**", "/b/**"); // false
+
+// Every registered route whose match-set intersects a *pattern* (a scope),
+// ordered least -> most specific like findAllRoutes.
+const router = createRouter();
+addRoute(router, "GET", "/**", { isr: true });
+addRoute(router, "GET", "/protected/**", { basicAuth: true });
+addRoute(router, "GET", "/protected/feed/**", { isr: 60 });
+
+findOverlappingRoutes(router, "GET", "/protected/feed/**");
+// [ { data: { isr: true } },        // /**
+//   { data: { basicAuth: true } },  // /protected/**
+//   { data: { isr: 60 } } ]         // /protected/feed/**
+```
+
+- **`routesOverlap(patternA, patternB)`** — returns `true` if the two patterns' match-sets intersect (there **exists a concrete path matched by both**). This is _overlap_, not subset containment.
+- **`findOverlappingRoutes(router, method, pattern)`** — like `findAllRoutes`, but the query is a **pattern** instead of a concrete path. Returns every registered route whose match-set intersects the pattern, ordered least → most specific, with the same method handling as `findAllRoutes` (falls back to the method-agnostic bucket). Matches carry only `data` — a scope has no single concrete path, so no `params` are resolved. A single route registered with optional/group syntax expands into several tree entries sharing one `data` reference and is reported once; distinct routes are always reported separately, even when they share an equal primitive `data` value (or none).
+
+**Overlap semantics** are computed with rou3's own segment/radix rules, so they stay consistent with `findRoute`/`findAllRoutes`:
+
+- Patterns are expanded through the same pipeline as `addRoute`, so groups (`{s}?`), optional/repeat modifiers (`:x?`/`:x+`/`:x*`), and escaping (`\:`, `\*`) are all respected. A pattern with optional syntax expands to several shapes; two patterns overlap when **any** pair of shapes overlaps.
+- **Segment counts:** bare `**` matches **zero or more** segments (so `/a/**` overlaps `/a`), `**:name` matches **one or more**, a **trailing** bare `*` matches **zero or one**, and mid-pattern `*` / `:name` match **exactly one**.
+- **Regex constraints** (`:id(\d+)`, unnamed groups, `*.png`) are matched **precisely against static literals** (`/user/:id(\d+)` does _not_ overlap `/user/abc`), but two dynamic segments where at least one is constrained are **over-approximated to "overlaps"** — `routesOverlap("/user/:id(\d+)", "/user/:name([a-z]+)")` returns `true` even though the sets are disjoint. Exact regex intersection is undecidable, and over-approximating toward "overlaps" is the safe conservative default.
 
 ## Compiler
 

@@ -230,6 +230,55 @@ describe("matcher: order", () => {
   });
 });
 
+describe("matcher: named wildcard", () => {
+  const router = createRouter(["/a/**:rest", "/z/**"]);
+
+  it("**:name requires at least one segment (consistent with findRoute)", () => {
+    expect(_findAllRoutes(router, "GET", "/a")).toEqual([]);
+    expect(_findAllRoutes(router, "GET", "/a/b")).toEqual(["/a/**:rest"]);
+  });
+
+  it("bare ** matches zero segments", () => {
+    expect(_findAllRoutes(router, "GET", "/z")).toEqual(["/z/**"]);
+    expect(_findAllRoutes(router, "GET", "/z/x")).toEqual(["/z/**"]);
+  });
+});
+
+describe("matcher: root path parity", () => {
+  // `_findAllRoutes` asserts interpreter and compiled matchAll agree.
+  it("required root wildcard does not match root (0 segments)", () => {
+    const router = createRouter(["/**:all"]);
+    expect(_findAllRoutes(router, "GET", "/")).toEqual([]);
+    expect(_findAllRoutes(router, "GET", "/a")).toEqual(["/**:all"]);
+  });
+
+  it("optional root wildcard matches root", () => {
+    const router = createRouter(["/**"]);
+    expect(_findAllRoutes(router, "GET", "/")).toEqual(["/**"]);
+  });
+
+  it("required root param does not match root (0 segments)", () => {
+    const router = createRouter(["/:x"]);
+    expect(_findAllRoutes(router, "GET", "/")).toEqual([]);
+    expect(_findAllRoutes(router, "GET", "/a")).toEqual(["/:x"]);
+  });
+
+  it("optional trailing param still matches root", () => {
+    const router = createRouter(["/*"]);
+    expect(_findAllRoutes(router, "GET", "/")).toEqual(["/*"]);
+    expect(_findAllRoutes(router, "GET", "/a")).toEqual(["/*"]);
+  });
+
+  it("collapses a trailing empty segment like splitPath (`//`, `/a//`)", () => {
+    // Required wildcards/params must not see the phantom segment `//` splits into.
+    expect(_findAllRoutes(createRouter(["/**:all"]), "GET", "//")).toEqual([]);
+    expect(_findAllRoutes(createRouter(["/:x"]), "GET", "//")).toEqual([]);
+    expect(_findAllRoutes(createRouter(["/a/**:x"]), "GET", "/a//")).toEqual([]);
+    // But a root static route matches `//` via the un-split fast path.
+    expect(_findAllRoutes(createRouter(["/"]), "GET", "//")).toEqual(["/"]);
+  });
+});
+
 describe("matcher: named", () => {
   const router = createRouter(["/foo", "/foo/:bar", "/foo/:bar/:qaz"]);
 

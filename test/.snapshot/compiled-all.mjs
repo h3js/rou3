@@ -1,6 +1,6 @@
 (m, p) => {
   let r = [];
-  if (p.charCodeAt(p.length - 1) === 47) p = p.slice(0, -1) || "/";
+  if (p.charCodeAt(p.length - 1) === 47) p = p.slice(0, -1);
   if (p === "/foo") {
     if (m === "GET") r.unshift({ data: $0 });
   } else if (p === "/foo/bar") {
@@ -8,8 +8,9 @@
   } else if (p === "/foo/bar/baz") {
     if (m === "GET") r.unshift({ data: $2 });
   }
-  let s = p.split("/"),
-    l = s.length;
+  let s = p.split("/");
+  if (s.length > 1 && s[s.length - 1] === "") s.pop();
+  let l = s.length;
   if (l > 1) {
     if (s[1] === "foo") {
       if (l > 3) {

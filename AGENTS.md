@@ -16,18 +16,21 @@ src/
   _escape.ts          # URLPattern backslash escape handling (placeholder approach)
   _group-delimiters.ts# Non-capturing group ({...}) expansion helper
   _segment-wildcards.ts# Wildcard segment capture handling
+  _overlap.ts         # Pattern-overlap shape model (tree entry -> RouteShape, shape intersection)
   regexp.ts           # routeToRegExp() utility
   compiler.ts         # JIT/AOT compiler (generates optimized match functions)
   operations/
     add.ts            # addRoute() - insert routes into the radix tree
     find.ts           # findRoute() - single-match lookup
     find-all.ts       # findAllRoutes() - multi-match lookup
+    overlap.ts        # routesOverlap() / findOverlappingRoutes() - pattern-vs-pattern overlap
     remove.ts         # removeRoute() - remove routes from tree
     _utils.ts         # Shared utilities (escaping, path splitting, normalization)
 test/
   router.test.ts      # Core router tests
   find.test.ts        # Route matching tests (interpreter vs compiled)
   find-all.test.ts    # Multi-match tests
+  overlap.test.ts     # Pattern-overlap tests (routesOverlap / findOverlappingRoutes)
   regexp.test.ts      # RegExp conversion tests
   types.test-d.ts     # TypeScript type-level tests
   bench/              # Performance benchmarks (mitata)
@@ -45,6 +48,8 @@ addRoute(ctx, method, path, data?) -> void
 removeRoute(ctx, method, path) -> void
 findRoute(ctx, method, path, opts?) -> MatchedRoute<T> | undefined
 findAllRoutes(ctx, method, path, opts?) -> MatchedRoute<T>[]
+routesOverlap(patternA, patternB) -> boolean
+findOverlappingRoutes(ctx, method, pattern) -> MatchedRoute<T>[]
 routeToRegExp(route) -> RegExp
 
 // rou3/compiler
@@ -99,6 +104,15 @@ Two separate escape systems handle `\x` in route patterns:
 2. **Regex escape handling** (`_escape.ts`): `replaceEscapesOutsideGroups()` replaces `\x` outside `(...)` groups with `\uFFFE` placeholder, preserving regex syntax inside groups (e.g., `\d` in `(\d+)`). `resolveEscapePlaceholders()` then converts placeholders to regex-safe literals. Used by `routeToRegExp()` and `getParamRegexp()` in `add.ts`.
 
 Key invariant: `\uFFFD` (U+FFFD) is used for router-level escaping, `\uFFFE` (U+FFFE) for regex-level escaping — they must not collide.
+
+### Pattern overlap (`routesOverlap` / `findOverlappingRoutes`)
+
+- The feature is tree-shakeable (the core bundle is unaffected; see `test/bench/bundle.test.ts`): `src/_overlap.ts` holds the shape model, `src/operations/overlap.ts` the public API + tree traversal. A route is modeled as a `RouteShape`: an array of fixed single-segment matchers (`string` literal | `RegExp` constraint | `undefined` = any) plus a variable-length tail `[tailMin, tailMax]` (trailing `*` -> `[0,1]`, `**` -> `[0,∞]`, `**:name` -> `[1,∞]`, none -> `[0,0]`). The tail matches any values, so it constrains only segment **count**, never contents.
+- Shapes are built from radix-tree entries (`shapeOf`): kind-tagged edges (static key | param | wildcard) plus the entry's own `paramsMap`. Carrying the node kind keeps escaped-literal static keys (`\*` -> static `"*"`) distinguishable from dynamic segments. Per-entry shapes are cached in a `WeakMap`.
+- Query patterns are inserted into a throwaway router via the real `addRoute` (`routeToShapes`), so queries and registered routes are classified by the exact same pipeline (`expandGroupDelimiters` -> `encodeEscapes`/`splitPath` -> `expandModifiers` -> regex params). A pattern with optional/group syntax yields several shapes; patterns overlap when **any** shape pair overlaps.
+- `shapesOverlap()`: check the shared fixed prefix then test that total-length ranges `[fixed+tailMin, fixed+tailMax]` intersect. Value check is length-independent because any valid common length ≥ `max(fixedA, fixedB)`.
+- **Overlap = "∃ concrete path matched by both,"** not subset containment. `static`/`static` and `static`/`regex` are precise; `any`-vs-anything and `regex`/`regex` are **over-approximated to overlap** (conservative default — regex intersection is undecidable).
+- `findOverlappingRoutes` traverses the tree in `findAllRoutes` order (wildcard, param, static, self) so results are least→most specific, prunes static subtrees the query can't reach, and collapses only genuine reference-duplicates (a route with optional/group syntax expands into several entries sharing one `data` reference); distinct routes with equal-or-absent primitive `data` are all reported. Matches carry `data` only (a scope has no single concrete path → no `params`).
 
 ### Input path normalization
 
