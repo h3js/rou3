@@ -230,6 +230,20 @@ describe("matcher: order", () => {
   });
 });
 
+describe("matcher: named wildcard", () => {
+  const router = createRouter(["/a/**:rest", "/z/**"]);
+
+  it("**:name requires at least one segment (consistent with findRoute)", () => {
+    expect(_findAllRoutes(router, "GET", "/a")).toEqual([]);
+    expect(_findAllRoutes(router, "GET", "/a/b")).toEqual(["/a/**:rest"]);
+  });
+
+  it("bare ** matches zero segments", () => {
+    expect(_findAllRoutes(router, "GET", "/z")).toEqual(["/z/**"]);
+    expect(_findAllRoutes(router, "GET", "/z/x")).toEqual(["/z/**"]);
+  });
+});
+
 describe("matcher: named", () => {
   const router = createRouter(["/foo", "/foo/:bar", "/foo/:bar/:qaz"]);
 
