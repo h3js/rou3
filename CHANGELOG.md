@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.9.0
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.8.1...v0.9.0)
+
+### 🚀 Enhancements
+
+- Add route pattern overlap utilities ([#183](https://github.com/h3js/rou3/pull/183))
+- Add regExpToRoute() to convert PCRE regex back to route pattern ([#188](https://github.com/h3js/rou3/pull/188))
+
+### 🩹 Fixes
+
+- **regexp:** Compile trailing optional groups inline for PCRE2 compatibility ([#185](https://github.com/h3js/rou3/pull/185))
+- Align findAllRoutes with findRoute & compiled matchAll ([#184](https://github.com/h3js/rou3/pull/184), [#186](https://github.com/h3js/rou3/pull/186))
+- Order findAllRoutes same-node siblings by specificity ([#187](https://github.com/h3js/rou3/pull/187))
+- **regexp:** Keep literal dots inside regex constraints verbatim ([baf2c87](https://github.com/h3js/rou3/commit/baf2c87))
+
+### 🏡 Chore
+
+- Update deps ([346e491](https://github.com/h3js/rou3/commit/346e491))
+
+### 🤖 CI
+
+- Bump node version ([d4461ad](https://github.com/h3js/rou3/commit/d4461ad))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+- Pi0x <x@pi0.io>
+
 ## v0.8.1
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.8.0...v0.8.1)
