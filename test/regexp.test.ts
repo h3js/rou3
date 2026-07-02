@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { routeToRegExp, createRouter, addRoute, findRoute } from "../src/index.ts";
 import { normalizeUnnamedGroupKey } from "../src/_segment-wildcards.ts";
-import { regexpCases as routes } from "./_regexp-cases.ts";
+import { regexpCases as routes, PCRE2_DUPLICATE_NAME_ROUTES } from "./_regexp-cases.ts";
 
 function normalizeGroups(groups?: Record<string, string>) {
   if (!groups) {
@@ -49,12 +49,27 @@ describe("routeToRegExp", () => {
   // Trailing single optional groups are compiled inline (`(?:...)?`) rather than
   // expanded into an alternation of full routes, so a param before the group is
   // never emitted twice. Duplicate named groups are valid JS but rejected by
-  // PCRE2-family engines (see test/regexp.pcre.test.ts).
+  // PCRE2-family engines (see test/regexp.pcre.test.ts). The only exceptions are
+  // routes that cannot be inlined safely and fall back to alternation, tracked
+  // explicitly in PCRE2_DUPLICATE_NAME_ROUTES.
   it("does not emit duplicate named capture groups", () => {
     for (const route of Object.keys(routes)) {
+      if (PCRE2_DUPLICATE_NAME_ROUTES.has(route)) {
+        continue;
+      }
       const names = [...routeToRegExp(route).source.matchAll(/\(\?<([\w]+)>/g)].map((m) => m[1]);
       const duplicates = names.filter((name, i) => names.indexOf(name) !== i);
       expect(duplicates, `duplicate named groups for "${route}"`).toEqual([]);
+    }
+  });
+
+  // Complements the check above: routes tracked as non-inlinable really do emit
+  // duplicate named groups (guards against the set going silently stale).
+  it("known fallback routes emit duplicate named capture groups", () => {
+    for (const route of PCRE2_DUPLICATE_NAME_ROUTES) {
+      const names = [...routeToRegExp(route).source.matchAll(/\(\?<([\w]+)>/g)].map((m) => m[1]);
+      const duplicates = names.filter((name, i) => names.indexOf(name) !== i);
+      expect(duplicates, `expected duplicate named groups for "${route}"`).not.toEqual([]);
     }
   });
 });

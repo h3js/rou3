@@ -127,6 +127,19 @@ export const regexpCases: Record<string, RegExpCase> = {
     regex: /^\/foo(?:\/bar)?\/?$/,
     match: [["/foo"], ["/foo/bar"]],
   },
+  // Mid-segment optional after a greedy open-ended capture (`*` -> `[^/]*`).
+  // Inlining as `(?<_0>[^/]*)(?:\.webp)?` would let the greedy capture swallow
+  // `.webp` (capturing `photo.webp` instead of `photo`), so this must fall back
+  // to alternation — which anchors the literal outside the capture and keeps
+  // `_0` = `photo`. The fallback reuses the `_0` named group across branches
+  // (see PCRE2_DUPLICATE_NAME_ROUTES).
+  "/media/*{.webp}?": {
+    regex: /^(?:\/media\/(?<_0>[^/]*)\.webp\/?|\/media\/(?<_0>[^/]*)\/?)$/,
+    match: [
+      ["/media/photo.webp", { "0": "photo" }],
+      ["/media/photo", { "0": "photo" }],
+    ],
+  },
 };
 
 // Routes whose generated regex reuses the same named capture group across
@@ -134,8 +147,10 @@ export const regexpCases: Record<string, RegExpCase> = {
 // (per the TC39 duplicate-named-groups proposal) and in Perl, but PCRE2-family
 // engines reject it unless PCRE2_DUPNAMES is set.
 //
-// A trailing single optional group is now compiled inline as `(?:...)?`
-// (see inlineOptionalGroup in src/regexp.ts), so none of the fixtures above
-// currently trip this. The set is kept so any future non-inlinable route that
-// does can be flagged and asserted against real PCRE2 engines.
-export const PCRE2_DUPLICATE_NAME_ROUTES: ReadonlySet<string> = new Set([]);
+// A trailing single optional group is normally compiled inline as `(?:...)?`
+// (see inlineOptionalGroup in src/regexp.ts), which avoids duplicate names. But
+// a mid-segment optional after a greedy open-ended capture cannot be inlined
+// safely (the capture would swallow the optional literal), so it falls back to
+// alternation and reuses the capture name across branches. These routes exercise
+// that fallback and are asserted to be rejected by strict PCRE2 engines.
+export const PCRE2_DUPLICATE_NAME_ROUTES: ReadonlySet<string> = new Set(["/media/*{.webp}?"]);

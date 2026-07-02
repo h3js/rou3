@@ -1,4 +1,4 @@
-import { expandGroupDelimiters } from "./_group-delimiters.ts";
+import { expandGroupDelimiters, scanFirstGroup } from "./_group-delimiters.ts";
 import { replaceEscapesOutsideGroups, resolveEscapePlaceholders } from "./_escape.ts";
 import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcards.ts";
 
@@ -54,20 +54,23 @@ export function routeToRegExp(route: string = "/"): RegExp {
  */
 function inlineOptionalGroup(route: string): RegExp | undefined {
   const group = scanFirstGroup(route);
+  if (!group) {
+    return;
+  }
+  const [pre, body, suf, mod] = group;
   if (
-    !group ||
-    group.mod !== "?" ||
-    group.suf !== "" ||
-    group.body === "" ||
+    mod !== "?" ||
+    suf !== "" ||
+    body === "" ||
     // Only a single group is handled inline; bail if `pre`/`body` nest another.
-    scanFirstGroup(group.pre) ||
-    scanFirstGroup(group.body)
+    scanFirstGroup(pre) ||
+    scanFirstGroup(body)
   ) {
     return;
   }
 
-  const baseSegs = routeToRegExpSegments(group.pre);
-  const fullSegs = routeToRegExpSegments(group.pre + group.body);
+  const baseSegs = routeToRegExpSegments(pre);
+  const fullSegs = routeToRegExpSegments(pre + body);
   const baseLen = baseSegs.length;
   if (baseLen === 0 || fullSegs.length < baseLen) {
     return;
@@ -86,11 +89,21 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
   if (midSegment) {
     // `body` extends the final segment (e.g. `book` -> `books`); make the
     // appended tail optional.
+    const prefix = baseSegs[baseLen - 1];
     const last = fullSegs[baseLen - 1];
-    const k = baseSegs[baseLen - 1].length;
-    if (!last.startsWith(baseSegs[baseLen - 1])) {
+    if (!last.startsWith(prefix)) {
       return;
     }
+    // If the base segment ends in a greedy, open-ended capture (`[^/]*` from a
+    // `*` wildcard / unconstrained param, or `.*`/`.+`), appending `(?:tail)?`
+    // lets that capture swallow the optional literal instead of leaving it out
+    // — changing the captured value (`/media/*{.webp}?` would capture the whole
+    // `photo.webp` instead of `photo`). Fall back to alternation, which anchors
+    // the literal outside the capture in one branch.
+    if (/(?:\[\^\/\]|\.)[*+]\)?$/.test(prefix)) {
+      return;
+    }
+    const k = prefix.length;
     const inlineSegs = fullSegs.slice(0, baseLen - 1);
     inlineSegs.push(`${last.slice(0, k)}(?:${last.slice(k)})?`);
     return new RegExp(`^/${inlineSegs.join("/")}/?$`);
@@ -198,44 +211,4 @@ function routeToRegExpSegments(route: string): string[] {
 
 function toRegExpUnnamedKey(index: number): string {
   return `_${index}`;
-}
-
-/**
- * Locate the first top-level `{...}` group delimiter (skipping escapes and
- * capturing-group parens) and split into `pre` / `body` / `suf` plus modifier.
- * Kept local to the regexp module so it stays out of the core bundle.
- */
-function scanFirstGroup(
-  path: string,
-): { pre: string; body: string; suf: string; mod: string | undefined } | undefined {
-  let i = 0;
-  let depth = 0;
-  for (; i < path.length; i++) {
-    const c = path.charCodeAt(i);
-    if (c === 92 /* \ */) i++;
-    else if (c === 40 /* ( */) depth++;
-    else if (c === 41 /* ) */ && depth > 0) depth--;
-    else if (c === 123 /* { */ && depth === 0) break;
-  }
-  if (i >= path.length) return;
-
-  let j = i + 1;
-  depth = 0;
-  for (; j < path.length; j++) {
-    const c = path.charCodeAt(j);
-    if (c === 92 /* \ */) j++;
-    else if (c === 40 /* ( */) depth++;
-    else if (c === 41 /* ) */ && depth > 0) depth--;
-    else if (c === 125 /* } */ && depth === 0) break;
-  }
-  if (j >= path.length) return;
-
-  const mod = path[j + 1];
-  const hasMod = mod === "?" || mod === "+" || mod === "*";
-  return {
-    pre: path.slice(0, i),
-    body: path.slice(i + 1, j),
-    suf: path.slice(j + (hasMod ? 2 : 1)),
-    mod: hasMod ? mod : undefined,
-  };
 }
