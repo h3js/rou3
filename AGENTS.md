@@ -32,6 +32,8 @@ test/
   find-all.test.ts    # Multi-match tests
   overlap.test.ts     # Pattern-overlap tests (routesOverlap / findOverlappingRoutes)
   regexp.test.ts      # RegExp conversion tests
+  regexp.pcre.test.ts # Cross-engine PCRE checks (runs routeToRegExp output through installed grep -P/rg -P/pcre2grep/perl/php)
+  _regexp-cases.ts    # Shared route->regex fixtures (used by regexp.test.ts + regexp.pcre.test.ts)
   types.test-d.ts     # TypeScript type-level tests
   bench/              # Performance benchmarks (mitata)
   _utils.ts           # Test helpers (createRouter, formatTree)
@@ -94,6 +96,7 @@ interface Node<T> {
 - `src/_group-delimiters.ts` expands non-capturing group delimiters before route insertion/removal/regexp generation.
 - Supported forms: `{...}` and `{...}?` (plus single-segment `{...}+` / `{...}*` converted to `(?:...)+/*` regex fragments).
 - Limitation: `{...}+` / `{...}*` are rejected when group body contains `/` (cross-segment repetition unsupported in radix tree).
+- **Regexp inlining (`routeToRegExp` only):** the radix tree still expands `{...}?` into two full routes (add/remove need that), but `routeToRegExp()` compiles a *trailing single* optional group inline as `(?:...)?` via `inlineOptionalGroup()` in `regexp.ts`, instead of OR-joining two full-route regexes. This avoids re-emitting params before the group in both branches — the duplicate named groups (`(?<id>…)|(?<id>…)`) that PCRE2-family engines reject. It handles the mid-segment case (`/book{s}?` → `^\/book(?:s)?\/?$`, `/blog/:id(\d+){-:title}?` → `…(?<id>\d+)(?:-(?<title>…))?…`) and the cross-segment case (`/foo{/bar}?` → `^\/foo(?:\/bar)?\/?$`); it falls back to alternation (old behavior) for multi-group routes, mid-route optionals (non-empty `suf`), unexpected segment shapes, **or a mid-segment optional following a greedy open-ended capture** (`/media/*{.webp}?` — inlining would let `[^/]*` swallow `.webp` and change the captured value, so it stays as alternation; these are the only fixtures that still emit duplicate names). The group scanner (`scanFirstGroup()`) is shared: it lives in `_group-delimiters.ts` (already in the core bundle via add/remove) and is used by both `expandGroupDelimiters()` and `inlineOptionalGroup()`, so the two paths classify groups identically. It returns a `[pre, body, suf, mod]` **tuple** (not an object) to avoid enlarging the size-budgeted core bundle.
 
 ### URLPattern backslash escaping
 
@@ -151,6 +154,7 @@ pnpm bench:deno        # Benchmarks (deno)
 - **Type tests:** `vitest typecheck` via `types.test-d.ts`
 - Run a single test: `pnpm vitest run test/<file>.test.ts`
 - **WPT compat tests:** `test/wpt.test.ts` validates URLPattern compatibility using Web Platform Test data. Known diffs are tracked in `KNOWN_DIFFS`, `REGEXP_ONLY_KNOWN_DIFFS`, and `ROUTER_KNOWN_DIFFS` sets with reason comments.
+- **PCRE cross-engine tests:** `test/regexp.pcre.test.ts` runs `routeToRegExp()` output through whichever real PCRE-compatible CLIs are installed (`grep -P`, `rg -P`, `pcre2grep`, `pcregrep`, `perl`, `php`). Each candidate is included only after a `(?<name>...)` sanity probe, so missing/non-PCRE tools are auto-skipped (suite is a no-op if none are present). All fixtures are asserted to compile and match on every detected engine. `PCRE2_DUPLICATE_NAME_ROUTES` flags any route whose output reuses a named group across alternation branches (valid in JS/Perl, rejected by PCRE2 without `PCRE2_DUPNAMES`); it contains the non-inlinable cases (e.g. `/media/*{.webp}?`, a mid-segment optional after a greedy capture) — for those the suite asserts strict PCRE2 engines *reject* the output while Perl accepts and matches it. `test/regexp.test.ts` asserts every other fixture emits no duplicate named groups, and conversely that each `PCRE2_DUPLICATE_NAME_ROUTES` entry really does (so the set can't go silently stale).
 
 ## Code Conventions
 

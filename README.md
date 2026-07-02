@@ -199,6 +199,27 @@ findOverlappingRoutes(router, "GET", "/protected/feed/**");
 - **Segment counts:** bare `**` matches **zero or more** segments (so `/a/**` overlaps `/a`), `**:name` matches **one or more**, a **trailing** bare `*` matches **zero or one**, and mid-pattern `*` / `:name` match **exactly one**.
 - **Regex constraints** (`:id(\d+)`, unnamed groups, `*.png`) are matched **precisely against static literals** (`/user/:id(\d+)` does _not_ overlap `/user/abc`), but two dynamic segments where at least one is constrained are **over-approximated to "overlaps"** — `routesOverlap("/user/:id(\d+)", "/user/:name([a-z]+)")` returns `true` even though the sets are disjoint. Exact regex intersection is undecidable, and over-approximating toward "overlaps" is the safe conservative default.
 
+### Regular expressions
+
+`routeToRegExp(route)` converts a route pattern into an anchored `RegExp` with named capture groups, useful outside the router (validation, codegen, matching in other tools):
+
+```js
+import { routeToRegExp } from "rou3";
+
+routeToRegExp("/users/:id(\\d+)");
+// /^\/users\/(?<id>\d+)\/?$/  ->  "/users/123".match(re).groups // { id: "123" }
+```
+
+The output is **PCRE-compatible**: it uses `(?<name>...)` named groups and avoids JS-only constructs, so the generated `.source` also compiles in PCRE2 engines (`grep -P`, `rg -P`, `pcre2grep`, PHP `preg_*`) and Perl — not just JavaScript. In particular, trailing optional groups are compiled inline as `(?:...)?` instead of an alternation, so a param is never emitted twice as a duplicate named group (which PCRE2 rejects unless `PCRE2_DUPNAMES` is set):
+
+```js
+routeToRegExp("/blog/:id(\\d+){-:title}?");
+// /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
+```
+
+> [!NOTE]
+> Multi-group or mid-route optionals that cannot be inlined fall back to an alternation and may contain duplicate named groups. That output is valid in JavaScript (per the TC39 duplicate-named-groups proposal) and Perl, but requires `PCRE2_DUPNAMES` on strict PCRE2 engines.
+
 ## Compiler
 
 <!-- automd:jsdocs src="./src/compiler.ts" -->
