@@ -4,8 +4,26 @@
 // catch-alls, `(?:/...)?` optional groups). Hand-written regexes that follow the
 // same conventions convert too; constructs outside the dialect throw.
 
-/** Chars that carry rou3 route syntax and must be backslash-escaped as literals. */
-const ROUTE_SPECIAL = new Set([":", "(", ")", "{", "}", "*", "\\"]);
+// Chars a literal must be backslash-escaped as so `routeToRegExp` re-emits them
+// verbatim: rou3 route syntax (`: ( ) { } * \`) plus regex metacharacters its
+// dynamic-segment branch does not auto-escape (`? + | ^ $ [ ]`). `.` is omitted
+// on purpose — that branch already escapes `.`, so a literal dot stays raw.
+const ROUTE_SPECIAL = new Set([
+  ":",
+  "(",
+  ")",
+  "{",
+  "}",
+  "*",
+  "\\",
+  "?",
+  "+",
+  "|",
+  "^",
+  "$",
+  "[",
+  "]",
+]);
 
 /**
  * Convert an anchored {@link RegExp} (or its source string) produced by
@@ -77,7 +95,7 @@ function reverseSegment(seg: string): string {
     }
     const rep = matchRepeat(whole.body);
     if (rep) {
-      return `:${whole.name}(${rep})+`;
+      return `:${whole.name}${constraint(rep)}+`;
     }
   }
 
@@ -127,13 +145,16 @@ function mergeGroup(segments: string[], body: string): void {
 /** Classify a param group inside a segment (`:name`, `*`, `(pat)`, ...). */
 function paramToken(name: string, body: string): string {
   const unnamed = /^_\d+$/.test(name);
-  if (body === "[^/]*") {
-    return unnamed ? "*" : `:${name}([^/]*)`;
+  // `*` (unnamed `[^/]*`) and `:name` (named `[^/]+`) are the only single-segment
+  // matchers with dedicated syntax. Every other body becomes an inline `(pat)`
+  // constraint, which `constraint()` rejects if it can't survive path splitting.
+  if (unnamed && body === "[^/]*") {
+    return "*";
   }
-  if (body === "[^/]+") {
-    return unnamed ? "([^/]+)" : `:${name}`;
+  if (!unnamed && body === "[^/]+") {
+    return `:${name}`;
   }
-  return unnamed ? `(${body})` : `:${name}(${body})`;
+  return unnamed ? constraint(body) : `:${name}${constraint(body)}`;
 }
 
 /** Classify a param inside an optional group (`:name?`, `:name*`, ...). */
@@ -146,15 +167,28 @@ function optionalParam(name: string, body: string): string {
   }
   const rep = matchRepeat(body);
   if (rep) {
-    return `:${name}(${rep})*`;
+    return `:${name}${constraint(rep)}*`;
   }
-  return `:${name}(${body})?`;
+  return `:${name}${constraint(body)}?`;
 }
 
 /** Detect `PAT(?:/PAT)*` (the `+`/`*` repeat form) and return `PAT`. */
 function matchRepeat(body: string): string | undefined {
   const m = body.match(/^(.+)\(\?:\\\/(.+)\)\*$/);
   return m && m[1] === m[2] ? m[1] : undefined;
+}
+
+/**
+ * Wrap an inline param constraint as `(body)`, rejecting bodies that contain a
+ * `/`. rou3 splits routes on `/` before parsing params, so a constraint with a
+ * slash (e.g. `[a-z/]+`) is unrepresentable — throw rather than emit a route
+ * `routeToRegExp` would choke on.
+ */
+function constraint(body: string): string {
+  if (body.includes("/")) {
+    throw new Error(`rou3: param constraint "(${body})" cannot contain "/"`);
+  }
+  return `(${body})`;
 }
 
 function escapeLiteral(ch: string): string {

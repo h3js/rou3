@@ -39,8 +39,35 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(/^\/static\/\*\/\*\*\/?$/)).toBe("/static/\\*/\\*\\*");
   });
 
+  it("round-trips literal regex metacharacters inside a dynamic segment", () => {
+    // A literal (escaped) metachar sharing a segment with a param must come back
+    // re-escaped, or routeToRegExp would reinterpret it as a regex operator.
+    for (const route of [
+      "/a\\+:id",
+      "/foo\\?:id",
+      "/foo\\|:id",
+      "/a\\^b:id",
+      "/a\\$b:id",
+      "/a\\[b:id",
+    ]) {
+      const regex = routeToRegExp(route);
+      expect(routeToRegExp(regExpToRoute(regex)).source, route).toBe(regex.source);
+    }
+  });
+
   it("throws on the alternation fallback it cannot reverse", () => {
     const alt = routeToRegExp("/media/*{.webp}?");
     expect(() => regExpToRoute(alt)).toThrow();
+  });
+
+  it("throws on inline constraints that cannot be expressed as a route", () => {
+    // A param body with a `/` can't survive rou3's path splitting.
+    expect(() => regExpToRoute(/^\/foo\/(?<id>[a-z/]+)\/?$/)).toThrow(/cannot contain/);
+    // Unnamed `[^/]+` has no route syntax (a raw `([^/]+)` group would mis-split).
+    expect(() => regExpToRoute(/^\/path\/(?<_0>[^/]+)\/?$/)).toThrow(/cannot contain/);
+  });
+
+  it("throws when an optional group has no preceding segment", () => {
+    expect(() => regExpToRoute(/^(?:foo)?\/?$/)).toThrow(/preceding segment/);
   });
 });

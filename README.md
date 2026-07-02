@@ -36,6 +36,7 @@ import {
   routesOverlap,
   findOverlappingRoutes,
   routeToRegExp,
+  regExpToRoute,
   NullProtoObj,
 } from "rou3";
 ```
@@ -52,6 +53,7 @@ import {
   routesOverlap,
   findOverlappingRoutes,
   routeToRegExp,
+  regExpToRoute,
   NullProtoObj,
 } from "https://esm.sh/rou3";
 ```
