@@ -339,6 +339,38 @@ describe("matcher: regression #184", () => {
   });
 });
 
+describe("matcher: regression #187", () => {
+  // `_findAllRoutes` asserts interpreter and compiled matchAll agree.
+  // Same-node siblings must be returned least->most specific, with insertion
+  // order preserved on equal specificity — regardless of insertion order.
+
+  it("required `**:name` sibling ordered after optional `**` (reverse insertion)", () => {
+    const router = createRouter(["/:id/**:rest", "/:id/**"]);
+    expect(_findAllRoutes(router, "GET", "/a/b")).toEqual(["/:id/**", "/:id/**:rest"]);
+  });
+
+  it("required param sibling ordered after optional `*` (reverse insertion)", () => {
+    const router = createRouter(["/foo/:id", "/foo/*"]);
+    expect(_findAllRoutes(router, "GET", "/foo/x")).toEqual(["/foo/*", "/foo/:id"]);
+  });
+
+  it("regex-constrained param ordered after optional `*` (reverse insertion)", () => {
+    const router = createRouter(["/:id(\\d+)", "/*"]);
+    expect(_findAllRoutes(router, "GET", "/42")).toEqual(["/*", "/:id(\\d+)"]);
+  });
+
+  it("equal-specificity siblings keep insertion order", () => {
+    expect(_findAllRoutes(createRouter(["/foo/:a", "/foo/:b"]), "GET", "/foo/x")).toEqual([
+      "/foo/:a",
+      "/foo/:b",
+    ]);
+    expect(_findAllRoutes(createRouter(["/foo/:b", "/foo/:a"]), "GET", "/foo/x")).toEqual([
+      "/foo/:b",
+      "/foo/:a",
+    ]);
+  });
+});
+
 describe("matcher: named", () => {
   const router = createRouter(["/foo", "/foo/:bar", "/foo/:bar/:qaz"]);
 

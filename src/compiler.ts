@@ -135,8 +135,12 @@ function compileMethodMatch(
     const matchers = methods[key];
     if (matchers && matchers.length > 0) {
       if (key !== "") code += `if(m==="${key}")${matchers.length > 1 ? "{" : ""}`;
+      // Sort descending by weight and emit via `r.unshift`, so the final array
+      // is least->most specific. `unshift` reverses emit order, so reverse
+      // first to keep equal-weight siblings in insertion order (issue #187).
       const _matchers = matchers
         .map((m) => compileFinalMatch(ctx, m, currentIdx, params))
+        .reverse()
         .sort((a, b) => b.weight - a.weight);
       for (const matcher of _matchers) {
         code += matcher.code;

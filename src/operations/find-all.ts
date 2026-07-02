@@ -45,15 +45,17 @@ function _findAll<T>(
     const match = node.wildcard.methods[method] || node.wildcard.methods[""];
     if (match) {
       if (index < segments.length) {
-        matches.push(...match);
+        pushSorted(matches, match, true);
       } else {
         // Zero segments remain: only optional (`**`) wildcards match (mirrors findRoute)
+        const optional: MethodData<T>[] = [];
         for (const m of match) {
           const pMap = m.paramsMap;
           if (pMap?.[pMap.length - 1]?.[2] /* optional */) {
-            matches.push(m);
+            optional.push(m);
           }
         }
+        pushSorted(matches, optional, true);
       }
     }
   }
@@ -76,12 +78,14 @@ function _findAll<T>(
       // required (`:id`, `:id(\d+)`) routes (mirrors the wildcard branch above).
       const match = node.param.methods[method] || node.param.methods[""];
       if (match) {
+        const optional: MethodData<T>[] = [];
         for (const m of match) {
           const pMap = m.paramsMap;
           if (pMap?.[pMap.length - 1]?.[2] /* optional */) {
-            matches.push(m);
+            optional.push(m);
           }
         }
+        pushSorted(matches, optional, true);
       }
     }
   }
@@ -96,9 +100,46 @@ function _findAll<T>(
   if (index === segments.length && node.methods) {
     const match = node.methods[method] || node.methods[""];
     if (match) {
-      matches.push(...match);
+      // A param node (`key === "*"`) is a dynamic terminal, so a required last
+      // param (`:id`) outweighs an optional one (`*`); static terminals don't
+      // distinguish them (mirrors the compiler's `hasLastOptionalParam`).
+      pushSorted(matches, match, node.key === "*");
     }
   }
 
   return matches;
+}
+
+/**
+ * Push same-node sibling matches ordered least->most specific (ascending match
+ * weight), preserving insertion order on ties (stable sort). This mirrors the
+ * weight-based ordering the compiler emits for `matchAll`, so `findAllRoutes`
+ * and compiled `matchAll` agree regardless of route insertion order (#187).
+ *
+ * Weight matches the compiler's model: one point per regex-constrained param,
+ * plus one for a required last param on a `dynamicTerminal` (param/wildcard
+ * node) — static terminals don't distinguish required from optional there.
+ */
+function pushSorted<T>(
+  matches: MethodData<T>[],
+  match: MethodData<T>[],
+  dynamicTerminal: boolean,
+): void {
+  if (match.length > 1) {
+    match = match
+      .map((m): [MethodData<T>, number] => {
+        let w = 0;
+        const { paramsRegexp: rx, paramsMap: pm } = m;
+        for (let i = 0; i < rx.length; i++) {
+          if (rx[i]) w++;
+        }
+        if (dynamicTerminal && pm && !pm[pm.length - 1][2] /* required */) w++;
+        return [m, w];
+      })
+      .sort((a, b) => a[1] - b[1])
+      .map((e) => e[0]);
+  }
+  for (const m of match) {
+    matches.push(m);
+  }
 }
