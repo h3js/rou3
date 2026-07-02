@@ -14,7 +14,7 @@ const findRoute = /* @__PURE__ */ (() => {
     $12 = { path: "/wildcard/**" },
     $13 = { path: "/**" };
   return (m, p) => {
-    if (p.charCodeAt(p.length - 1) === 47) p = p.slice(0, -1) || "/";
+    if (p.charCodeAt(p.length - 1) === 47) p = p.slice(0, -1);
     if (p === "/test") {
       if (m === "GET") return { data: $0 };
     } else if (p === "/test/foo") {
@@ -30,8 +30,9 @@ const findRoute = /* @__PURE__ */ (() => {
     } else if (p === "/static:path/*/**") {
       if (m === "GET") return { data: $6 };
     }
-    let s = p.split("/"),
-      l = s.length;
+    let s = p.split("/");
+    if (s.length > 1 && s[s.length - 1] === "") s.pop();
+    let l = s.length;
     if (l > 1) {
       if (s[1] === "test") {
         if (l > 2) {

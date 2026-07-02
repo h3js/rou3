@@ -44,7 +44,17 @@ function _findAll<T>(
   if (node.wildcard && node.wildcard.methods) {
     const match = node.wildcard.methods[method] || node.wildcard.methods[""];
     if (match) {
-      matches.push(...match);
+      if (index < segments.length) {
+        matches.push(...match);
+      } else {
+        // Zero segments remain: only optional (`**`) wildcards match (mirrors findRoute)
+        for (const m of match) {
+          const pMap = m.paramsMap;
+          if (pMap?.[pMap.length - 1]?.[2] /* optional */) {
+            matches.push(m);
+          }
+        }
+      }
     }
   }
 
