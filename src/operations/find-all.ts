@@ -71,12 +71,16 @@ function _findAll<T>(
         }
       }
     } else if (node.param.methods) {
-      // End of path: only an optional trailing param matches (e.g. `/*` matches `/`)
+      // End of path: only optional trailing params match (e.g. `/*` matches `/`).
+      // Filter per entry — one param node can hold both optional (`*`) and
+      // required (`:id`, `:id(\d+)`) routes (mirrors the wildcard branch above).
       const match = node.param.methods[method] || node.param.methods[""];
       if (match) {
-        const pMap = match[0].paramsMap;
-        if (pMap?.[pMap?.length - 1]?.[2] /* optional */) {
-          matches.push(...match);
+        for (const m of match) {
+          const pMap = m.paramsMap;
+          if (pMap?.[pMap.length - 1]?.[2] /* optional */) {
+            matches.push(m);
+          }
         }
       }
     }

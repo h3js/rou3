@@ -156,6 +156,10 @@ function compileFinalMatch(
   let ret = `{data:${serializeData(ctx, data.data)}`;
 
   const conditions: string[] = [];
+  // Presence guards (segment-count checks) are not specificity constraints, so
+  // they must not raise `weight` — otherwise an optional `**` tail ties with a
+  // required `**:name` and the weight-sort/`unshift` ordering flips (#186).
+  let guardConditions = 0;
 
   // Add param properties
   const { paramsMap, paramsRegexp } = data;
@@ -169,6 +173,7 @@ function compileFinalMatch(
       } else if (lastParam[0] < 0 && paramsMap.length > 1) {
         // Optional `**` tail, but the required leading param(s) must be present
         conditions.push(`l>${currentIdx - 1}`);
+        guardConditions++;
       }
     }
     for (let i = 0; i < paramsRegexp.length; i++) {
@@ -195,7 +200,7 @@ function compileFinalMatch(
     (conditions.length > 0 ? `if(${conditions.join("&&")})` : "") +
     (ctx.opts?.matchAll ? `r.unshift(${ret}});` : `return ${ret}};`);
 
-  return { code, weight: conditions.length };
+  return { code, weight: conditions.length - guardConditions };
 }
 
 function compileNode(

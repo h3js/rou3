@@ -315,6 +315,24 @@ describe("matcher: regression #184", () => {
     expect(_findAllRoutes(router, "GET", "/42")).toEqual(["/(\\d+)/**"]);
     expect(_findAllRoutes(router, "GET", "/42/x")).toEqual(["/(\\d+)/**"]);
   });
+
+  it("optional & required routes on one param node filter per entry", () => {
+    // A single param node can hold both an optional `*` and a required
+    // `:id`/`:id(\d+)` route; the end-of-path branch must filter each entry.
+    expect(_findAllRoutes(createRouter(["/foo/*", "/foo/:id"]), "GET", "/foo")).toEqual(["/foo/*"]);
+    // Reverse insertion order (required registered first) must still match `*`.
+    expect(_findAllRoutes(createRouter(["/foo/:id", "/foo/*"]), "GET", "/foo")).toEqual(["/foo/*"]);
+    // A required regex sibling must not be pushed (previously crashed in getMatchParams).
+    expect(_findAllRoutes(createRouter(["/foo/*", "/foo/:id(\\d+)"]), "GET", "/foo")).toEqual([
+      "/foo/*",
+    ]);
+  });
+
+  it("optional `**` and required `**:name` on one node keep least→most order", () => {
+    const router = createRouter(["/:id/**", "/:id/**:rest"]);
+    expect(_findAllRoutes(router, "GET", "/a/b")).toEqual(["/:id/**", "/:id/**:rest"]);
+    expect(_findAllRoutes(router, "GET", "/a/b/c")).toEqual(["/:id/**", "/:id/**:rest"]);
+  });
 });
 
 describe("matcher: named", () => {
