@@ -14,8 +14,10 @@ describe("benchmark", () => {
     `;
     const { bytes, gzipSize } = await getBundleSize(code);
     console.log("bundle size", { bytes, gzipSize });
-    expect(bytes).toBeLessThanOrEqual(5800); // <5.8kb
-    expect(gzipSize).toBeLessThanOrEqual(2250); // <2.25kb
+    // Budget bumped from 5.8kb/2.25kb: findAllRoutes now validates regex param
+    // constraints and gates zero-segment param/wildcard matches (#184).
+    expect(bytes).toBeLessThanOrEqual(5900); // <5.9kb
+    expect(gzipSize).toBeLessThanOrEqual(2260); // <2.26kb
   });
 });
 
