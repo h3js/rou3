@@ -47,9 +47,11 @@ export function routesOverlap(patternA: string, patternB: string): boolean {
  * {@link routesOverlap}.
  *
  * Returned matches carry only `data` — a pattern describes a whole scope rather
- * than one concrete path, so no `params` can be resolved. Each matched `data`
- * value is returned at most once (routes with optional syntax expand to several
- * tree entries; duplicates would carry no extra information).
+ * than one concrete path, so no `params` can be resolved. A route registered
+ * with optional/group syntax expands into several tree entries that share one
+ * `data` reference; those are collapsed to a single match. Distinct routes are
+ * always reported separately, even when they carry an equal primitive `data`
+ * value (or none — `addRoute` stores `null` when no data is given).
  */
 export function findOverlappingRoutes<T>(
   ctx: RouterContext<T>,
@@ -67,7 +69,7 @@ function _collectOverlaps<T>(
   method: string,
   query: RouteShape[],
   edges: Edge[],
-  seen: Set<T>,
+  seen: Set<unknown>,
   matches: MatchedRoute<T>[],
 ): void {
   // Least- to most-specific: wildcard, then param, then static, then self.
@@ -95,11 +97,18 @@ function _collectOverlaps<T>(
     const data = node.methods[method] || node.methods[""];
     if (data) {
       for (const entry of data) {
-        if (seen.has(entry.data)) continue;
+        const d = entry.data;
+        // Collapse only genuine reference-duplicates: a route with optional/group
+        // syntax (`:x?`, `{/c}?`) expands into several tree entries that share the
+        // same `data` reference. Primitive/absent data (`addRoute` stores `null`
+        // when none is given) is never deduped, so distinct routes that happen to
+        // carry an equal primitive value are all reported instead of dropped.
+        const isRef = d !== null && (typeof d === "object" || typeof d === "function");
+        if (isRef && seen.has(d)) continue;
         const shape = shapeOf(edges, entry);
         if (query.some((q) => shapesOverlap(q, shape))) {
-          seen.add(entry.data);
-          matches.push({ data: entry.data });
+          if (isRef) seen.add(d);
+          matches.push({ data: d });
         }
       }
     }

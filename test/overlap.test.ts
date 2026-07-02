@@ -156,13 +156,38 @@ describe("findOverlappingRoutes", () => {
     expect(findOverlappingRoutes(router, "GET", "/c/\\*\\*/d").map((m) => m.data)).toEqual(["mid"]);
   });
 
-  it("returns each registered route once (expanded modifiers/groups)", () => {
-    const router = createRouter<string>();
-    addRoute(router, "GET", "/a/:x?", "opt");
-    addRoute(router, "GET", "/b{/c}?", "grp");
+  it("collapses a route that expands into several entries (shared data reference)", () => {
+    const router = createRouter<Record<string, unknown>>();
+    const opt = { name: "opt" };
+    const grp = { name: "grp" };
+    addRoute(router, "GET", "/a/:x?", opt);
+    addRoute(router, "GET", "/b{/c}?", grp);
 
-    expect(findOverlappingRoutes(router, "GET", "/a/**").map((m) => m.data)).toEqual(["opt"]);
-    expect(findOverlappingRoutes(router, "GET", "/b/**").map((m) => m.data)).toEqual(["grp"]);
+    // `:x?` / `{/c}?` expand to several tree entries sharing one data reference.
+    expect(findOverlappingRoutes(router, "GET", "/a/**").map((m) => m.data)).toEqual([opt]);
+    expect(findOverlappingRoutes(router, "GET", "/b/**").map((m) => m.data)).toEqual([grp]);
+  });
+
+  it("does not drop distinct overlapping routes that lack data (all default to null)", () => {
+    const router = createRouter();
+    addRoute(router, "GET", "/a/x");
+    addRoute(router, "GET", "/a/*");
+    addRoute(router, "GET", "/a/y");
+
+    // Three genuinely distinct routes all overlap `/a/**`; none may be dropped
+    // just because `addRoute` stored `null` for each (no data passed).
+    expect(findOverlappingRoutes(router, "GET", "/a/**")).toHaveLength(3);
+  });
+
+  it("keeps distinct routes that share an equal primitive data value", () => {
+    const router = createRouter<string>();
+    addRoute(router, "GET", "/a/**", "same");
+    addRoute(router, "GET", "/a/b/**", "same");
+
+    expect(findOverlappingRoutes(router, "GET", "/a/b/c").map((m) => m.data)).toEqual([
+      "same",
+      "same",
+    ]);
   });
 
   it("named wildcard scope requires at least one segment (matches findAllRoutes)", () => {

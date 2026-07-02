@@ -42,38 +42,15 @@ export function routeToShapes(pattern: string): RouteShape[] {
 /**
  * Build the {@link RouteShape} of a registered route entry from its tree
  * position (kind-tagged edges) and its own `paramsMap` classification.
+ *
+ * A registered entry is stable once inserted, so its shape is cached across
+ * queries. (Query patterns go through {@link routeToShapes}, whose throwaway
+ * entries are transient and never benefit from the cache — they call
+ * `_computeShape` directly.)
  */
 export function shapeOf(edges: Edge[], entry: MethodData): RouteShape {
   let shape = _shapeCache.get(entry);
-  if (shape) return shape;
-  const fixed: RouteShape["fixed"] = [];
-  let tailMin = 0;
-  let tailMax = 0;
-  const pMap = entry.paramsMap;
-  for (let d = 0; d < edges.length; d++) {
-    const edge = edges[d];
-    if (typeof edge === "string") {
-      fixed.push(edge);
-    } else if (edge === 1) {
-      // Wildcard is always terminal and its paramsMap entry is always last
-      // (`**` is optional, `**:name` requires one segment).
-      tailMin = pMap![pMap!.length - 1][2] ? 0 : 1;
-      tailMax = Number.POSITIVE_INFINITY;
-    } else if (pMap) {
-      // Param: classified by this entry's paramsMap entry at this segment index.
-      const p = pMap.find((e) => e[0] === d)!;
-      if (p[1] instanceof RegExp) {
-        fixed.push(p[1]);
-      } else if (p[2] /* bare `*` */ && d === edges.length - 1) {
-        // A trailing bare `*` matches zero-or-one segment; elsewhere exactly one.
-        tailMax = 1;
-      } else {
-        fixed.push(undefined);
-      }
-    }
-  }
-  shape = { fixed, tailMin, tailMax };
-  _shapeCache.set(entry, shape);
+  if (!shape) _shapeCache.set(entry, (shape = _computeShape(edges, entry)));
   return shape;
 }
 
@@ -120,7 +97,7 @@ const _shapeCache = new WeakMap<MethodData, RouteShape>();
 function _collectShapes(node: Node, edges: Edge[], shapes: RouteShape[]): void {
   if (node.methods) {
     for (const entry of node.methods[""] || []) {
-      shapes.push(shapeOf(edges, entry));
+      shapes.push(_computeShape(edges, entry));
     }
   }
   if (node.static) {
@@ -140,6 +117,36 @@ function _collectShapes(node: Node, edges: Edge[], shapes: RouteShape[]): void {
     _collectShapes(node.wildcard, edges, shapes);
     edges.pop();
   }
+}
+
+function _computeShape(edges: Edge[], entry: MethodData): RouteShape {
+  const fixed: RouteShape["fixed"] = [];
+  let tailMin = 0;
+  let tailMax = 0;
+  const pMap = entry.paramsMap;
+  for (let d = 0; d < edges.length; d++) {
+    const edge = edges[d];
+    if (typeof edge === "string") {
+      fixed.push(edge);
+    } else if (edge === 1) {
+      // Wildcard is always terminal and its paramsMap entry is always last
+      // (`**` is optional, `**:name` requires one segment).
+      tailMin = pMap![pMap!.length - 1][2] ? 0 : 1;
+      tailMax = Number.POSITIVE_INFINITY;
+    } else if (pMap) {
+      // Param: classified by this entry's paramsMap entry at this segment index.
+      const p = pMap.find((e) => e[0] === d)!;
+      if (p[1] instanceof RegExp) {
+        fixed.push(p[1]);
+      } else if (p[2] /* bare `*` */ && d === edges.length - 1) {
+        // A trailing bare `*` matches zero-or-one segment; elsewhere exactly one.
+        tailMax = 1;
+      } else {
+        fixed.push(undefined);
+      }
+    }
+  }
+  return { fixed, tailMin, tailMax };
 }
 
 /**

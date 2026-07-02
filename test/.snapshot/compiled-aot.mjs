@@ -30,8 +30,9 @@ const findRoute = /* @__PURE__ */ (() => {
     } else if (p === "/static:path/*/**") {
       if (m === "GET") return { data: $6 };
     }
-    let s = p.split("/"),
-      l = s.length;
+    let s = p.split("/");
+    if (s[s.length - 1] === "") s.pop();
+    let l = s.length;
     if (l > 1) {
       if (s[1] === "test") {
         if (l > 2) {

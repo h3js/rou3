@@ -95,7 +95,10 @@ function compileRouteMatch(ctx: CompilerContext): string {
   const match = compileNode(ctx, ctx.router.root, [], 1);
   // Empty root node emit an empty bound check
   if (match) {
-    code += `let s=p.split("/"),l=s.length;${match}`;
+    // Drop the trailing empty segment root "/" splits into (["",""]) so its
+    // segment count matches `splitPath`; otherwise required root wildcards/params
+    // (`/**:name`, `/:x`) would wrongly match "/" (mirrors findRoute/findAllRoutes).
+    code += `let s=p.split("/");if(s[s.length-1]==="")s.pop();let l=s.length;${match}`;
   }
 
   if (!code) {

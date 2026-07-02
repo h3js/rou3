@@ -244,6 +244,26 @@ describe("matcher: named wildcard", () => {
   });
 });
 
+describe("matcher: root path parity", () => {
+  // `_findAllRoutes` asserts interpreter and compiled matchAll agree.
+  it("required root wildcard does not match root (0 segments)", () => {
+    const router = createRouter(["/**:all"]);
+    expect(_findAllRoutes(router, "GET", "/")).toEqual([]);
+    expect(_findAllRoutes(router, "GET", "/a")).toEqual(["/**:all"]);
+  });
+
+  it("optional root wildcard matches root", () => {
+    const router = createRouter(["/**"]);
+    expect(_findAllRoutes(router, "GET", "/")).toEqual(["/**"]);
+  });
+
+  it("required root param does not match root (0 segments)", () => {
+    const router = createRouter(["/:x"]);
+    expect(_findAllRoutes(router, "GET", "/")).toEqual([]);
+    expect(_findAllRoutes(router, "GET", "/a")).toEqual(["/:x"]);
+  });
+});
+
 describe("matcher: named", () => {
   const router = createRouter(["/foo", "/foo/:bar", "/foo/:bar/:qaz"]);
 
