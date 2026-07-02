@@ -18,7 +18,10 @@ describe("benchmark", () => {
     // same-node siblings by specificity so it agrees with compiled matchAll
     // regardless of insertion order (#187). Previous bump was for #184.
     // regExpToRoute() is tree-shakeable, so it does not affect this budget.
-    expect(bytes).toBeLessThanOrEqual(6200); // <6.2kb
+    // +~15B: getParamRegexp() now escapes only literal dots *outside* (...) groups
+    // so a `.` inside a regex constraint (`:id(\d+\.\d+)`) stays verbatim instead
+    // of being double-escaped; gzip is unchanged (2383).
+    expect(bytes).toBeLessThanOrEqual(6250); // <6.25kb
     expect(gzipSize).toBeLessThanOrEqual(2385); // <2.39kb
   });
 });

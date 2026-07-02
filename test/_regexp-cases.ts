@@ -116,6 +116,16 @@ export const regexpCases: Record<string, RegExpCase> = {
     regex: /^\/book(?:s)?\/?$/,
     match: [["/book"], ["/books"]],
   },
+  // Constraint bodies are opaque regex: dots inside them (escaped `\.` or a
+  // char class) must be preserved verbatim, not blanket-escaped to `\\.`.
+  "/blog/:slug(\\d+\\.\\d+)": {
+    regex: /^\/blog\/(?<slug>\d+\.\d+)\/?$/,
+    match: [["/blog/1.2", { slug: "1.2" }]],
+  },
+  "/img/:name([a-z.]+)": {
+    regex: /^\/img\/(?<name>[a-z.]+)\/?$/,
+    match: [["/img/a.b.c", { name: "a.b.c" }]],
+  },
   "/blog/:id(\\d+){-:title}?": {
     regex: /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/,
     match: [

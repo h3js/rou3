@@ -148,6 +148,12 @@ function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
         continue;
       }
     }
+    // A literal `.` outside a (...) group is a route separator -> escape it;
+    // a `.` inside a group is opaque regex and stays verbatim (`:id(\d+\.\d+)`).
+    else if (c === 46 && _d === 0) {
+      _s += "\\.";
+      continue;
+    }
     _s += segment[j];
   }
   [_s, _i] = replaceSegmentWildcards(_s, _i);
@@ -155,7 +161,6 @@ function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
   const regex = _s
     .replace(/:([\w-]+)(?:\(([^)]*)\))?/g, (_, id, p) => `(?<${id}>${p || "[^/]+"})`)
     .replace(/\((?![?<])/g, () => `(?<${toUnnamedGroupKey(_i++)}>`)
-    .replace(/\./g, "\\.")
     .replace(/\uFFFE(.)/g, (_, c) => (/[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c));
 
   return [new RegExp(`^${regex}$`), _i];

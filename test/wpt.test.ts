@@ -114,27 +114,25 @@ const SKIP_PATTERNS = new Set([
 // Tracked as `it.fails()` so we notice if rou3 gains compatibility.
 // Labels include `[match]` or `[no match]` to disambiguate duplicate patterns.
 const KNOWN_DIFFS = new Set([
-  // `(.*)` semantics — URLPattern `(.*)` is greedy catch-all across `/`;
-  // rou3 `(.*)` inside a segment is treated as a named regex group
-  "/foo/(.*) → /foo/bar [match]",
-  "/foo/(.*) → /foo/bar/baz [match]",
-  "/foo/:bar(.*) → /foo/bar [match]",
-  "/foo/:bar(.*) → /foo/bar/baz [match]",
+  // `(.*)` cross-segment — a regex group `(.*)` matches across `/` (URLPattern
+  // semantics), which routeToRegExp now reproduces, so single-segment inputs
+  // agree for every strategy. The radix tree is segment-scoped, so multi-segment
+  // and empty inputs stay router-only diffs (see ROUTER_KNOWN_DIFFS). Only inputs
+  // that still differ for *every* strategy remain here.
 
   // `*` catch-all vs single-segment — URLPattern `*` = `(.*)`, rou3 `*` = `([^/]*)`
   "/foo/* → /foo/bar/baz [match]",
 
   // `(.*)` / `*` with modifiers — rou3 doesn't support these as URLPattern does
-  "/foo/(.*)? → /foo/bar [match]",
-  "/foo/(.*)? → /foo/bar/baz [match]",
   "/foo/(.*)? → /foo [match]",
   "/foo/(.*)? → /foo/ [match]",
   "/foo/*? → /foo/bar/baz [match]",
   "/foo/*? → /foo [match]",
   "/foo/*? → /foo/ [match]",
-  "/foo/(.*)+ → /foo/bar [match]",
-  "/foo/(.*)+ → /foo/bar/baz [match]",
   "/foo/*+ → /foo/bar/baz [match]",
+  // `(.*)*` captures into the trailing `*` group, so params differ from
+  // URLPattern for every strategy even when the input matches.
+  "/foo/(.*)* → /foo/bar [match]",
   "/foo/(.*)* → /foo/bar/baz [match]",
   "/foo/(.*)* → /foo [match]",
 
@@ -251,6 +249,13 @@ const ROUTER_KNOWN_DIFFS = new Set([
   "/foo/(.*)+ → /foo/ [match]",
   "/foo/*+ → /foo/ [match]",
   "/foo/(.*)* → /foo/ [match]",
+
+  // `(.*)` cross-segment — routeToRegExp matches `bar/baz` (regex `.` spans `/`),
+  // but the segment-scoped radix tree stops at one segment.
+  "/foo/(.*) → /foo/bar/baz [match]",
+  "/foo/:bar(.*) → /foo/bar/baz [match]",
+  "/foo/(.*)? → /foo/bar/baz [match]",
+  "/foo/(.*)+ → /foo/bar/baz [match]",
 ]);
 
 type MatchStrategy = {
