@@ -213,4 +213,70 @@ describe("findOverlappingRoutes", () => {
         .sort(),
     ).toEqual(["alpha", "num"]);
   });
+
+  it("prunes static siblings precisely against a regex-constrained query", () => {
+    const router = createRouter<string>();
+    addRoute(router, "GET", "/42", "num");
+    addRoute(router, "GET", "/abc", "alpha");
+
+    // A regex query keeps only the static literal it accepts (`/abc` pruned).
+    expect(findOverlappingRoutes(router, "GET", "/:id(\\d+)").map((m) => m.data)).toEqual(["num"]);
+  });
+
+  it("fans an any-segment query across all static siblings", () => {
+    const router = createRouter<string>();
+    addRoute(router, "GET", "/a/z", "A");
+    addRoute(router, "GET", "/b/z", "B");
+
+    expect(
+      findOverlappingRoutes(router, "GET", "/*/z")
+        .map((m) => m.data)
+        .sort(),
+    ).toEqual(["A", "B"]);
+  });
+
+  it("reaches statics deeper than the query's fixed prefix via its tail", () => {
+    const deep = createRouter<string>();
+    addRoute(deep, "GET", "/a/b/c/d", "deep");
+    expect(findOverlappingRoutes(deep, "GET", "/a/**").map((m) => m.data)).toEqual(["deep"]);
+
+    // A trailing `*` tail is [0,1], so it must not reach a 2-deep static.
+    const shallow = createRouter<string>();
+    addRoute(shallow, "GET", "/a/b", "hit");
+    addRoute(shallow, "GET", "/a/b/c", "miss");
+    expect(findOverlappingRoutes(shallow, "GET", "/a/*").map((m) => m.data)).toEqual(["hit"]);
+  });
+
+  it("orders wildcard -> param -> static -> self at a single node", () => {
+    const router = createRouter<string>();
+    addRoute(router, "GET", "/a", "self");
+    addRoute(router, "GET", "/a/b", "static");
+    addRoute(router, "GET", "/a/:p", "param");
+    addRoute(router, "GET", "/a/**", "wild");
+
+    expect(findOverlappingRoutes(router, "GET", "/a/**").map((m) => m.data)).toEqual([
+      "wild",
+      "param",
+      "static",
+      "self",
+    ]);
+  });
+
+  it("dedups by reference identity for function data too", () => {
+    // Expansion siblings share one function reference -> collapsed.
+    const collapse = createRouter<() => void>();
+    const fn = () => {};
+    addRoute(collapse, "GET", "/a/:x?", fn);
+    const collapsed = findOverlappingRoutes(collapse, "GET", "/a/**");
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0].data).toBe(fn);
+
+    // Distinct functions on distinct routes are both reported.
+    const distinct = createRouter<() => void>();
+    const f1 = () => {};
+    const f2 = () => {};
+    addRoute(distinct, "GET", "/a/**", f1);
+    addRoute(distinct, "GET", "/a/b/**", f2);
+    expect(findOverlappingRoutes(distinct, "GET", "/a/b/c").map((m) => m.data)).toEqual([f1, f2]);
+  });
 });

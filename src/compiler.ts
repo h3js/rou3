@@ -86,7 +86,12 @@ function compileRouteMatch(ctx: CompilerContext): string {
     for (const key in ctx.router.static) {
       const node = ctx.router.static[key];
       if (node?.methods) {
-        code += `${hasIf ? "else " : ""}if(p===${JSON.stringify(key.replace(/\/$/, ""))}){${compileMethodMatch(ctx, node.methods, [], -1)}}`;
+        // Root "/" collapses to "" after the trailing-slash strip, but the once-
+        // stripped doubled slash "//" reaches here as "/", so root matches both
+        // (mirrors the interpreter's `ctx.static` fast path).
+        const nk = key.replace(/\/$/, "");
+        const cond = nk === "" ? `(p===""||p==="/")` : `p===${JSON.stringify(nk)}`;
+        code += `${hasIf ? "else " : ""}if(${cond}){${compileMethodMatch(ctx, node.methods, [], -1)}}`;
         hasIf = true;
       }
     }
