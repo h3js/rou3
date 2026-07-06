@@ -239,3 +239,29 @@ describe("method-agnostic fallback (compiled parity)", () => {
     });
   }
 });
+
+describe("end-of-path optional fallback with mixed same-node siblings", () => {
+  // One param/wildcard node can hold both required (`:id`, `**:name`) and
+  // optional (`*`, `**`) routes for the same method. The end-of-path fallback
+  // must scan all entries, not just the first-inserted one.
+  const router = createEmptyRouter<{ path: string }>();
+  addRoute(router, "GET", "/p/:id", { path: "P-REQUIRED" });
+  addRoute(router, "GET", "/p/*", { path: "P-OPTIONAL" });
+  addRoute(router, "GET", "/w/**:name", { path: "W-REQUIRED" });
+  addRoute(router, "GET", "/w/**", { path: "W-OPTIONAL" });
+  const compiledLookup = compileRouter(router);
+
+  const lookups = [
+    { name: "findRoute", match: (m: string, p: string) => findRoute(router, m, p) },
+    { name: "compiledLookup", match: (m: string, p: string) => compiledLookup(m, p) },
+  ];
+
+  for (const { name, match } of lookups) {
+    it(`optional sibling matches even when a required one was inserted first (${name})`, () => {
+      expect(match("GET", "/p")).toMatchObject({ data: { path: "P-OPTIONAL" } });
+      expect(match("GET", "/w")).toMatchObject({ data: { path: "W-OPTIONAL" } });
+      expect(match("GET", "/p/1")).toMatchObject({ data: { path: "P-REQUIRED" } });
+      expect(match("GET", "/w/1")).toMatchObject({ data: { path: "W-REQUIRED" } });
+    });
+  }
+});
