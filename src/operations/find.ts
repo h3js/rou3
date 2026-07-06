@@ -85,10 +85,16 @@ function _lookupTree<T>(
     const match = _lookupTree(node.param, method, segments, index + 1);
     if (match) {
       if (node.param.hasRegexParam) {
-        const exactMatch =
-          match.find((m) => m.paramsRegexp[index]?.test(segment)) ||
-          match.find((m) => !m.paramsRegexp[index]);
-        return exactMatch ? [exactMatch] : undefined;
+        // First regex-constrained sibling that matches wins; the first sibling
+        // without a regex at this index is the fallback (insertion order).
+        let fallback: MethodData<T> | undefined;
+        for (const m of match) {
+          const regexp = m.paramsRegexp[index];
+          if (regexp) {
+            if (regexp.test(segment)) return [m];
+          } else fallback ||= m;
+        }
+        return fallback && [fallback];
       }
       return match;
     }

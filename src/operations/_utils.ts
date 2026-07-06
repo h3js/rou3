@@ -46,8 +46,10 @@ export function normalizePath(path: string): string {
 }
 
 export function splitPath(path: string): string[] {
-  const [_, ...s] = path.split("/");
-  return s[s.length - 1] === "" ? s.slice(0, -1) : s;
+  const s = path.split("/");
+  s.shift();
+  if (s[s.length - 1] === "") s.pop();
+  return s;
 }
 
 export function getMatchParams(
