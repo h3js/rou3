@@ -146,9 +146,16 @@ describe("compareRoutes", () => {
     ["/user/:id(\\d+)", "/user/42", "subsumes", "regex accepts literal (precise)"],
     ["/user/:id(\\d+)", "/user/abc", "disjoint", "regex rejects literal (precise)"],
     ["/user/:id(\\d+)", "/user/:id(\\d+)", "equal", "identical regex sources"],
+    ["/user/:id(\\d+)", "/user/:x(\\d+)", "equal", "identical regex, param names don't matter"],
+    ["/a/:x(\\d+)", "/a/:y(\\d+)/**", "subsumed", "same constraint, other pattern deeper"],
     ["/user/:id(\\d+)", "/user/:x", "subsumed", "any-param covers regex"],
     ["/user/:id(\\d+)", "/user/:n([a-z]+)", "partial", "regex vs regex (undecidable)"],
     ["/user/:id(\\d+)", "/user/**", "subsumed", "wildcard covers regex"],
+    // Equality between a regex and the literal/any value-set it happens to
+    // coincide with is undecidable — only the ⊇ direction is provable, so the
+    // verdict degrades to the proven containment, never to a wrong "equal".
+    ["/user/:id(42)", "/user/42", "subsumes", "regex==literal degrades to containment"],
+    ["/u/:id([\\s\\S]+)", "/u/:x", "subsumed", "regex==any-param degrades to containment"],
 
     // escaping
     ["/a/\\*", "/a/*", "subsumed", "escaped star is one literal of trailing *"],

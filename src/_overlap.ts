@@ -1,5 +1,6 @@
 import { createRouter } from "./context.ts";
 import { addRoute } from "./operations/add.ts";
+import { mergeShapes } from "./_subsume.ts";
 import type { MethodData, Node } from "./types.ts";
 
 /**
@@ -30,13 +31,25 @@ export type Edge = string | 0 | 1;
  * encoding, modifiers) and reading the resulting tree entries. Both query
  * patterns and registered routes are therefore classified by the exact same
  * code, so overlap stays consistent with route matching by construction.
+ *
+ * Results are memoized per pattern string (typical consumers compare N
+ * patterns pairwise — N parses instead of N²) and must be treated as
+ * immutable by callers.
  */
 export function routeToShapes(pattern: string): RouteShape[] {
-  const ctx = createRouter();
-  addRoute(ctx, "", pattern);
-  const shapes: RouteShape[] = [];
-  _collectShapes(ctx.root, [], shapes);
-  return _mergeShapes(shapes);
+  let shapes = _patternShapes.get(pattern);
+  if (shapes === undefined) {
+    const ctx = createRouter();
+    addRoute(ctx, "", pattern);
+    shapes = [];
+    _collectShapes(ctx.root, [], shapes);
+    shapes = mergeShapes(shapes);
+    // Keep the memo bounded; pattern vocabularies are small in practice, so a
+    // full reset on overflow is simpler than recency tracking.
+    if (_patternShapes.size >= 1024) _patternShapes.clear();
+    _patternShapes.set(pattern, shapes);
+  }
+  return shapes;
 }
 
 /**
@@ -76,36 +89,6 @@ export function shapesOverlap(a: RouteShape, b: RouteShape): boolean {
 }
 
 /**
- * Whether shape `a` certainly matches a superset of the paths shape `b`
- * matches (subset containment of match-sets, `a` ⊇ `b`).
- *
- * Sound but not complete: `true` is a proof, `false` means "not provable"
- * rather than "certainly not a superset". Containment between two regex
- * constraints is only decided by source equality, and a regex is only proven
- * to cover a static literal via an anchored `test()` (regex intersection is
- * undecidable in general).
- */
-export function shapeSubsumes(a: RouteShape, b: RouteShape): boolean {
-  const fa = a.fixed.length;
-  const fb = b.fixed.length;
-  // `b`'s total-length range must sit inside `a`'s.
-  if (fa + a.tailMin > fb + b.tailMin || fa + a.tailMax < fb + b.tailMax) {
-    return false;
-  }
-  const common = fa < fb ? fa : fb;
-  for (let k = 0; k < common; k++) {
-    if (!_segmentSubsumes(a.fixed[k], b.fixed[k])) return false;
-  }
-  // Positions covered by `b`'s any-value tail but fixed in `a` must be
-  // unconstrained. (Length containment already guarantees every `b` path is
-  // long enough to reach all of `a`'s fixed positions.)
-  for (let k = fb; k < fa; k++) {
-    if (a.fixed[k] !== undefined) return false;
-  }
-  return true;
-}
-
-/**
  * Whether any query shape can match the static segment `key` at `depth`
  * (either via its fixed matcher there, or via its any-value tail).
  */
@@ -123,6 +106,9 @@ export function mayMatchAt(query: RouteShape[], depth: number, key: string): boo
 
 // A route entry's shape never changes once inserted; cache across queries.
 const _shapeCache = new WeakMap<MethodData, RouteShape>();
+
+// Pattern -> canonical shapes memo for `routeToShapes` (see its doc comment).
+const _patternShapes = new Map<string, RouteShape[]>();
 
 function _collectShapes(node: Node, edges: Edge[], shapes: RouteShape[]): void {
   if (node.methods) {
@@ -188,55 +174,6 @@ function _computeShape(edges: Edge[], entry: MethodData): RouteShape {
     fixed.length = f;
   }
   return { fixed, tailMin, tailMax };
-}
-
-/**
- * Collapse shapes that differ only in tail length into one shape per fixed
- * prefix (union of contiguous total-length ranges). An optional-syntax pattern
- * expands into several entries (`/a/:x?` -> `/a` + `/a/:x`) whose canonical
- * shapes are `["a"] [0,0]` and `["a"] [1,1]`; merging yields `["a"] [0,1]` —
- * the same shape as `/a/*` — so containment checks see through the expansion.
- */
-function _mergeShapes(shapes: RouteShape[]): RouteShape[] {
-  for (let i = 0; i < shapes.length; i++) {
-    for (let j = i + 1; j < shapes.length; j++) {
-      const a = shapes[i];
-      const b = shapes[j];
-      // Ranges must be equal fixed-wise and union into one contiguous range.
-      if (
-        _sameFixed(a.fixed, b.fixed) &&
-        a.tailMin <= b.tailMax + 1 &&
-        b.tailMin <= a.tailMax + 1
-      ) {
-        a.tailMin = Math.min(a.tailMin, b.tailMin);
-        a.tailMax = Math.max(a.tailMax, b.tailMax);
-        shapes.splice(j, 1);
-        j = i; // Restart: the widened range may absorb earlier-skipped shapes.
-      }
-    }
-  }
-  return shapes;
-}
-
-function _sameFixed(a: RouteShape["fixed"], b: RouteShape["fixed"]): boolean {
-  if (a.length !== b.length) return false;
-  for (let k = 0; k < a.length; k++) {
-    if (!_segmentSubsumes(a[k], b[k]) || !_segmentSubsumes(b[k], a[k])) return false;
-  }
-  return true;
-}
-
-/**
- * Whether single-segment matcher `x` certainly matches every value `y`
- * matches. `any` covers everything; literals must be equal; an (anchored)
- * regex provably covers a literal it tests true on, and another regex only
- * when their sources are identical.
- */
-function _segmentSubsumes(x: string | RegExp | undefined, y: string | RegExp | undefined): boolean {
-  if (x === undefined) return true;
-  if (typeof x === "string") return x === y;
-  if (typeof y === "string") return x.test(y);
-  return y instanceof RegExp && x.source === y.source && x.flags === y.flags;
 }
 
 /**

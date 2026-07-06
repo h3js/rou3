@@ -182,7 +182,7 @@ routesOverlap("/**", "/protected/feed/**"); // true
 routesOverlap("/a/**", "/b/**"); // false
 
 // How do two patterns' match-sets relate? (pure, router-free)
-compareRoutes("/api/**", "/api/admin/**"); // "subsumes" (strict superset)
+compareRoutes("/api/**", "/api/admin/**"); // "subsumes" (superset)
 compareRoutes("/a/:x", "/a/:y"); // "equal" (names don't matter)
 compareRoutes("/a/*/c", "/a/b/*"); // "partial" (ambiguous specificity)
 
@@ -200,7 +200,7 @@ findOverlappingRoutes(router, "GET", "/protected/feed/**");
 ```
 
 - **`routesOverlap(patternA, patternB)`** — returns `true` if the two patterns' match-sets intersect (there **exists a concrete path matched by both**). This is _overlap_, not subset containment.
-- **`compareRoutes(patternA, patternB)`** — classifies the relation between the two match-sets: `"disjoint"` (no common path), `"equal"` (same paths — param _names_ are ignored, so `/a/:x` equals `/a/:y` and `/a/:x?` equals `/a/*`), `"subsumes"` (`patternA` matches a strict superset of `patternB`), `"subsumed"` (strict subset), or `"partial"` (they intersect but neither contains the other). Useful for ordering patterns by specificity and detecting ambiguous pairs where "most specific match" is undefined. The verdict is **sound**: every answer except `"partial"` is a proof, and undecidable cases (e.g. containment between two different regex constraints) degrade to `"partial"`, never to a wrong claim.
+- **`compareRoutes(patternA, patternB)`** — classifies the relation between the two match-sets: `"disjoint"` (provably no common path), `"equal"` (provably the same paths — param _names_ are ignored, so `/a/:x` equals `/a/:y`, `/u/:id(\d+)` equals `/u/:x(\d+)`, and `/a/:x?` equals `/a/*`), `"subsumes"` (`patternA` provably matches every path `patternB` matches — a superset, strict unless equality is undecidable), `"subsumed"` (the mirror image), or `"partial"` (no containment proven; the sets _may_ intersect). Useful for ordering patterns by specificity and detecting ambiguous pairs where "most specific match" is undefined. Every verdict's containment claims are proofs, and undecidable cases degrade to a **weaker verdict, never a wrong claim**: containment between two different regex constraints falls back to `"partial"` (even when the sets are actually disjoint — see the over-approximation note below — or actually equal), and an actually-equal pair whose equality is only provable in one direction (e.g. `/u/:id(42)` vs `/u/42`) reports the proven containment instead of `"equal"`.
 - **`findOverlappingRoutes(router, method, pattern)`** — like `findAllRoutes`, but the query is a **pattern** instead of a concrete path. Returns every registered route whose match-set intersects the pattern, ordered least → most specific, with the same method handling as `findAllRoutes` (falls back to the method-agnostic bucket). Matches carry only `data` — a scope has no single concrete path, so no `params` are resolved. A single route registered with optional/group syntax expands into several tree entries sharing one `data` reference and is reported once; distinct routes are always reported separately, even when they share an equal primitive `data` value (or none).
 
 **Overlap semantics** are computed with rou3's own segment/radix rules, so they stay consistent with `findRoute`/`findAllRoutes`:
