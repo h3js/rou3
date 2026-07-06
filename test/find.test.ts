@@ -3,6 +3,7 @@ import { createRouter, formatTree } from "./_utils.ts";
 import {
   addRoute,
   createRouter as createEmptyRouter,
+  findAllRoutes,
   findRoute,
   removeRoute,
 } from "../src/index.ts";
@@ -236,6 +237,208 @@ describe("method-agnostic fallback (compiled parity)", () => {
       expect(match("GET", "/x/42")).toMatchObject({ data: { path: "GET-DATA" } });
       expect(match("GET", "/x/abc")).toBeUndefined();
       expect(match("POST", "/x/abc")).toMatchObject({ data: { path: "AGN" } });
+    });
+  }
+});
+
+describe("duplicate route registrations (compiled parity)", () => {
+  // findRoute resolves duplicates in insertion order (`staticMatch[0]` /
+  // first regex-passing entry); compiled single-match must agree instead of
+  // returning the last-registered entry.
+  const router = createEmptyRouter<{ path: string }>();
+  addRoute(router, "GET", "/dup", { path: "S-FIRST" });
+  addRoute(router, "GET", "/dup", { path: "S-SECOND" });
+  addRoute(router, "GET", "/dup/:x", { path: "P-FIRST" });
+  addRoute(router, "GET", "/dup/:x", { path: "P-SECOND" });
+  addRoute(router, "GET", "/dup/:x(\\d+)/r", { path: "R-FIRST" });
+  addRoute(router, "GET", "/dup/:x(\\d+)/r", { path: "R-SECOND" });
+  const compiledLookup = compileRouter(router);
+
+  const lookups = [
+    { name: "findRoute", match: (m: string, p: string) => findRoute(router, m, p) },
+    { name: "compiledLookup", match: (m: string, p: string) => compiledLookup(m, p) },
+  ];
+
+  for (const { name, match } of lookups) {
+    it(`returns the first-registered duplicate (${name})`, () => {
+      expect(match("GET", "/dup")).toMatchObject({ data: { path: "S-FIRST" } });
+      expect(match("GET", "/dup/1")).toMatchObject({ data: { path: "P-FIRST" } });
+      expect(match("GET", "/dup/1/r")).toMatchObject({ data: { path: "R-FIRST" } });
+    });
+  }
+});
+
+describe("prototype-key lookups (compiled parity)", () => {
+  // Neither an Object.prototype member used as a path/method nor a
+  // "__proto__" segment may leak a match (interpreter uses null-proto maps).
+  const router = createEmptyRouter<{ path: string }>();
+  addRoute(router, "GET", "/static", { path: "S" });
+  addRoute(router, "GET", "/:p", { path: "P" });
+  const compiledLookup = compileRouter(router);
+
+  const lookups = [
+    { name: "findRoute", match: (m: string, p: string) => findRoute(router, m, p) },
+    { name: "compiledLookup", match: (m: string, p: string) => compiledLookup(m, p) },
+  ];
+
+  for (const { name, match } of lookups) {
+    it(`does not match via prototype keys (${name})`, () => {
+      expect(match("__proto__", "/static")).toBeUndefined();
+      expect(match("constructor", "/static")).toBeUndefined();
+      expect(match("toString", "/static")).toBeUndefined();
+      expect(match("GET", "/__proto__")).toMatchObject({
+        data: { path: "P" },
+        params: { p: "__proto__" },
+      });
+    });
+  }
+});
+
+describe("many static routes (compiled static-map parity)", () => {
+  // More than STATIC_CHAIN_MAX static paths switch the compiled static
+  // dispatch from an `else if` chain to a null-proto map lookup — pin that
+  // codegen path: hits, misses, root, method-agnostic fallback,
+  // first-registered duplicates, prototype keys, and matchAll ordering.
+  const router = createEmptyRouter<{ path: string }>();
+  for (let i = 0; i < 10; i++) {
+    addRoute(router, "GET", `/page${i}`, { path: `/page${i}` });
+  }
+  addRoute(router, "GET", "/", { path: "ROOT" });
+  addRoute(router, "", "/any", { path: "ANY" });
+  addRoute(router, "GET", "/dup", { path: "D-FIRST" });
+  addRoute(router, "GET", "/dup", { path: "D-SECOND" });
+  addRoute(router, "POST", "/page0/:id", { path: "/page0/:id" });
+  const compiledLookup = compileRouter(router);
+  const compiledMatchAll = compileRouter(router, { matchAll: true });
+
+  const lookups = [
+    { name: "findRoute", match: (m: string, p: string) => findRoute(router, m, p) },
+    { name: "compiledLookup", match: (m: string, p: string) => compiledLookup(m, p) },
+  ];
+
+  for (const { name, match } of lookups) {
+    it(`resolves static routes via the map (${name})`, () => {
+      expect(match("GET", "/page0")).toMatchObject({ data: { path: "/page0" } });
+      expect(match("GET", "/page9")).toMatchObject({ data: { path: "/page9" } });
+      expect(match("GET", "/page9/")).toMatchObject({ data: { path: "/page9" } });
+      expect(match("GET", "/")).toMatchObject({ data: { path: "ROOT" } });
+      expect(match("GET", "//")).toMatchObject({ data: { path: "ROOT" } });
+      expect(match("GET", "/nope")).toBeUndefined();
+      // method-agnostic fallback + method miss falling through to the tree
+      expect(match("DELETE", "/any")).toMatchObject({ data: { path: "ANY" } });
+      expect(match("POST", "/page0/42")).toMatchObject({
+        data: { path: "/page0/:id" },
+        params: { id: "42" },
+      });
+      expect(match("POST", "/page1")).toBeUndefined();
+      // duplicates resolve to the first-registered entry
+      expect(match("GET", "/dup")).toMatchObject({ data: { path: "D-FIRST" } });
+      // prototype keys must not leak through the map
+      expect(match("__proto__", "/page0")).toBeUndefined();
+      expect(match("GET", "/__proto__")).toBeUndefined();
+      expect(match("GET", "/constructor")).toBeUndefined();
+    });
+  }
+
+  it("matchAll agrees with findAllRoutes (map codegen)", () => {
+    for (const path of ["/page0", "/dup", "/any", "/", "/nope"]) {
+      for (const method of ["GET", "POST", "__proto__"]) {
+        expect(compiledMatchAll(method, path).map((mr) => mr.data.path)).toEqual(
+          findAllRoutes(router, method, path).map((mr) => mr.data.path),
+        );
+      }
+    }
+  });
+});
+
+describe("regex constraints with embedded groups (compiled parity)", () => {
+  const router = createEmptyRouter<{ path: string }>();
+  addRoute(router, "GET", "/c/:id(a(?<extra>b)?c)", { path: "INNER-NAMED" });
+  addRoute(router, "GET", "/m/:a(\\d+)/:b([a-z]+)", { path: "MULTI" });
+  addRoute(router, "GET", "/n/:num(\\d+)", { path: "WHOLE" });
+  addRoute(router, "GET", "/file/*.png", { path: "MID-WILDCARD" });
+  const compiledLookup = compileRouter(router);
+
+  const lookups = [
+    { name: "findRoute", match: (m: string, p: string) => findRoute(router, m, p) },
+    { name: "compiledLookup", match: (m: string, p: string) => compiledLookup(m, p) },
+  ];
+
+  for (const { name, match } of lookups) {
+    it(`resolves nested and multiple regex groups (${name})`, () => {
+      expect(match("GET", "/c/abc")).toMatchObject({
+        data: { path: "INNER-NAMED" },
+        params: { id: "abc", extra: "b" },
+      });
+      expect(match("GET", "/c/ac")).toMatchObject({
+        data: { path: "INNER-NAMED" },
+        params: { id: "ac" },
+      });
+      expect(match("GET", "/c/ax")).toBeUndefined();
+      expect(match("GET", "/m/12/ab")).toMatchObject({
+        data: { path: "MULTI" },
+        params: { a: "12", b: "ab" },
+      });
+      expect(match("GET", "/m/12/34")).toBeUndefined();
+      expect(match("GET", "/n/42")).toMatchObject({
+        data: { path: "WHOLE" },
+        params: { num: "42" },
+      });
+      expect(match("GET", "/n/x")).toBeUndefined();
+      expect(match("GET", "/file/logo.png")).toMatchObject({
+        data: { path: "MID-WILDCARD" },
+        params: { "0": "logo" },
+      });
+    });
+  }
+});
+
+describe("wildcard tail extraction (compiled parity)", () => {
+  // Static-prefix wildcards compile to a constant `p.slice(K)`; these pin the
+  // edge cases where `p` and the popped segment array could drift apart
+  // (doubled slashes), plus the param-prefix form that must keep slice/join.
+  const router = createEmptyRouter<{ path: string }>();
+  addRoute(router, "GET", "/files/**:path", { path: "FILES" });
+  addRoute(router, "GET", "/opt/**", { path: "OPT" });
+  addRoute(router, "GET", "/pre/:x/**:rest", { path: "PRE" });
+  const compiledLookup = compileRouter(router);
+
+  const lookups = [
+    { name: "findRoute", match: (m: string, p: string) => findRoute(router, m, p) },
+    { name: "compiledLookup", match: (m: string, p: string) => compiledLookup(m, p) },
+  ];
+
+  for (const { name, match } of lookups) {
+    it(`extracts wildcard tails (${name})`, () => {
+      expect(match("GET", "/files/a/b")).toMatchObject({
+        data: { path: "FILES" },
+        params: { path: "a/b" },
+      });
+      // doubled trailing slash: one is stripped, one is a popped empty segment
+      expect(match("GET", "/files/a//")).toMatchObject({
+        data: { path: "FILES" },
+        params: { path: "a" },
+      });
+      // doubled internal slash is preserved in the tail
+      expect(match("GET", "/files//a")).toMatchObject({
+        data: { path: "FILES" },
+        params: { path: "/a" },
+      });
+      // required tail must not match empty
+      expect(match("GET", "/files")).toBeUndefined();
+      expect(match("GET", "/files/")).toBeUndefined();
+      // optional tail matches empty (with and without doubled slash)
+      expect(match("GET", "/opt")).toMatchObject({ data: { path: "OPT" }, params: { _: "" } });
+      expect(match("GET", "/opt//")).toMatchObject({ data: { path: "OPT" }, params: { _: "" } });
+      expect(match("GET", "/opt/a/b")).toMatchObject({
+        data: { path: "OPT" },
+        params: { _: "a/b" },
+      });
+      // param before the wildcard: offset is unknown at compile time
+      expect(match("GET", "/pre/v/a/b")).toMatchObject({
+        data: { path: "PRE" },
+        params: { x: "v", rest: "a/b" },
+      });
     });
   }
 });

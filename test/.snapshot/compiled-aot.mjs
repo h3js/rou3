@@ -45,7 +45,10 @@ const findRoute = /* @__PURE__ */ (() => {
       }
     }
     let s = p.split("/");
-    if (s.length > 1 && s[s.length - 1] === "") s.pop();
+    if (s.length > 1 && s[s.length - 1] === "") {
+      s.pop();
+      p = p.slice(0, -1);
+    }
     let l = s.length;
     if (l > 1) {
       if (s[1] === "test") {
@@ -57,7 +60,7 @@ const findRoute = /* @__PURE__ */ (() => {
               }
             }
             if (m === "GET") {
-              return { data: $8, params: { _: s.slice(3).join("/") } };
+              return { data: $8, params: { _: p.slice(10) } };
             }
           }
         }
@@ -80,12 +83,12 @@ const findRoute = /* @__PURE__ */ (() => {
         }
       } else if (s[1] === "wildcard") {
         if (m === "GET") {
-          return { data: $12, params: { _: s.slice(2).join("/") } };
+          return { data: $12, params: { _: p.slice(10) } };
         }
       }
     }
     if (m === "GET") {
-      return { data: $13, params: { _: s.slice(1).join("/") } };
+      return { data: $13, params: { _: p.slice(1) } };
     }
   };
 })();
