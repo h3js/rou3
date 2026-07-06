@@ -1,5 +1,6 @@
 import { createRouter } from "./context.ts";
 import { addRoute } from "./operations/add.ts";
+import { mergeShapes } from "./_subsume.ts";
 import type { MethodData, Node } from "./types.ts";
 
 /**
@@ -30,12 +31,24 @@ export type Edge = string | 0 | 1;
  * encoding, modifiers) and reading the resulting tree entries. Both query
  * patterns and registered routes are therefore classified by the exact same
  * code, so overlap stays consistent with route matching by construction.
+ *
+ * Results are memoized per pattern string (typical consumers compare N
+ * patterns pairwise — N parses instead of N²) and must be treated as
+ * immutable by callers.
  */
 export function routeToShapes(pattern: string): RouteShape[] {
-  const ctx = createRouter();
-  addRoute(ctx, "", pattern);
-  const shapes: RouteShape[] = [];
-  _collectShapes(ctx.root, [], shapes);
+  let shapes = _patternShapes.get(pattern);
+  if (shapes === undefined) {
+    const ctx = createRouter();
+    addRoute(ctx, "", pattern);
+    shapes = [];
+    _collectShapes(ctx.root, [], shapes);
+    shapes = mergeShapes(shapes);
+    // Keep the memo bounded; pattern vocabularies are small in practice, so a
+    // full reset on overflow is simpler than recency tracking.
+    if (_patternShapes.size >= 1024) _patternShapes.clear();
+    _patternShapes.set(pattern, shapes);
+  }
   return shapes;
 }
 
@@ -94,6 +107,9 @@ export function mayMatchAt(query: RouteShape[], depth: number, key: string): boo
 // A route entry's shape never changes once inserted; cache across queries.
 const _shapeCache = new WeakMap<MethodData, RouteShape>();
 
+// Pattern -> canonical shapes memo for `routeToShapes` (see its doc comment).
+const _patternShapes = new Map<string, RouteShape[]>();
+
 function _collectShapes(node: Node, edges: Edge[], shapes: RouteShape[]): void {
   if (node.methods) {
     for (const entry of node.methods[""] || []) {
@@ -145,6 +161,17 @@ function _computeShape(edges: Edge[], entry: MethodData): RouteShape {
         fixed.push(undefined);
       }
     }
+  }
+  // Canonical form: trailing any-value matchers are equivalent to tail
+  // positions (both match exactly one arbitrary segment), so fold them into
+  // the tail. This is what lets `/a/:x` compare equal to shapes reached
+  // through the tail model (e.g. the `/a/:x?` <-> `/a/*` equivalence).
+  let f = fixed.length;
+  while (f > 0 && fixed[f - 1] === undefined) f--;
+  if (f < fixed.length) {
+    tailMin += fixed.length - f;
+    tailMax += fixed.length - f;
+    fixed.length = f;
   }
   return { fixed, tailMin, tailMax };
 }

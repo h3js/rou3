@@ -6,7 +6,8 @@ export { addRoute } from "./operations/add.ts";
 export { findRoute } from "./operations/find.ts";
 export { removeRoute } from "./operations/remove.ts";
 export { findAllRoutes } from "./operations/find-all.ts";
-export { routesOverlap, findOverlappingRoutes } from "./operations/overlap.ts";
+export { routesOverlap, compareRoutes, findOverlappingRoutes } from "./operations/overlap.ts";
+export type { RouteComparison } from "./operations/overlap.ts";
 export { routeToRegExp } from "./regexp.ts";
 export { regExpToRoute } from "./regexp-to-route.ts";
 
