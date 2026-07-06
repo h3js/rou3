@@ -1,11 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
   addRoute,
+  compareRoutes,
   createRouter,
   findAllRoutes,
   findOverlappingRoutes,
   routesOverlap,
 } from "../src/index.ts";
+import type { RouteComparison } from "../src/index.ts";
 
 describe("routesOverlap", () => {
   // [patternA, patternB, expectedOverlap, label]
@@ -93,6 +95,94 @@ describe("routesOverlap", () => {
       expect(routesOverlap(b, a)).toBe(expected);
     });
   }
+});
+
+describe("compareRoutes", () => {
+  // [patternA, patternB, expected, label] — the inverse direction is derived.
+  const cases: [string, string, RouteComparison, string][] = [
+    // literal / literal
+    ["/a/b", "/a/b", "equal", "identical literals"],
+    ["/a/b", "/a/c", "disjoint", "disjoint literals"],
+    ["/a", "/a/b", "disjoint", "different literal depth"],
+
+    // `**` zero-or-more segments
+    ["/a/**", "/a/b", "superset", "** vs literal below it"],
+    ["/a/**", "/a", "superset", "** matches zero segments"],
+    ["/a/**", "/a/b/c/d", "superset", "** vs deep literal"],
+    ["/**", "/a/**", "superset", "root ** vs deep **"],
+    ["/a/**", "/a/**", "equal", "identical wildcards"],
+    ["/a/**", "/b/**", "disjoint", "disjoint sibling wildcards"],
+
+    // named `**:name` is one-or-more
+    ["/a/**:rest", "/a", "disjoint", "named ** needs >=1 segment"],
+    ["/a/**", "/a/**:rest", "superset", "bare ** also matches zero segments"],
+    ["/a/**:rest", "/a/b/**", "superset", "named ** vs deeper **"],
+    ["/a/**:x", "/a/**:y", "equal", "match-sets compare, names don't"],
+
+    // `*` / `:param` single segments
+    ["/a/:x", "/a/b", "superset", ":param vs literal"],
+    ["/a/:x", "/a/:y", "equal", "params equal regardless of name"],
+    ["/a/*", "/a/:x", "superset", "trailing * also matches zero segments"],
+    ["/a/*/c", "/a/:x/c", "equal", "mid * is exactly one, like :param"],
+    ["/a/**", "/a/:x", "superset", "** vs :param"],
+
+    // partial overlap (the pre-merge ambiguity case)
+    ["/a/*/c", "/a/b/*", "partial", "crossing dynamic segments"],
+    ["/a/**", "/*/b", "partial", "deep wildcard vs fixed-depth suffix"],
+
+    // optional / repeat modifiers (multi-shape patterns)
+    ["/a/:x?", "/a/*", "equal", "optional param == trailing *"],
+    ["/a/:x?", "/a", "superset", "optional param matches without"],
+    ["/a/:x*", "/a/**", "equal", "repeat* == bare **"],
+    ["/a/:x+", "/a/**:rest", "equal", "repeat+ == named **"],
+    ["/a/:x+", "/a/**", "subset", "repeat+ needs >=1, ** doesn't"],
+
+    // non-capturing group delimiters `{...}?`
+    ["/a{/b}?", "/a", "superset", "optional group matches without"],
+    ["/a{/b}?", "/a/*", "subset", "optional group is a subset of trailing *"],
+    ["/a{/b}?", "/a/c", "disjoint", "optional group rejects other suffix"],
+
+    // regex-constrained segments
+    ["/user/:id(\\d+)", "/user/42", "superset", "regex accepts literal (precise)"],
+    ["/user/:id(\\d+)", "/user/abc", "disjoint", "regex rejects literal (precise)"],
+    ["/user/:id(\\d+)", "/user/:id(\\d+)", "equal", "identical regex sources"],
+    ["/user/:id(\\d+)", "/user/:x(\\d+)", "equal", "identical regex, param names don't matter"],
+    ["/a/:x(\\d+)", "/a/:y(\\d+)/**", "subset", "same constraint, other pattern deeper"],
+    ["/user/:id(\\d+)", "/user/:x", "subset", "any-param covers regex"],
+    ["/user/:id(\\d+)", "/user/:n([a-z]+)", "partial", "regex vs regex (undecidable)"],
+    ["/user/:id(\\d+)", "/user/**", "subset", "wildcard covers regex"],
+    // Equality between a regex and the literal/any value-set it happens to
+    // coincide with is undecidable — only the ⊇ direction is provable, so the
+    // verdict degrades to the proven containment, never to a wrong "equal".
+    ["/user/:id(42)", "/user/42", "superset", "regex==literal degrades to containment"],
+    ["/u/:id([\\s\\S]+)", "/u/:x", "subset", "regex==any-param degrades to containment"],
+
+    // escaping
+    ["/a/\\*", "/a/*", "subset", "escaped star is one literal of trailing *"],
+    ["/a/\\:b", "/a/:b", "subset", "escaped colon is one literal of :param"],
+    ["/a/\\*", "/a/\\*", "equal", "identical escaped literals"],
+  ];
+
+  const inverse: Record<RouteComparison, RouteComparison> = {
+    disjoint: "disjoint",
+    equal: "equal",
+    superset: "subset",
+    subset: "superset",
+    partial: "partial",
+  };
+
+  for (const [a, b, expected, label] of cases) {
+    it(`${label}: ${a} <> ${b} => ${expected}`, () => {
+      expect(compareRoutes(a, b)).toBe(expected);
+      expect(compareRoutes(b, a)).toBe(inverse[expected]);
+    });
+  }
+
+  it("agrees with routesOverlap on the overlap question", () => {
+    for (const [a, b] of cases) {
+      expect(compareRoutes(a, b) !== "disjoint").toBe(routesOverlap(a, b));
+    }
+  });
 });
 
 describe("findOverlappingRoutes", () => {
