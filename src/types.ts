@@ -8,8 +8,12 @@ export type MethodData<T = unknown> = {
   data: T;
   paramsMap?: ParamsIndexMap;
   paramsRegexp: RegExp[];
-  route?: string;
-  method?: string;
+  /** Registered route pattern (leading-slash-normalized, before group/modifier expansion). */
+  route: string;
+  /** Registered method (uppercased; `""` for method-agnostic). */
+  method: string;
+  /** Precomputed default `findRoute` result for param-less entries (`undefined` when the entry has params). */
+  res?: MatchedRoute<T>;
 };
 
 export interface Node<T = unknown> {

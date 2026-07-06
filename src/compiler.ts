@@ -209,7 +209,7 @@ function compileFinalMatch(
   }
 
   if (ctx.opts?.routes) {
-    ret += `,route:${JSON.stringify(data.route)},method:${JSON.stringify(data.method)}`;
+    ret += `,route:${serializeRouteString(ctx, data.route)},method:${serializeRouteString(ctx, data.method)}`;
   }
 
   const code =
@@ -296,6 +296,17 @@ function serializeData(ctx: CompilerContext, value: any): string {
       value = JSON.stringify(value);
     }
   }
+  return dataRef(ctx, value);
+}
+
+// Route/method strings share the `$N` dedup table (a route expanded from
+// optional/group syntax repeats its pattern across entries, and methods repeat
+// across the router) but bypass the `serialize` hook, which is for data of `T`.
+function serializeRouteString(ctx: CompilerContext, value: string): string {
+  return dataRef(ctx, ctx.compileToString ? JSON.stringify(value) : value);
+}
+
+function dataRef(ctx: CompilerContext, value: any): string {
   let index = ctx.data.indexOf(value);
   if (index === -1) {
     ctx.data.push(value);

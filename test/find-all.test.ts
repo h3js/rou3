@@ -5,6 +5,7 @@ import {
   compareRoutes,
   createRouter as createEmptyRouter,
   findAllRoutes,
+  findRoute,
   type RouterContext,
 } from "../src/index.ts";
 import { compileRouter } from "../src/compiler.ts";
@@ -489,6 +490,17 @@ describe("matcher: route attribution (routes: true)", () => {
     expect(_findAllWithRoutes(router, "GET", "/no-slash")).toEqual([
       { data: { name: "n" }, route: "/no-slash", method: "GET" },
     ]);
+  });
+
+  it("params: false returns raw entries even with routes: true (matches findRoute)", () => {
+    const router = createEmptyRouter<{ name: string }>();
+    addRoute(router, "GET", "/dyn/:id", { name: "param" });
+    const opts = { params: false, routes: true };
+    const all = findAllRoutes(router, "GET", "/dyn/42", opts);
+    // Raw MethodData entries: identical to findRoute's, paramsMap intact for
+    // lazy param resolution.
+    expect(all[0]).toBe(findRoute(router, "GET", "/dyn/42", opts));
+    expect(all[0]).toMatchObject({ paramsMap: [[1, "id", false]] });
   });
 
   it("route/method stay off matches and compiled output without the flag", () => {

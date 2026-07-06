@@ -93,6 +93,9 @@ findRoute(router, "GET", "/path/foo/bar/baz");
 findRoute(router, "GET", "/");
 ```
 
+> [!NOTE]
+> For performance, `findRoute` returns one shared match object per registered route **without params** (static routes). Clone it if you need to mutate results; matches with `params` are fresh objects on every call.
+
 **Match all routes, ordered least → most specific:**
 
 ```js
@@ -271,7 +274,7 @@ findOverlappingRoutes(router, "GET", "/protected/feed/**");
   Useful for ordering patterns by specificity and detecting ambiguous pairs where "most specific match" is undefined. Every verdict's containment claims are proofs, and undecidable cases degrade to a **weaker verdict, never a wrong claim**: containment between two different regex constraints falls back to `"partial"` (even when the sets are actually disjoint — see the over-approximation note below — or actually equal), and an actually-equal pair whose equality is only provable in one direction (e.g. `/u/:id(42)` vs `/u/42`) reports the proven containment instead of `"equal"`.
 
 
-- **`findOverlappingRoutes(router, method, pattern, opts?)`** — like `findAllRoutes`, but the query is a **pattern** instead of a concrete path. Returns every registered route whose match-set intersects the pattern, ordered least → most specific, with the same method handling as `findAllRoutes` (falls back to the method-agnostic bucket). Matches carry only `data` — a scope has no single concrete path, so no `params` are resolved — plus the registered `route`/`method` with [`{ routes: true }`](#matched-route-attribution). A single route registered with optional/group syntax expands into several tree entries sharing one `data` reference and is reported once; distinct routes are always reported separately, even when they share an equal primitive `data` value (or none).
+- **`findOverlappingRoutes(router, method, pattern, opts?)`** — like `findAllRoutes`, but the query is a **pattern** instead of a concrete path. Returns every registered route whose match-set intersects the pattern, ordered least → most specific, with the same method handling as `findAllRoutes` (falls back to the method-agnostic bucket). Matches carry only `data` — a scope has no single concrete path, so no `params` are resolved — plus the registered `route`/`method` with [`{ routes: true }`](#matched-route-attribution). A single route registered with optional/group syntax expands into several tree entries and is reported once; distinct routes are always reported separately, even when they share one `data` reference (e.g. a common middleware object) or an equal primitive `data` value (or none).
 
 **Overlap semantics** are computed with rou3's own segment/radix rules, so they stay consistent with `findRoute`/`findAllRoutes`:
 

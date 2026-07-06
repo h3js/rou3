@@ -30,8 +30,12 @@ describe("benchmark", () => {
     // stores the original pattern + method on each entry (threaded through
     // group/modifier expansion), and findRoute/findAllRoutes copy them onto
     // matches behind the opt-in flag.
-    expect(bytes).toBeLessThanOrEqual(6400); // <6.4kb
-    expect(gzipSize).toBeLessThanOrEqual(2540); // <2.54kb
+    // +~100B raw / +~30B gzip: default findRoute results no longer leak
+    // route/method/paramsRegexp — param-less matches return a per-entry match
+    // object precomputed in addRoute (zero allocation), param matches stay a
+    // fresh `{ data, params }` like before; raw entries only via `params: false`.
+    expect(bytes).toBeLessThanOrEqual(6520); // <6.52kb
+    expect(gzipSize).toBeLessThanOrEqual(2560); // <2.56kb
   });
 });
 

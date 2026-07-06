@@ -125,16 +125,20 @@ function _addRoute<T>(
 
   // Assign index, params and data to the node
   const hasParams = paramsMap.length > 0;
+  const _data = data || (null as T);
   if (!node.methods) {
     node.methods = new NullProtoObj();
   }
   node.methods![method] ??= [];
   node.methods![method]!.push({
-    data: data || (null as T),
+    data: _data,
     paramsRegexp,
     paramsMap: hasParams ? paramsMap : undefined,
     route,
     method,
+    // Precomputed default match object for param-less entries: findRoute
+    // returns it as-is (zero allocation, no `route`/`method` leak).
+    res: hasParams ? undefined : { data: _data, params: undefined },
   });
 
   // Static

@@ -19,21 +19,17 @@ export function findAllRoutes<T>(
   const segments = splitPath(path);
   const matches = _findAll(ctx.root, method, segments, 0);
 
-  const withParams = opts?.params !== false;
-  if (!withParams && !opts?.routes) {
+  if (opts?.params === false) {
+    // Raw entries — they already carry `route`/`method` alongside `data`.
     return matches;
   }
 
+  const withRoutes = opts?.routes === true;
   return matches.map((m) => {
-    const match: MatchedRoute<T> = {
-      data: m.data,
-      params: withParams && m.paramsMap ? getMatchParams(segments, m.paramsMap) : undefined,
-    };
-    if (opts?.routes) {
-      match.route = m.route;
-      match.method = m.method;
-    }
-    return match;
+    const params = m.paramsMap ? getMatchParams(segments, m.paramsMap) : undefined;
+    return withRoutes
+      ? { data: m.data, params, route: m.route, method: m.method }
+      : { data: m.data, params };
   });
 }
 

@@ -285,6 +285,24 @@ describe("findOverlappingRoutes", () => {
     expect(findOverlappingRoutes(router, "GET", "/b/**").map((m) => m.data)).toEqual([grp]);
   });
 
+  it("reports each pattern when distinct routes share one data reference", () => {
+    const router = createRouter<Record<string, unknown>>();
+    const shared = { mw: "auth" };
+    addRoute(router, "GET", "/a/**", shared);
+    addRoute(router, "GET", "/b/**", shared);
+
+    // Same handler object on two registrations: dedup is per registration
+    // (data + route + method), not per data reference.
+    expect(findOverlappingRoutes(router, "GET", "/**", { routes: true })).toEqual([
+      { data: shared, route: "/a/**", method: "GET" },
+      { data: shared, route: "/b/**", method: "GET" },
+    ]);
+    expect(findOverlappingRoutes(router, "GET", "/**")).toEqual([
+      { data: shared },
+      { data: shared },
+    ]);
+  });
+
   it("does not drop distinct overlapping routes that lack data (all default to null)", () => {
     const router = createRouter();
     addRoute(router, "GET", "/a/x");

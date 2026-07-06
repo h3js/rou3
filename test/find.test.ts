@@ -215,6 +215,40 @@ describe("route attribution (routes: true)", () => {
   it("compiled output stays free of route strings without the flag", () => {
     expect(compileRouter(router).toString()).not.toContain("route:");
   });
+
+  it("static matches carry only data and params by default (parity with compiled)", () => {
+    const match = findRoute(router, "GET", "/static")!;
+    expect("route" in match).toBe(false);
+    expect("method" in match).toBe(false);
+    expect("paramsRegexp" in match).toBe(false);
+    expect(match).toEqual(compileRouter(router)("GET", "/static"));
+  });
+
+  it("param matches are fresh objects; param-less matches reuse one per entry", () => {
+    // Param matches: fresh object per call (identical to pre-attribution rou3).
+    const first = findRoute(router, "GET", "/dyn/1")!;
+    const second = findRoute(router, "GET", "/dyn/2")!;
+    expect(second).not.toBe(first);
+    expect(first.params).toEqual({ id: "1" });
+    expect(second.params).toEqual({ id: "2" });
+    // Param-less matches: the entry's precomputed object (zero allocation) —
+    // shared across calls, like the raw-entry return before attribution.
+    expect(findRoute(router, "GET", "/static")!).toBe(findRoute(router, "GET", "/static")!);
+    // `routes: true` allocates fresh objects on its own branch.
+    const withRoute = findRoute(router, "GET", "/dyn/3", { routes: true })!;
+    expect(withRoute).toMatchObject({ route: "/dyn/:id", method: "GET" });
+    expect(withRoute).not.toBe(findRoute(router, "GET", "/dyn/3", { routes: true })!);
+    expect("route" in findRoute(router, "GET", "/dyn/4")!).toBe(false);
+  });
+
+  it("params: false returns the raw entry for static and dynamic paths alike", () => {
+    const opts = { params: false, routes: true };
+    for (const path of ["/static", "/dyn/42"]) {
+      const raw = findRoute(router, "GET", path, opts)!;
+      expect(raw).toMatchObject({ paramsRegexp: [] });
+      expect(raw.route).toBeDefined();
+    }
+  });
 });
 
 describe("hyphenated param names", () => {
