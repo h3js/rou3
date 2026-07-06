@@ -1,6 +1,11 @@
-import { mayMatchAt, routeToShapes, shapeOf, shapesOverlap } from "../_overlap.ts";
+import { mayMatchAt, routeToShapes, shapeOf, shapeSubsumes, shapesOverlap } from "../_overlap.ts";
 import type { Edge, RouteShape } from "../_overlap.ts";
 import type { MatchedRoute, Node, RouterContext } from "../types.ts";
+
+/**
+ * How the match-sets of two route patterns relate. See {@link compareRoutes}.
+ */
+export type RouteComparison = "disjoint" | "equal" | "subsumes" | "subsumed" | "partial";
 
 /**
  * Whether two route patterns can match a common concrete path (their match-sets
@@ -37,6 +42,55 @@ export function routesOverlap(patternA: string, patternB: string): boolean {
 }
 
 /**
+ * Compare two route patterns by the sets of concrete paths they match. Pure
+ * and router-free, like {@link routesOverlap}, but answers containment as well
+ * as intersection:
+ *
+ * - `"disjoint"` — no concrete path matches both.
+ * - `"equal"` — both match exactly the same paths (param *names* don't
+ *   matter: `/a/:x` equals `/a/:y`).
+ * - `"subsumes"` — `patternA` matches a strict superset of `patternB`.
+ * - `"subsumed"` — `patternA` matches a strict subset of `patternB`.
+ * - `"partial"` — the match-sets intersect but neither containment could be
+ *   proven.
+ *
+ * The comparison is *sound*: every verdict except `"partial"` is a proof.
+ * Undecidable cases degrade toward `"partial"` (the ambiguous default), never
+ * the other way. Two regex-constrained segments are only proven equal by
+ * source equality, and a regex only proven to cover a static literal via
+ * `test()` — so `/u/:id(\d+)` vs `/u/:id([0-9]+)` reports `"partial"` even
+ * though the sets are equal. Containment of one multi-shape pattern (optional
+ * groups/modifiers) in another is proven shape-by-shape, so a subset split
+ * across several of the other pattern's alternatives may also degrade to
+ * `"partial"`.
+ *
+ * Patterns are expanded through rou3's own `addRoute` pipeline (groups,
+ * modifiers, escaping), so the verdict is consistent with
+ * `findRoute`/`findAllRoutes` by construction — e.g. `/a/:x?` is `"equal"` to
+ * `/a/*` (both match `/a` and `/a/seg`).
+ *
+ * @example
+ * compareRoutes("/api/**", "/api/admin/**"); // "subsumes"
+ * compareRoutes("/a/:x/c", "/a/b/*"); // "partial" (ambiguous specificity)
+ * compareRoutes("/a/**", "/b/**"); // "disjoint"
+ */
+export function compareRoutes(patternA: string, patternB: string): RouteComparison {
+  const a = routeToShapes(patternA);
+  const b = routeToShapes(patternB);
+  const aCoversB = _covers(a, b);
+  const bCoversA = _covers(b, a);
+  if (aCoversB && bCoversA) return "equal";
+  if (aCoversB) return "subsumes";
+  if (bCoversA) return "subsumed";
+  for (const x of a) {
+    for (const y of b) {
+      if (shapesOverlap(x, y)) return "partial";
+    }
+  }
+  return "disjoint";
+}
+
+/**
  * Find every registered route whose match-set intersects the given pattern
  * (scope). Like {@link findAllRoutes}, but the query is a *pattern* instead of a
  * concrete path.
@@ -62,6 +116,13 @@ export function findOverlappingRoutes<T>(
   const matches: MatchedRoute<T>[] = [];
   _collectOverlaps(ctx.root, method, query, [], new Set(), matches);
   return matches;
+}
+
+// Every shape of `sub` is contained in a single shape of `sup`. Sufficient
+// (not necessary) for union containment — a `sub` shape covered only by the
+// union of several `sup` shapes is not detected (see compareRoutes docs).
+function _covers(sup: RouteShape[], sub: RouteShape[]): boolean {
+  return sub.every((s) => sup.some((x) => shapeSubsumes(x, s)));
 }
 
 function _collectOverlaps<T>(

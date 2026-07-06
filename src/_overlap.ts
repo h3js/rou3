@@ -36,7 +36,7 @@ export function routeToShapes(pattern: string): RouteShape[] {
   addRoute(ctx, "", pattern);
   const shapes: RouteShape[] = [];
   _collectShapes(ctx.root, [], shapes);
-  return shapes;
+  return _mergeShapes(shapes);
 }
 
 /**
@@ -73,6 +73,36 @@ export function shapesOverlap(a: RouteShape, b: RouteShape): boolean {
   const lo = Math.max(fa + a.tailMin, fb + b.tailMin);
   const hi = Math.min(fa + a.tailMax, fb + b.tailMax);
   return lo <= hi;
+}
+
+/**
+ * Whether shape `a` certainly matches a superset of the paths shape `b`
+ * matches (subset containment of match-sets, `a` ⊇ `b`).
+ *
+ * Sound but not complete: `true` is a proof, `false` means "not provable"
+ * rather than "certainly not a superset". Containment between two regex
+ * constraints is only decided by source equality, and a regex is only proven
+ * to cover a static literal via an anchored `test()` (regex intersection is
+ * undecidable in general).
+ */
+export function shapeSubsumes(a: RouteShape, b: RouteShape): boolean {
+  const fa = a.fixed.length;
+  const fb = b.fixed.length;
+  // `b`'s total-length range must sit inside `a`'s.
+  if (fa + a.tailMin > fb + b.tailMin || fa + a.tailMax < fb + b.tailMax) {
+    return false;
+  }
+  const common = fa < fb ? fa : fb;
+  for (let k = 0; k < common; k++) {
+    if (!_segmentSubsumes(a.fixed[k], b.fixed[k])) return false;
+  }
+  // Positions covered by `b`'s any-value tail but fixed in `a` must be
+  // unconstrained. (Length containment already guarantees every `b` path is
+  // long enough to reach all of `a`'s fixed positions.)
+  for (let k = fb; k < fa; k++) {
+    if (a.fixed[k] !== undefined) return false;
+  }
+  return true;
 }
 
 /**
@@ -146,7 +176,67 @@ function _computeShape(edges: Edge[], entry: MethodData): RouteShape {
       }
     }
   }
+  // Canonical form: trailing any-value matchers are equivalent to tail
+  // positions (both match exactly one arbitrary segment), so fold them into
+  // the tail. This is what lets `/a/:x` compare equal to shapes reached
+  // through the tail model (e.g. the `/a/:x?` <-> `/a/*` equivalence).
+  let f = fixed.length;
+  while (f > 0 && fixed[f - 1] === undefined) f--;
+  if (f < fixed.length) {
+    tailMin += fixed.length - f;
+    tailMax += fixed.length - f;
+    fixed.length = f;
+  }
   return { fixed, tailMin, tailMax };
+}
+
+/**
+ * Collapse shapes that differ only in tail length into one shape per fixed
+ * prefix (union of contiguous total-length ranges). An optional-syntax pattern
+ * expands into several entries (`/a/:x?` -> `/a` + `/a/:x`) whose canonical
+ * shapes are `["a"] [0,0]` and `["a"] [1,1]`; merging yields `["a"] [0,1]` —
+ * the same shape as `/a/*` — so containment checks see through the expansion.
+ */
+function _mergeShapes(shapes: RouteShape[]): RouteShape[] {
+  for (let i = 0; i < shapes.length; i++) {
+    for (let j = i + 1; j < shapes.length; j++) {
+      const a = shapes[i];
+      const b = shapes[j];
+      // Ranges must be equal fixed-wise and union into one contiguous range.
+      if (
+        _sameFixed(a.fixed, b.fixed) &&
+        a.tailMin <= b.tailMax + 1 &&
+        b.tailMin <= a.tailMax + 1
+      ) {
+        a.tailMin = Math.min(a.tailMin, b.tailMin);
+        a.tailMax = Math.max(a.tailMax, b.tailMax);
+        shapes.splice(j, 1);
+        j = i; // Restart: the widened range may absorb earlier-skipped shapes.
+      }
+    }
+  }
+  return shapes;
+}
+
+function _sameFixed(a: RouteShape["fixed"], b: RouteShape["fixed"]): boolean {
+  if (a.length !== b.length) return false;
+  for (let k = 0; k < a.length; k++) {
+    if (!_segmentSubsumes(a[k], b[k]) || !_segmentSubsumes(b[k], a[k])) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether single-segment matcher `x` certainly matches every value `y`
+ * matches. `any` covers everything; literals must be equal; an (anchored)
+ * regex provably covers a literal it tests true on, and another regex only
+ * when their sources are identical.
+ */
+function _segmentSubsumes(x: string | RegExp | undefined, y: string | RegExp | undefined): boolean {
+  if (x === undefined) return true;
+  if (typeof x === "string") return x === y;
+  if (typeof y === "string") return x.test(y);
+  return y instanceof RegExp && x.source === y.source && x.flags === y.flags;
 }
 
 /**

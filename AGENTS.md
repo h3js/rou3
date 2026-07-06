@@ -24,14 +24,14 @@ src/
     add.ts            # addRoute() - insert routes into the radix tree
     find.ts           # findRoute() - single-match lookup
     find-all.ts       # findAllRoutes() - multi-match lookup
-    overlap.ts        # routesOverlap() / findOverlappingRoutes() - pattern-vs-pattern overlap
+    overlap.ts        # routesOverlap() / compareRoutes() / findOverlappingRoutes() - pattern-vs-pattern relations
     remove.ts         # removeRoute() - remove routes from tree
     _utils.ts         # Shared utilities (escaping, path splitting, normalization)
 test/
   router.test.ts      # Core router tests
   find.test.ts        # Route matching tests (interpreter vs compiled)
   find-all.test.ts    # Multi-match tests
-  overlap.test.ts     # Pattern-overlap tests (routesOverlap / findOverlappingRoutes)
+  overlap.test.ts     # Pattern-overlap tests (routesOverlap / compareRoutes / findOverlappingRoutes)
   regexp.test.ts      # RegExp conversion tests
   regexp.pcre.test.ts # Cross-engine PCRE checks (runs routeToRegExp output through installed grep -P/rg -P/pcre2grep/perl/php)
   _regexp-cases.ts    # Shared route->regex fixtures (used by regexp.test.ts + regexp.pcre.test.ts)
@@ -52,6 +52,7 @@ removeRoute(ctx, method, path) -> void
 findRoute(ctx, method, path, opts?) -> MatchedRoute<T> | undefined
 findAllRoutes(ctx, method, path, opts?) -> MatchedRoute<T>[]
 routesOverlap(patternA, patternB) -> boolean
+compareRoutes(patternA, patternB) -> "disjoint" | "equal" | "subsumes" | "subsumed" | "partial"
 findOverlappingRoutes(ctx, method, pattern) -> MatchedRoute<T>[]
 routeToRegExp(route) -> RegExp
 regExpToRoute(regexp) -> string
@@ -98,6 +99,7 @@ Results are ordered **least → most specific**, and the interpreter (`findAllRo
 - Inlines static routes for O(1) lookup
 - Unrolls segment checks into `split("/")`-based array access
 - Inlines regex patterns for param validation
+- Method-agnostic (`""`) registrations are emitted as an `else` fallback after the method-scoped `if(m==="…")` chain (`compileMethodMatch`), mirroring the runtime's per-node `methods[m] || methods[""]`: a method-scoped entry shadows the agnostic sibling even when its own conditions (regex/length) fail. Previously the agnostic entry was emitted unconditionally, so compiled `matchAll` returned a duplicate agnostic layer and compiled `findRoute` wrongly fell back to it.
 - Compare interpreter vs compiled output in tests
 
 ### URLPattern group delimiters
@@ -125,13 +127,15 @@ Key invariant: `\uFFFD` (U+FFFD) is used for router-level escaping, `\uFFFE` (U+
 - **Reject-by-default (no silent corruption):** `reverseSegment()` is a whitelist parser — only named/bare groups, escaped-punctuation literals, and plain literal chars are accepted. Anything outside the dialect throws a `rou3:` error instead of being literalized into a wrong route: structural look-arounds (`(?=` `(?!` `(?<=` `(?<!`) and other `(?…)` group constructs, backreferences and metaclass escapes outside a constraint (`\k<x>`, `\1`, `\d`, `\w`, `\b`), and bare (unescaped) regex operators at segment level (`. ^ $ * + ? | [ ] { }`). Constraint bodies (`(…)`) stay **opaque** — arbitrary regex inside them (quantifiers, non-greedy, look-arounds, nested groups) is preserved verbatim. `constraint()` still rejects bodies containing `/` (unrepresentable after path splitting). Match-affecting **regexp flags** (`i`/`m`/`s`) throw (routes carry none, so honoring them silently is impossible); `g`/`y`/`u`/`v`/`d` don't affect a fully-anchored match and are ignored.
 - **Round-trip:** `routeToRegExp(regExpToRoute(regexp)).source === regexp.source` holds for every non-fallback fixture (`test/regexp-to-route.test.ts` asserts this over `_regexp-cases.ts`). The **alternation fallback** forms (`PCRE2_DUPLICATE_NAME_ROUTES`, e.g. `/media/*{.webp}?` → `^(?:…|…)$`) are not reversible and throw.
 
-### Pattern overlap (`routesOverlap` / `findOverlappingRoutes`)
+### Pattern overlap & subsumption (`routesOverlap` / `compareRoutes` / `findOverlappingRoutes`)
 
 - The feature is tree-shakeable (the core bundle is unaffected; see `test/bench/bundle.test.ts`): `src/_overlap.ts` holds the shape model, `src/operations/overlap.ts` the public API + tree traversal. A route is modeled as a `RouteShape`: an array of fixed single-segment matchers (`string` literal | `RegExp` constraint | `undefined` = any) plus a variable-length tail `[tailMin, tailMax]` (trailing `*` -> `[0,1]`, `**` -> `[0,∞]`, `**:name` -> `[1,∞]`, none -> `[0,0]`). The tail matches any values, so it constrains only segment **count**, never contents.
 - Shapes are built from radix-tree entries (`shapeOf`): kind-tagged edges (static key | param | wildcard) plus the entry's own `paramsMap`. Carrying the node kind keeps escaped-literal static keys (`\*` -> static `"*"`) distinguishable from dynamic segments. Per-entry shapes are cached in a `WeakMap`.
 - Query patterns are inserted into a throwaway router via the real `addRoute` (`routeToShapes`), so queries and registered routes are classified by the exact same pipeline (`expandGroupDelimiters` -> `encodeEscapes`/`splitPath` -> `expandModifiers` -> regex params). A pattern with optional/group syntax yields several shapes; patterns overlap when **any** shape pair overlaps.
 - `shapesOverlap()`: check the shared fixed prefix then test that total-length ranges `[fixed+tailMin, fixed+tailMax]` intersect. Value check is length-independent because any valid common length ≥ `max(fixedA, fixedB)`.
 - **Overlap = "∃ concrete path matched by both,"** not subset containment. `static`/`static` and `static`/`regex` are precise; `any`-vs-anything and `regex`/`regex` are **over-approximated to overlap** (conservative default — regex intersection is undecidable).
+- **Shape canonicalization:** `_computeShape` folds trailing `undefined` (any-value) fixed matchers into the tail (`/a/:x` -> `["a"] [1,1]`), and `routeToShapes` merges shapes with identical fixed prefixes and contiguous length ranges (`/a/:x?` -> `["a"] [0,0]` + `["a"] [1,1]` -> `["a"] [0,1]`). Both are match-set-preserving; they make containment see through optional-syntax expansion (`/a/:x?` == `/a/*`).
+- `compareRoutes(a, b)` classifies match-set relations: `disjoint` | `equal` | `subsumes` (strict superset) | `subsumed` | `partial` (intersecting, no containment proven). Built on `shapeSubsumes()` (`_overlap.ts`): `b`'s total-length range inside `a`'s + per-position matcher containment (`any` ⊇ all; literals by equality; anchored regex ⊇ literal via `test()`; regex ⊇ regex only by source+flags equality) + `a`'s fixed positions under `b`'s tail must be `any`. Pattern-level containment is proven shape-by-shape (each `b` shape inside a *single* `a` shape) — sufficient, not necessary, so union-split coverage degrades to `partial`. **Sound by construction:** every verdict except `partial` is a proof; undecidable cases (different regex sources, param names irrelevant) fall back to `partial`/one-sided, never a wrong claim. Param *names* don't affect the verdict (`/a/:x` equals `/a/:y`).
 - `findOverlappingRoutes` traverses the tree in `findAllRoutes` order (wildcard, param, static, self) so results are least→most specific, prunes static subtrees the query can't reach, and collapses only genuine reference-duplicates (a route with optional/group syntax expands into several entries sharing one `data` reference); distinct routes with equal-or-absent primitive `data` are all reported. Matches carry `data` only (a scope has no single concrete path → no `params`).
 
 ### Input path normalization
