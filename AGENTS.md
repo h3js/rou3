@@ -88,7 +88,7 @@ interface Node<T> {
 
 ### `findAllRoutes` result ordering
 
-Results are ordered **least → most specific**, and the interpreter (`findAllRoutes`) and compiled `matchAll` must agree exactly (`test/find-all.test.ts` asserts `toEqual`). Two levels:
+Results are ordered **least → most specific**, and the interpreter (`findAllRoutes`) and compiled `matchAll` must agree exactly (`test/find-all.test.ts` asserts `toEqual`). This is a **public contract**, documented in README ("Result ordering") and pinned by `test/find-all.test.ts` (`matcher: ordering contract` ties result order to `compareRoutes` subsumption order) — changing it is a breaking change. Two levels:
 
 - **Across node kinds:** tree traversal order (wildcard → param → static → self) yields general → specific.
 - **Same-node siblings** (multiple routes sharing one param/wildcard node, i.e. one `methods[method]` array): ordered by **specificity weight ascending**, with **insertion order preserved on ties** (#187). Weight = one point per regex-constrained param + one for a required last param on a *dynamic* terminal (param/wildcard node; static terminals don't distinguish required from optional — mirrors the compiler's `hasLastOptionalParam`/`currentIdx === -1` gating). `pushSorted()` in `find-all.ts` sorts each pushed array (stable `Array#sort`); the compiler reaches the same order by sorting matchers **descending** by weight then `r.unshift`-ing, and `.reverse()`-ing first so equal-weight siblings keep insertion order despite the unshift. The two weight models are kept identical on purpose — insertion order and weight order coincided before #187, which masked the divergence.

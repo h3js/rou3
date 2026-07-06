@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createRouter, formatTree } from "./_utils.ts";
 import {
   addRoute,
+  compareRoutes,
   createRouter as createEmptyRouter,
   findAllRoutes,
   type RouterContext,
@@ -232,6 +233,32 @@ describe("matcher: order", () => {
         "/hello/**",
       ]
     `);
+  });
+});
+
+describe("matcher: ordering contract", () => {
+  // Documented guarantee (README "Result ordering"): findAllRoutes and
+  // compiled matchAll return matches least -> most specific, and for
+  // patterns strictly ordered by subsumption the result order agrees with
+  // the subsumption order (broader scopes first). Merge/fold consumers
+  // (take-last resolution) depend on this — an intentional change to the
+  // traversal order is a breaking change, not an internal detail.
+  const chain = ["/**", "/api/**", "/api/:v/**", "/api/:v/users/**", "/api/:v/users/:id"];
+
+  it("chain is strictly ordered by subsumption (compareRoutes)", () => {
+    for (let i = 0; i < chain.length - 1; i++) {
+      expect(compareRoutes(chain[i], chain[i + 1]), `${chain[i]} vs ${chain[i + 1]}`).toBe(
+        "superset",
+      );
+    }
+  });
+
+  it("result order agrees with subsumption order, regardless of insertion order", () => {
+    for (const routes of [chain, [...chain].reverse()]) {
+      const router = createRouter(routes);
+      // `_findAllRoutes` also asserts compiled matchAll returns the same order.
+      expect(_findAllRoutes(router, "GET", "/api/v1/users/42")).toEqual(chain);
+    }
   });
 });
 

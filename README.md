@@ -93,6 +93,18 @@ findRoute(router, "GET", "/path/foo/bar/baz");
 findRoute(router, "GET", "/");
 ```
 
+**Match all routes, ordered least → most specific:**
+
+```js
+findAllRoutes(router, "GET", "/path/foo/bar/baz");
+// [
+//   { data: { payload: "wildcard route" } },
+//   { data: { payload: "named wildcard route" }, params: { name: "bar/baz" } },
+// ]
+```
+
+The result ordering is a documented contract — see [Result ordering](#result-ordering).
+
 > [!IMPORTANT]
 > Paths should **always begin with `/`**.
 
@@ -167,6 +179,29 @@ The compiled router also supports this via the `normalize` option:
 const match = compileRouter(router, { normalize: true });
 match("GET", "/foo/bar/../baz"); // Matches "/foo/baz"
 ```
+
+### Result ordering
+
+`findAllRoutes` returns matches ordered **least → most specific**: the broadest scopes first, the most specific match last. The compiled `matchAll` (see [Compiler](#compiler)) returns the **exact same results in the exact same order**. This ordering is a **contract**, not incidental behavior — merge/fold-style consumers (e.g. route rules resolved by merging all matched layers, taking the last as the most specific) can rely on it, and it is pinned by tests. Any intentional change to it would be a breaking change.
+
+```js
+const router = createRouter();
+addRoute(router, "GET", "/**", { name: "catch-all" });
+addRoute(router, "GET", "/api/**", { name: "api" });
+addRoute(router, "GET", "/api/:v/users/:id", { name: "user" });
+
+findAllRoutes(router, "GET", "/api/v1/users/42").map((m) => m.data.name);
+// ["catch-all", "api", "user"]
+```
+
+Precisely:
+
+- **Across the tree:** at each level, wildcard (`**`) matches are emitted first, then single-segment params (`*`, `:name`), then static segments — so wilder/shallower routes come before more-static/deeper ones.
+- **Same-node siblings** (multiple routes ending on the same dynamic node, e.g. `/foo/*` and `/foo/:id(\d+)`): ordered by ascending specificity — optional/unconstrained entries before required/regex-constrained ones — with **insertion order preserved on ties**.
+- **Subsumption consistency:** when registered patterns are strictly ordered by containment (each a `"superset"` of the next per [`compareRoutes`](#pattern-overlap)), the result order agrees with the subsumption order (broader first).
+- Registration order never affects the result order, except as the tiebreaker between equally specific same-node siblings.
+
+[`findOverlappingRoutes`](#pattern-overlap) follows the same least → most specific order.
 
 ### Pattern overlap
 
