@@ -55,10 +55,12 @@ export function findRoute<T = unknown>(
   // Default hot path — mirrors pre-attribution rou3: a fresh `{ data, params }`
   // per param match (`segments` is always set when `paramsMap` is); param-less
   // matches return the entry's precomputed object (zero allocation, and unlike
-  // a raw entry it keeps `route`/`method` off default results).
+  // a raw entry it keeps `route`/`method` off default results). The fallback
+  // covers entries built without `res` (a context from pre-attribution rou3):
+  // degrade to a fresh allocation instead of reporting a match as a miss.
   return match.paramsMap
     ? { data: match.data, params: getMatchParams(segments!, match.paramsMap) }
-    : match.res!;
+    : match.res || { data: match.data, params: undefined };
 }
 
 function _lookupTree<T>(

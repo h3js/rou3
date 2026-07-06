@@ -94,7 +94,7 @@ findRoute(router, "GET", "/");
 ```
 
 > [!NOTE]
-> For performance, `findRoute` returns one shared match object per registered route **without params** (static routes). Clone it if you need to mutate results; matches with `params` are fresh objects on every call.
+> For performance, `findRoute` returns one shared match object per registered route **without params** (static routes, but also e.g. the param-less branch of `/a/:x?`). Clone it if you need to mutate results; matches with `params` are fresh objects on every call. Mutating a raw entry's `data` (via `params: false`) after registration is not supported — default results snapshot `data` at `addRoute` time.
 
 **Match all routes, ordered least → most specific:**
 

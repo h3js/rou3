@@ -303,6 +303,21 @@ describe("findOverlappingRoutes", () => {
     ]);
   });
 
+  it("registration dedup cannot collide across method/route string boundaries", () => {
+    // addRoute uppercases but never validates methods, so method strings may
+    // contain spaces/slashes; two registrations sharing a data reference must
+    // never be conflated by an ambiguous method+route composite.
+    const router = createRouter<Record<string, unknown>>();
+    const shared = { mw: true };
+    addRoute(router, "", "/B /c", shared);
+    addRoute(router, " /B", "/c", shared);
+
+    // Querying method " /B" reaches both: bucket " /B" at one node, the
+    // method-agnostic "" fallback at the other.
+    const matches = findOverlappingRoutes(router, " /B", "/**", { routes: true });
+    expect(matches.map((m) => m.route).sort()).toEqual(["/B /c", "/c"]);
+  });
+
   it("does not drop distinct overlapping routes that lack data (all default to null)", () => {
     const router = createRouter();
     addRoute(router, "GET", "/a/x");

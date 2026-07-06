@@ -24,7 +24,8 @@ export function findAllRoutes<T>(
     return matches;
   }
 
-  const withRoutes = opts?.routes === true;
+  // Truthiness (not `=== true`) to stay in lockstep with findRoute/compiler.
+  const withRoutes = !!opts?.routes;
   return matches.map((m) => {
     const params = m.paramsMap ? getMatchParams(segments, m.paramsMap) : undefined;
     return withRoutes

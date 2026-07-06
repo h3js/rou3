@@ -503,6 +503,17 @@ describe("matcher: route attribution (routes: true)", () => {
     expect(all[0]).toMatchObject({ paramsMap: [[1, "id", false]] });
   });
 
+  it("treats any truthy routes flag like true (parity with findRoute and compiled)", () => {
+    // Plain-JS callers may pass truthy non-boolean flags; all entry points must
+    // agree with the compiler, which checks truthiness.
+    const router = createEmptyRouter<{ name: string }>();
+    addRoute(router, "GET", "/t/:id", { name: "t" });
+    const opts = { routes: 1 } as unknown as { routes: boolean };
+    const res = findAllRoutes(router, "GET", "/t/1", opts);
+    expect(res).toEqual(compileRouter(router, { matchAll: true, routes: true })("GET", "/t/1"));
+    expect(res[0]).toEqual(findRoute(router, "GET", "/t/1", opts));
+  });
+
   it("route/method stay off matches and compiled output without the flag", () => {
     const router = createRouter(["/x/**"]);
     const m = findAllRoutes(router, "GET", "/x/1")[0];

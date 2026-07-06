@@ -249,6 +249,16 @@ describe("route attribution (routes: true)", () => {
       expect(raw.route).toBeDefined();
     }
   });
+
+  it("default lookup degrades to a fresh match when an entry lacks res (foreign context)", () => {
+    // An entry built by pre-attribution rou3 (e.g. a context shared across two
+    // rou3 copies) has no precomputed `res`: the default path must fall back to
+    // a fresh allocation, not report a matching route as a miss.
+    const foreign = createRouter(["/static"]);
+    const raw = findRoute(foreign, "GET", "/static", { params: false })! as { res?: unknown };
+    delete raw.res;
+    expect(findRoute(foreign, "GET", "/static")).toEqual({ data: { path: "/static" } });
+  });
 });
 
 describe("hyphenated param names", () => {

@@ -118,7 +118,8 @@ export function findOverlappingRoutes<T>(
   const query = routeToShapes(pattern);
   const entries: MethodData<T>[] = [];
   _collectOverlaps(ctx.root, method, query, [], new Map(), entries);
-  const routes = opts?.routes === true;
+  // Truthiness (not `=== true`) to stay in lockstep with findRoute/compiler.
+  const routes = !!opts?.routes;
   return entries.map((e) =>
     routes ? { data: e.data, route: e.route, method: e.method } : { data: e.data },
   );
@@ -147,7 +148,7 @@ function _collectOverlaps<T>(
   method: string,
   query: RouteShape[],
   edges: Edge[],
-  seen: Map<unknown, Set<string>>,
+  seen: Map<unknown, Map<string, Set<string>>>,
   entries: MethodData<T>[],
 ): void {
   // Least- to most-specific: wildcard, then param, then static, then self.
@@ -179,20 +180,23 @@ function _collectOverlaps<T>(
         // Collapse only genuine registration-duplicates: a route with optional/
         // group syntax (`:x?`, `{/c}?`) expands into several tree entries that
         // share one `data` reference AND one registered route/method — so the
-        // dedup keys on the whole registration, and distinct patterns sharing a
-        // data reference (e.g. one middleware object) are each reported.
+        // dedup keys on the whole registration (nested maps rather than a
+        // delimited composite string: addRoute never validates methods, so no
+        // delimiter is collision-free), and distinct patterns sharing a data
+        // reference (e.g. one middleware object) are each reported.
         // Primitive/absent data (`addRoute` stores `null` when none is given)
         // is never deduped, so distinct routes that happen to carry an equal
         // primitive value are all reported instead of dropped.
         const isRef = d !== null && (typeof d === "object" || typeof d === "function");
-        const key = isRef ? entry.method + " " + entry.route : "";
-        if (isRef && seen.get(d)?.has(key)) continue;
+        if (isRef && seen.get(d)?.get(entry.method)?.has(entry.route)) continue;
         const shape = shapeOf(edges, entry);
         if (query.some((q) => shapesOverlap(q, shape))) {
           if (isRef) {
-            let keys = seen.get(d);
-            if (!keys) seen.set(d, (keys = new Set()));
-            keys.add(key);
+            let byMethod = seen.get(d);
+            if (!byMethod) seen.set(d, (byMethod = new Map()));
+            let routes = byMethod.get(entry.method);
+            if (!routes) byMethod.set(entry.method, (routes = new Set()));
+            routes.add(entry.route);
           }
           entries.push(entry);
         }
