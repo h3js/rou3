@@ -114,16 +114,19 @@ function _optionalMatches<T>(
   method: string,
 ): MethodData<T>[] | undefined {
   const match = methods && (methods[method] || methods[""]);
-  if (match) {
-    const optional: MethodData<T>[] = [];
-    for (const m of match) {
-      const pMap = m.paramsMap;
-      if (pMap?.[pMap.length - 1]?.[2] /* optional */) {
-        optional.push(m);
+  if (!match) {
+    return;
+  }
+  let optional: MethodData<T>[] | undefined;
+  for (const m of match) {
+    const pMap = m.paramsMap;
+    if (pMap?.[pMap.length - 1]?.[2] /* optional */) {
+      // Single sibling needs no filtered copy (zero allocation)
+      if (match.length === 1) {
+        return match;
       }
-    }
-    if (optional.length > 0) {
-      return optional;
+      (optional ||= []).push(m);
     }
   }
+  return optional;
 }

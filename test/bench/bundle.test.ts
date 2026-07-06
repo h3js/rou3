@@ -21,12 +21,13 @@ describe("benchmark", () => {
     // +~15B: getParamRegexp() now escapes only literal dots *outside* (...) groups
     // so a `.` inside a regex constraint (`:id(\d+\.\d+)`) stays verbatim instead
     // of being double-escaped; gzip is unchanged (2383).
-    // -~67B raw / +~40B gzip: findRoute's end-of-path optional fallback now
+    // -~40B raw / +~50B gzip: findRoute's end-of-path optional fallback now
     // scans all same-node siblings (not just the first-inserted entry) via a
-    // shared helper — deduplication shrinks raw size, but the filter loop adds
-    // tokens the old duplicated blocks gzipped away.
+    // shared helper with a zero-allocation single-sibling fast path —
+    // deduplication shrinks raw size, but the filter loop adds tokens the old
+    // duplicated blocks gzipped away.
     expect(bytes).toBeLessThanOrEqual(6180); // <6.18kb
-    expect(gzipSize).toBeLessThanOrEqual(2425); // <2.43kb
+    expect(gzipSize).toBeLessThanOrEqual(2435); // <2.44kb
   });
 });
 
