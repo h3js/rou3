@@ -6,7 +6,7 @@ import type { MatchedRoute, Node, RouterContext } from "../types.ts";
 /**
  * How the match-sets of two route patterns relate. See {@link compareRoutes}.
  */
-export type RouteComparison = "disjoint" | "equal" | "subsumes" | "subsumed" | "partial";
+export type RouteComparison = "disjoint" | "equal" | "superset" | "subset" | "partial";
 
 /**
  * Whether two route patterns can match a common concrete path (their match-sets
@@ -43,10 +43,10 @@ export function routesOverlap(patternA: string, patternB: string): boolean {
  * - `"disjoint"` — no concrete path matches both (proven).
  * - `"equal"` — both match exactly the same paths (proven; param *names*
  *   don't matter: `/a/:x` equals `/a/:y`, `/u/:id(\d+)` equals `/u/:x(\d+)`).
- * - `"subsumes"` — `patternA` provably matches every path `patternB` matches,
- *   and the reverse could not be proven: a superset, strict unless equality
- *   is undecidable.
- * - `"subsumed"` — the mirror image (`patternA` ⊆ `patternB`).
+ * - `"superset"` — `patternA` provably matches every path `patternB` matches,
+ *   and the reverse could not be proven (strict unless equality is
+ *   undecidable).
+ * - `"subset"` — the mirror image (`patternA` ⊆ `patternB`).
  * - `"partial"` — neither containment could be proven and the match-sets
  *   *may* intersect.
  *
@@ -58,9 +58,9 @@ export function routesOverlap(patternA: string, patternB: string): boolean {
  *   (modulo param names), and a regex only proven to cover a literal via
  *   `test()` — so `/u/:id(\d+)` vs `/u/:id([0-9]+)` reports `"partial"` even
  *   though the sets are equal.
- * - Strictness of `"subsumes"`/`"subsumed"` is best-effort: when a pair is
+ * - Strictness of `"superset"`/`"subset"` is best-effort: when a pair is
  *   actually equal but equality is only provable in one direction, the proven
- *   containment is reported — `/u/:id(42)` vs `/u/42` is `"subsumes"`, not
+ *   containment is reported — `/u/:id(42)` vs `/u/42` is `"superset"`, not
  *   `"equal"`.
  * - `"partial"`'s intersection half is over-approximated (like
  *   {@link routesOverlap}): a `"partial"` pair of disjoint regex constraints,
@@ -75,7 +75,7 @@ export function routesOverlap(patternA: string, patternB: string): boolean {
  * `/a/*` (both match `/a` and `/a/seg`).
  *
  * @example
- * compareRoutes("/api/**", "/api/admin/**"); // "subsumes"
+ * compareRoutes("/api/**", "/api/admin/**"); // "superset"
  * compareRoutes("/a/:x/c", "/a/b/*"); // "partial" (ambiguous specificity)
  * compareRoutes("/a/**", "/b/**"); // "disjoint"
  */
@@ -85,8 +85,8 @@ export function compareRoutes(patternA: string, patternB: string): RouteComparis
   const aCoversB = _covers(a, b);
   const bCoversA = _covers(b, a);
   if (aCoversB && bCoversA) return "equal";
-  if (aCoversB) return "subsumes";
-  if (bCoversA) return "subsumed";
+  if (aCoversB) return "superset";
+  if (bCoversA) return "subset";
   return _anyOverlap(a, b) ? "partial" : "disjoint";
 }
 

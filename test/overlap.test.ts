@@ -106,25 +106,25 @@ describe("compareRoutes", () => {
     ["/a", "/a/b", "disjoint", "different literal depth"],
 
     // `**` zero-or-more segments
-    ["/a/**", "/a/b", "subsumes", "** vs literal below it"],
-    ["/a/**", "/a", "subsumes", "** matches zero segments"],
-    ["/a/**", "/a/b/c/d", "subsumes", "** vs deep literal"],
-    ["/**", "/a/**", "subsumes", "root ** vs deep **"],
+    ["/a/**", "/a/b", "superset", "** vs literal below it"],
+    ["/a/**", "/a", "superset", "** matches zero segments"],
+    ["/a/**", "/a/b/c/d", "superset", "** vs deep literal"],
+    ["/**", "/a/**", "superset", "root ** vs deep **"],
     ["/a/**", "/a/**", "equal", "identical wildcards"],
     ["/a/**", "/b/**", "disjoint", "disjoint sibling wildcards"],
 
     // named `**:name` is one-or-more
     ["/a/**:rest", "/a", "disjoint", "named ** needs >=1 segment"],
-    ["/a/**", "/a/**:rest", "subsumes", "bare ** also matches zero segments"],
-    ["/a/**:rest", "/a/b/**", "subsumes", "named ** vs deeper **"],
+    ["/a/**", "/a/**:rest", "superset", "bare ** also matches zero segments"],
+    ["/a/**:rest", "/a/b/**", "superset", "named ** vs deeper **"],
     ["/a/**:x", "/a/**:y", "equal", "match-sets compare, names don't"],
 
     // `*` / `:param` single segments
-    ["/a/:x", "/a/b", "subsumes", ":param vs literal"],
+    ["/a/:x", "/a/b", "superset", ":param vs literal"],
     ["/a/:x", "/a/:y", "equal", "params equal regardless of name"],
-    ["/a/*", "/a/:x", "subsumes", "trailing * also matches zero segments"],
+    ["/a/*", "/a/:x", "superset", "trailing * also matches zero segments"],
     ["/a/*/c", "/a/:x/c", "equal", "mid * is exactly one, like :param"],
-    ["/a/**", "/a/:x", "subsumes", "** vs :param"],
+    ["/a/**", "/a/:x", "superset", "** vs :param"],
 
     // partial overlap (the pre-merge ambiguity case)
     ["/a/*/c", "/a/b/*", "partial", "crossing dynamic segments"],
@@ -132,42 +132,42 @@ describe("compareRoutes", () => {
 
     // optional / repeat modifiers (multi-shape patterns)
     ["/a/:x?", "/a/*", "equal", "optional param == trailing *"],
-    ["/a/:x?", "/a", "subsumes", "optional param matches without"],
+    ["/a/:x?", "/a", "superset", "optional param matches without"],
     ["/a/:x*", "/a/**", "equal", "repeat* == bare **"],
     ["/a/:x+", "/a/**:rest", "equal", "repeat+ == named **"],
-    ["/a/:x+", "/a/**", "subsumed", "repeat+ needs >=1, ** doesn't"],
+    ["/a/:x+", "/a/**", "subset", "repeat+ needs >=1, ** doesn't"],
 
     // non-capturing group delimiters `{...}?`
-    ["/a{/b}?", "/a", "subsumes", "optional group matches without"],
-    ["/a{/b}?", "/a/*", "subsumed", "optional group is a subset of trailing *"],
+    ["/a{/b}?", "/a", "superset", "optional group matches without"],
+    ["/a{/b}?", "/a/*", "subset", "optional group is a subset of trailing *"],
     ["/a{/b}?", "/a/c", "disjoint", "optional group rejects other suffix"],
 
     // regex-constrained segments
-    ["/user/:id(\\d+)", "/user/42", "subsumes", "regex accepts literal (precise)"],
+    ["/user/:id(\\d+)", "/user/42", "superset", "regex accepts literal (precise)"],
     ["/user/:id(\\d+)", "/user/abc", "disjoint", "regex rejects literal (precise)"],
     ["/user/:id(\\d+)", "/user/:id(\\d+)", "equal", "identical regex sources"],
     ["/user/:id(\\d+)", "/user/:x(\\d+)", "equal", "identical regex, param names don't matter"],
-    ["/a/:x(\\d+)", "/a/:y(\\d+)/**", "subsumed", "same constraint, other pattern deeper"],
-    ["/user/:id(\\d+)", "/user/:x", "subsumed", "any-param covers regex"],
+    ["/a/:x(\\d+)", "/a/:y(\\d+)/**", "subset", "same constraint, other pattern deeper"],
+    ["/user/:id(\\d+)", "/user/:x", "subset", "any-param covers regex"],
     ["/user/:id(\\d+)", "/user/:n([a-z]+)", "partial", "regex vs regex (undecidable)"],
-    ["/user/:id(\\d+)", "/user/**", "subsumed", "wildcard covers regex"],
+    ["/user/:id(\\d+)", "/user/**", "subset", "wildcard covers regex"],
     // Equality between a regex and the literal/any value-set it happens to
     // coincide with is undecidable — only the ⊇ direction is provable, so the
     // verdict degrades to the proven containment, never to a wrong "equal".
-    ["/user/:id(42)", "/user/42", "subsumes", "regex==literal degrades to containment"],
-    ["/u/:id([\\s\\S]+)", "/u/:x", "subsumed", "regex==any-param degrades to containment"],
+    ["/user/:id(42)", "/user/42", "superset", "regex==literal degrades to containment"],
+    ["/u/:id([\\s\\S]+)", "/u/:x", "subset", "regex==any-param degrades to containment"],
 
     // escaping
-    ["/a/\\*", "/a/*", "subsumed", "escaped star is one literal of trailing *"],
-    ["/a/\\:b", "/a/:b", "subsumed", "escaped colon is one literal of :param"],
+    ["/a/\\*", "/a/*", "subset", "escaped star is one literal of trailing *"],
+    ["/a/\\:b", "/a/:b", "subset", "escaped colon is one literal of :param"],
     ["/a/\\*", "/a/\\*", "equal", "identical escaped literals"],
   ];
 
   const inverse: Record<RouteComparison, RouteComparison> = {
     disjoint: "disjoint",
     equal: "equal",
-    subsumes: "subsumed",
-    subsumed: "subsumes",
+    superset: "subset",
+    subset: "superset",
     partial: "partial",
   };
 
