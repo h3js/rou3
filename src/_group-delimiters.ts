@@ -44,6 +44,7 @@ export function scanFirstGroup(path: string): GroupDelimiter | undefined {
 }
 
 export function expandGroupDelimiters(path: string): string[] | undefined {
+  if (!path.includes("{")) return;
   const group = scanFirstGroup(path);
   if (!group) {
     return;

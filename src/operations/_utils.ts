@@ -3,15 +3,12 @@ import { NullProtoObj } from "../object.ts";
 import type { MatchedRoute, ParamsIndexMap } from "../types.ts";
 
 export function encodeEscapes(path: string): string {
-  return path
-    .replace(/\\:/g, "\uFFFDA")
-    .replace(/\\\(/g, "\uFFFDB")
-    .replace(/\\\)/g, "\uFFFDC")
-    .replace(/\\\{/g, "\uFFFDD")
-    .replace(/\\\}/g, "\uFFFDE");
+  if (!path.includes("\\")) return path;
+  return path.replace(/\\([:(){}])/g, (_, c) => "\uFFFD" + "ABCDE"[":(){}".indexOf(c)]);
 }
 
 export function decodeEscaped(segment: string): string {
+  if (!segment.includes("\uFFFD")) return segment;
   return segment.replace(/\uFFFD([A-E])/g, (_, c) =>
     // eslint-disable-next-line unicorn/no-nested-ternary
     c === "A" ? ":" : c === "B" ? "(" : c === "C" ? ")" : c === "D" ? "{" : "}",
@@ -20,6 +17,8 @@ export function decodeEscaped(segment: string): string {
 
 export function expandModifiers(segments: string[]): string[] | undefined {
   for (let i = 0; i < segments.length; i++) {
+    const last = segments[i].charCodeAt(segments[i].length - 1);
+    if (last !== 63 /* ? */ && last !== 43 /* + */ && last !== 42 /* * */) continue;
     const m = segments[i].match(/^(.*:[\w-]+(?:\([^)]*\))?)([?+*])$/);
     if (!m) continue;
     const pre = segments.slice(0, i);

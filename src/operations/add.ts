@@ -64,12 +64,9 @@ export function addRoute<T>(
     }
 
     // Param
-    if (
-      segment === "*" ||
-      segment.includes(":") ||
-      segment.includes("(") ||
-      hasSegmentWildcard(segment)
-    ) {
+    const hasParen = segment.includes("(");
+    const hasWildcard = !hasParen && hasSegmentWildcard(segment);
+    if (segment === "*" || hasParen || hasWildcard || segment.includes(":")) {
       if (!node.param) {
         node.param = { key: "*" };
       }
@@ -77,9 +74,9 @@ export function addRoute<T>(
       if (segment === "*") {
         paramsMap.push([i, String(_unnamedParamIndex++), true /* optional */]);
       } else if (
+        hasParen ||
+        hasWildcard ||
         segment.includes(":", 1) ||
-        segment.includes("(") ||
-        hasSegmentWildcard(segment) ||
         !/^:[\w-]+$/.test(segment)
       ) {
         const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex);
@@ -115,11 +112,8 @@ export function addRoute<T>(
 
   // Assign index, params and data to the node
   const hasParams = paramsMap.length > 0;
-  if (!node.methods) {
-    node.methods = new NullProtoObj();
-  }
-  node.methods![method] ??= [];
-  node.methods![method]!.push({
+  const methods = (node.methods ??= new NullProtoObj());
+  (methods[method] ??= []).push({
     data: data || (null as T),
     paramsRegexp,
     paramsMap: hasParams ? paramsMap : undefined,

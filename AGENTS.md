@@ -122,6 +122,8 @@ Two separate escape systems handle `\x` in route patterns:
 
 Key invariant: `\uFFFD` (U+FFFD) is used for router-level escaping, `\uFFFE` (U+FFFE) for regex-level escaping — they must not collide.
 
+Perf: `addRoute`'s pre-processing helpers each bail out early when the input lacks their trigger char — `encodeEscapes` (`\`), `decodeEscaped` (`\uFFFD`), `expandGroupDelimiters` (`{`), `expandModifiers` (trailing `?`/`+`/`*` charCode check). Plain routes skip all the regex/scanner machinery (~2x faster add); keep the guards when editing these helpers.
+
 ### RegExp → route (`regExpToRoute`)
 
 - `src/regexp-to-route.ts` is the inverse of `routeToRegExp()`: it parses an anchored, PCRE-compatible `RegExp` (or its `source` string) back into a rou3 route pattern. Tree-shakeable — zero impact on the core bundle (only pulled in when imported).

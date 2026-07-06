@@ -30,8 +30,13 @@ describe("benchmark", () => {
     // closure-free pass (~1.4x faster than the old double `.find`) and
     // splitPath no longer rest-copies the split array — the unique loop
     // tokens gzip worse than the old repeated `.find` closures.
-    expect(bytes).toBeLessThanOrEqual(6180); // <6.18kb
-    expect(gzipSize).toBeLessThanOrEqual(2445); // <2.45kb
+    // +~46B raw / +~59B gzip: addRoute is ~2x faster — encodeEscapes,
+    // expandGroupDelimiters, expandModifiers and decodeEscaped bail out early
+    // when the path lacks their trigger char (`\`, `{`, `?+*` suffix,
+    // `\uFFFD`), and the five chained escape replaces collapsed into one
+    // callback pass (shrinks raw, but the repetitive chain gzipped better).
+    expect(bytes).toBeLessThanOrEqual(6230); // <6.23kb
+    expect(gzipSize).toBeLessThanOrEqual(2510); // <2.51kb
   });
 });
 
