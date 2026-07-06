@@ -1,7 +1,7 @@
 import { mayMatchAt, routeToShapes, shapeOf, shapesOverlap } from "../_overlap.ts";
 import { shapeSubsumes } from "../_subsume.ts";
 import type { Edge, RouteShape } from "../_overlap.ts";
-import type { MatchedRoute, Node, RouterContext } from "../types.ts";
+import type { MatchedRoute, MethodData, Node, RouterContext } from "../types.ts";
 
 /**
  * How the match-sets of two route patterns relate. See {@link compareRoutes}.
@@ -101,21 +101,28 @@ export function compareRoutes(patternA: string, patternB: string): RouteComparis
  * {@link routesOverlap}.
  *
  * Returned matches carry only `data` — a pattern describes a whole scope rather
- * than one concrete path, so no `params` can be resolved. A route registered
- * with optional/group syntax expands into several tree entries that share one
- * `data` reference; those are collapsed to a single match. Distinct routes are
- * always reported separately, even when they carry an equal primitive `data`
- * value (or none — `addRoute` stores `null` when no data is given).
+ * than one concrete path, so no `params` can be resolved. With `routes: true`
+ * they also carry the registered `route` pattern and `method` (mirrors
+ * `findAllRoutes`). A route registered with optional/group syntax expands into
+ * several tree entries; those are collapsed to a single match. Distinct routes
+ * are always reported separately, even when they share one `data` reference
+ * (e.g. a common middleware object) or carry an equal primitive `data` value
+ * (or none — `addRoute` stores `null` when no data is given).
  */
 export function findOverlappingRoutes<T>(
   ctx: RouterContext<T>,
   method: string = "",
   pattern: string,
+  opts?: { routes?: boolean },
 ): MatchedRoute<T>[] {
   const query = routeToShapes(pattern);
-  const matches: MatchedRoute<T>[] = [];
-  _collectOverlaps(ctx.root, method, query, [], new Set(), matches);
-  return matches;
+  const entries: MethodData<T>[] = [];
+  _collectOverlaps(ctx.root, method, query, [], new Map(), entries);
+  // Truthiness (not `=== true`) to stay in lockstep with findRoute/compiler.
+  const routes = !!opts?.routes;
+  return entries.map((e) =>
+    routes ? { data: e.data, route: e.route, method: e.method } : { data: e.data },
+  );
 }
 
 // Whether any shape pair overlaps — the single overlap definition shared by
@@ -141,18 +148,18 @@ function _collectOverlaps<T>(
   method: string,
   query: RouteShape[],
   edges: Edge[],
-  seen: Set<unknown>,
-  matches: MatchedRoute<T>[],
+  seen: Map<unknown, Map<string, Set<string>>>,
+  entries: MethodData<T>[],
 ): void {
   // Least- to most-specific: wildcard, then param, then static, then self.
   if (node.wildcard) {
     edges.push(1);
-    _collectOverlaps(node.wildcard, method, query, edges, seen, matches);
+    _collectOverlaps(node.wildcard, method, query, edges, seen, entries);
     edges.pop();
   }
   if (node.param) {
     edges.push(0);
-    _collectOverlaps(node.param, method, query, edges, seen, matches);
+    _collectOverlaps(node.param, method, query, edges, seen, entries);
     edges.pop();
   }
   if (node.static) {
@@ -160,7 +167,7 @@ function _collectOverlaps<T>(
       // Static keys are value-constrained: skip subtrees the query can't reach.
       if (mayMatchAt(query, edges.length, key)) {
         edges.push(key);
-        _collectOverlaps(node.static[key], method, query, edges, seen, matches);
+        _collectOverlaps(node.static[key], method, query, edges, seen, entries);
         edges.pop();
       }
     }
@@ -170,17 +177,28 @@ function _collectOverlaps<T>(
     if (data) {
       for (const entry of data) {
         const d = entry.data;
-        // Collapse only genuine reference-duplicates: a route with optional/group
-        // syntax (`:x?`, `{/c}?`) expands into several tree entries that share the
-        // same `data` reference. Primitive/absent data (`addRoute` stores `null`
-        // when none is given) is never deduped, so distinct routes that happen to
-        // carry an equal primitive value are all reported instead of dropped.
+        // Collapse only genuine registration-duplicates: a route with optional/
+        // group syntax (`:x?`, `{/c}?`) expands into several tree entries that
+        // share one `data` reference AND one registered route/method — so the
+        // dedup keys on the whole registration (nested maps rather than a
+        // delimited composite string: addRoute never validates methods, so no
+        // delimiter is collision-free), and distinct patterns sharing a data
+        // reference (e.g. one middleware object) are each reported.
+        // Primitive/absent data (`addRoute` stores `null` when none is given)
+        // is never deduped, so distinct routes that happen to carry an equal
+        // primitive value are all reported instead of dropped.
         const isRef = d !== null && (typeof d === "object" || typeof d === "function");
-        if (isRef && seen.has(d)) continue;
+        if (isRef && seen.get(d)?.get(entry.method)?.has(entry.route)) continue;
         const shape = shapeOf(edges, entry);
         if (query.some((q) => shapesOverlap(q, shape))) {
-          if (isRef) seen.add(d);
-          matches.push({ data: d });
+          if (isRef) {
+            let byMethod = seen.get(d);
+            if (!byMethod) seen.set(d, (byMethod = new Map()));
+            let routes = byMethod.get(entry.method);
+            if (!routes) byMethod.set(entry.method, (routes = new Set()));
+            routes.add(entry.route);
+          }
+          entries.push(entry);
         }
       }
     }

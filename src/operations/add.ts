@@ -17,15 +17,25 @@ export function addRoute<T>(
   path: string,
   data?: T,
 ): void {
-  method = method.toUpperCase();
   if (path.charCodeAt(0) !== 47 /* '/' */) {
     path = `/${path}`;
   }
+  // Keep the original pattern: group/modifier expansion recurses with rewritten
+  // paths, but matches must report the route as registered (`routes: true`).
+  _addRoute(ctx, method.toUpperCase(), path, data, path);
+}
 
+function _addRoute<T>(
+  ctx: RouterContext<T>,
+  method: string,
+  path: string,
+  data: T | undefined,
+  route: string,
+): void {
   const groupExpanded = expandGroupDelimiters(path);
   if (groupExpanded) {
     for (const expandedPath of groupExpanded) {
-      addRoute(ctx, method, expandedPath, data);
+      _addRoute(ctx, method, expandedPath, data, route);
     }
     return;
   }
@@ -38,7 +48,7 @@ export function addRoute<T>(
   const expanded = expandModifiers(segments);
   if (expanded) {
     for (const p of expanded) {
-      addRoute(ctx, method, p, data);
+      _addRoute(ctx, method, p, data, route);
     }
     return;
   }
@@ -115,14 +125,20 @@ export function addRoute<T>(
 
   // Assign index, params and data to the node
   const hasParams = paramsMap.length > 0;
+  const _data = data || (null as T);
   if (!node.methods) {
     node.methods = new NullProtoObj();
   }
   node.methods![method] ??= [];
   node.methods![method]!.push({
-    data: data || (null as T),
+    data: _data,
     paramsRegexp,
     paramsMap: hasParams ? paramsMap : undefined,
+    route,
+    method,
+    // Precomputed default match object for param-less entries: findRoute
+    // returns it as-is (zero allocation, no `route`/`method` leak).
+    res: hasParams ? undefined : { data: _data, params: undefined },
   });
 
   // Static

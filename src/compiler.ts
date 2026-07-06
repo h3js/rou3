@@ -4,6 +4,8 @@ import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 export interface RouterCompilerOptions<T = any> {
   matchAll?: boolean;
   normalize?: boolean;
+  /** Include the registered `route` pattern and `method` on matches (opt-in: enlarges the generated code). */
+  routes?: boolean;
   serialize?: (data: T) => string;
 }
 
@@ -30,7 +32,7 @@ export function compileRouter<T, O extends RouterCompilerOptions<T> = RouterComp
   method: string,
   path: string,
 ) => O["matchAll"] extends true ? MatchedRoute<T>[] : MatchedRoute<T> | undefined {
-  const ctx: CompilerContext = { opts: opts || {}, router, data: [] };
+  const ctx: CompilerContext = { opts: opts || {}, router, data: [], dataIndex: new Map() };
   const compiled = compileRouteMatch(ctx);
   return new Function(...ctx.data!.map((_, i) => `$${i}`), `return(m,p)=>{${compiled}}`)(
     ...ctx.data!,
@@ -59,6 +61,7 @@ export function compileRouterToString(
     opts: opts || {},
     router,
     data: [],
+    dataIndex: new Map(),
     compileToString: true,
   };
   let compiled = `(m,p)=>{${compileRouteMatch(ctx)}}`;
@@ -76,6 +79,9 @@ interface CompilerContext {
   router: RouterContext<any>;
   compileToString?: boolean;
   data: string[];
+  // Value -> `data` index; keeps `dataRef` O(1) (an indexOf scan is quadratic
+  // over the whole table, which `routes: true` roughly doubles).
+  dataIndex: Map<any, number>;
 }
 
 function compileRouteMatch(ctx: CompilerContext): string {
@@ -206,6 +212,10 @@ function compileFinalMatch(
     ret += "}";
   }
 
+  if (ctx.opts?.routes) {
+    ret += `,route:${serializeRouteString(ctx, data.route)},method:${serializeRouteString(ctx, data.method)}`;
+  }
+
   const code =
     (conditions.length > 0 ? `if(${conditions.join("&&")})` : "") +
     (ctx.opts?.matchAll ? `r.unshift(${ret}});` : `return ${ret}};`);
@@ -290,10 +300,21 @@ function serializeData(ctx: CompilerContext, value: any): string {
       value = JSON.stringify(value);
     }
   }
-  let index = ctx.data.indexOf(value);
-  if (index === -1) {
-    ctx.data.push(value);
-    index = ctx.data.length - 1;
+  return dataRef(ctx, value);
+}
+
+// Route/method strings share the `$N` dedup table (a route expanded from
+// optional/group syntax repeats its pattern across entries, and methods repeat
+// across the router) but bypass the `serialize` hook, which is for data of `T`.
+function serializeRouteString(ctx: CompilerContext, value: string): string {
+  return dataRef(ctx, ctx.compileToString ? JSON.stringify(value) : value);
+}
+
+function dataRef(ctx: CompilerContext, value: any): string {
+  let index = ctx.dataIndex.get(value);
+  if (index === undefined) {
+    index = ctx.data.push(value) - 1;
+    ctx.dataIndex.set(value, index);
   }
   return `$${index}`;
 }

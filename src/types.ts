@@ -8,6 +8,12 @@ export type MethodData<T = unknown> = {
   data: T;
   paramsMap?: ParamsIndexMap;
   paramsRegexp: RegExp[];
+  /** Registered route pattern (leading-slash-normalized, before group/modifier expansion). */
+  route: string;
+  /** Registered method (uppercased; `""` for method-agnostic). */
+  method: string;
+  /** Precomputed default `findRoute` result for param-less entries (`undefined` when the entry has params). */
+  res?: MatchedRoute<T>;
 };
 
 export interface Node<T = unknown> {
@@ -25,6 +31,10 @@ export interface Node<T = unknown> {
 export type MatchedRoute<T = unknown> = {
   data: T;
   params?: Record<string, string>;
+  /** Registered route pattern that produced this match (opt-in via `routes: true`). */
+  route?: string;
+  /** Registered method (uppercased; `""` for method-agnostic) (opt-in via `routes: true`). */
+  method?: string;
 };
 
 type ExtractWildcards<

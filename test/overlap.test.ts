@@ -203,6 +203,33 @@ describe("findOverlappingRoutes", () => {
     expect(matches.every((m) => m.params === undefined)).toBe(true);
   });
 
+  it("routes: true attaches the registered pattern and method", () => {
+    const router = createRouter<string>();
+    addRoute(router, "", "/**", "root");
+    addRoute(router, "GET", "/protected/**", "auth");
+    addRoute(router, "GET", "/protected/feed/**", "feed");
+
+    expect(findOverlappingRoutes(router, "GET", "/protected/feed/**", { routes: true })).toEqual([
+      { data: "root", route: "/**", method: "" },
+      { data: "auth", route: "/protected/**", method: "GET" },
+      { data: "feed", route: "/protected/feed/**", method: "GET" },
+    ]);
+
+    // Off by default.
+    const plain = findOverlappingRoutes(router, "GET", "/protected/feed/**");
+    expect(plain.every((m) => !("route" in m) && !("method" in m))).toBe(true);
+  });
+
+  it("routes: true reports an expanded route's pattern as registered", () => {
+    const router = createRouter<Record<string, unknown>>();
+    const opt = { name: "opt" };
+    addRoute(router, "GET", "/a/:x?", opt);
+
+    expect(findOverlappingRoutes(router, "GET", "/a/**", { routes: true })).toEqual([
+      { data: opt, route: "/a/:x?", method: "GET" },
+    ]);
+  });
+
   it("does not include disjoint sibling scopes", () => {
     const router = createRouter<string>();
     addRoute(router, "GET", "/**", "root");
@@ -256,6 +283,39 @@ describe("findOverlappingRoutes", () => {
     // `:x?` / `{/c}?` expand to several tree entries sharing one data reference.
     expect(findOverlappingRoutes(router, "GET", "/a/**").map((m) => m.data)).toEqual([opt]);
     expect(findOverlappingRoutes(router, "GET", "/b/**").map((m) => m.data)).toEqual([grp]);
+  });
+
+  it("reports each pattern when distinct routes share one data reference", () => {
+    const router = createRouter<Record<string, unknown>>();
+    const shared = { mw: "auth" };
+    addRoute(router, "GET", "/a/**", shared);
+    addRoute(router, "GET", "/b/**", shared);
+
+    // Same handler object on two registrations: dedup is per registration
+    // (data + route + method), not per data reference.
+    expect(findOverlappingRoutes(router, "GET", "/**", { routes: true })).toEqual([
+      { data: shared, route: "/a/**", method: "GET" },
+      { data: shared, route: "/b/**", method: "GET" },
+    ]);
+    expect(findOverlappingRoutes(router, "GET", "/**")).toEqual([
+      { data: shared },
+      { data: shared },
+    ]);
+  });
+
+  it("registration dedup cannot collide across method/route string boundaries", () => {
+    // addRoute uppercases but never validates methods, so method strings may
+    // contain spaces/slashes; two registrations sharing a data reference must
+    // never be conflated by an ambiguous method+route composite.
+    const router = createRouter<Record<string, unknown>>();
+    const shared = { mw: true };
+    addRoute(router, "", "/B /c", shared);
+    addRoute(router, " /B", "/c", shared);
+
+    // Querying method " /B" reaches both: bucket " /B" at one node, the
+    // method-agnostic "" fallback at the other.
+    const matches = findOverlappingRoutes(router, " /B", "/**", { routes: true });
+    expect(matches.map((m) => m.route).sort()).toEqual(["/B /c", "/c"]);
   });
 
   it("does not drop distinct overlapping routes that lack data (all default to null)", () => {

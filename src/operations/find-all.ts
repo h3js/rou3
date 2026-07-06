@@ -8,7 +8,7 @@ export function findAllRoutes<T>(
   ctx: RouterContext<T>,
   method: string = "",
   path: string,
-  opts?: { params?: boolean; normalize?: boolean },
+  opts?: { params?: boolean; routes?: boolean; normalize?: boolean },
 ): MatchedRoute<T>[] {
   if (opts?.normalize) {
     path = normalizePath(path);
@@ -20,14 +20,17 @@ export function findAllRoutes<T>(
   const matches = _findAll(ctx.root, method, segments, 0);
 
   if (opts?.params === false) {
+    // Raw entries — they already carry `route`/`method` alongside `data`.
     return matches;
   }
 
+  // Truthiness (not `=== true`) to stay in lockstep with findRoute/compiler.
+  const withRoutes = !!opts?.routes;
   return matches.map((m) => {
-    return {
-      data: m.data,
-      params: m.paramsMap ? getMatchParams(segments, m.paramsMap) : undefined,
-    };
+    const params = m.paramsMap ? getMatchParams(segments, m.paramsMap) : undefined;
+    return withRoutes
+      ? { data: m.data, params, route: m.route, method: m.method }
+      : { data: m.data, params };
   });
 }
 

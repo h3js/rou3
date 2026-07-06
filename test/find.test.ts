@@ -175,6 +175,92 @@ describe("route matching", () => {
   });
 });
 
+describe("route attribution (routes: true)", () => {
+  const router = createRouter(["/static", "/dyn/:id", "/wild/**"]);
+  const compiledLookup = compileRouter(router, { routes: true });
+
+  const lookups = [
+    {
+      name: "findRoute",
+      match: (method: string, path: string) => findRoute(router, method, path, { routes: true }),
+    },
+    {
+      name: "compiledLookup",
+      match: (method: string, path: string) => compiledLookup(method, path),
+    },
+  ];
+
+  for (const { name, match } of lookups) {
+    it(`includes route and method with ${name}`, () => {
+      expect(match("GET", "/dyn/42")).toMatchObject({
+        data: { path: "/dyn/:id" },
+        params: { id: "42" },
+        route: "/dyn/:id",
+        method: "GET",
+      });
+      expect(match("GET", "/wild/a/b")).toMatchObject({
+        data: { path: "/wild/**" },
+        params: { _: "a/b" },
+        route: "/wild/**",
+        method: "GET",
+      });
+      expect(match("GET", "/static")).toMatchObject({
+        data: { path: "/static" },
+        route: "/static",
+        method: "GET",
+      });
+    });
+  }
+
+  it("compiled output stays free of route strings without the flag", () => {
+    expect(compileRouter(router).toString()).not.toContain("route:");
+  });
+
+  it("static matches carry only data and params by default (parity with compiled)", () => {
+    const match = findRoute(router, "GET", "/static")!;
+    expect("route" in match).toBe(false);
+    expect("method" in match).toBe(false);
+    expect("paramsRegexp" in match).toBe(false);
+    expect(match).toEqual(compileRouter(router)("GET", "/static"));
+  });
+
+  it("param matches are fresh objects; param-less matches reuse one per entry", () => {
+    // Param matches: fresh object per call (identical to pre-attribution rou3).
+    const first = findRoute(router, "GET", "/dyn/1")!;
+    const second = findRoute(router, "GET", "/dyn/2")!;
+    expect(second).not.toBe(first);
+    expect(first.params).toEqual({ id: "1" });
+    expect(second.params).toEqual({ id: "2" });
+    // Param-less matches: the entry's precomputed object (zero allocation) —
+    // shared across calls, like the raw-entry return before attribution.
+    expect(findRoute(router, "GET", "/static")!).toBe(findRoute(router, "GET", "/static")!);
+    // `routes: true` allocates fresh objects on its own branch.
+    const withRoute = findRoute(router, "GET", "/dyn/3", { routes: true })!;
+    expect(withRoute).toMatchObject({ route: "/dyn/:id", method: "GET" });
+    expect(withRoute).not.toBe(findRoute(router, "GET", "/dyn/3", { routes: true })!);
+    expect("route" in findRoute(router, "GET", "/dyn/4")!).toBe(false);
+  });
+
+  it("params: false returns the raw entry for static and dynamic paths alike", () => {
+    const opts = { params: false, routes: true };
+    for (const path of ["/static", "/dyn/42"]) {
+      const raw = findRoute(router, "GET", path, opts)!;
+      expect(raw).toMatchObject({ paramsRegexp: [] });
+      expect(raw.route).toBeDefined();
+    }
+  });
+
+  it("default lookup degrades to a fresh match when an entry lacks res (foreign context)", () => {
+    // An entry built by pre-attribution rou3 (e.g. a context shared across two
+    // rou3 copies) has no precomputed `res`: the default path must fall back to
+    // a fresh allocation, not report a matching route as a miss.
+    const foreign = createRouter(["/static"]);
+    const raw = findRoute(foreign, "GET", "/static", { params: false })! as { res?: unknown };
+    delete raw.res;
+    expect(findRoute(foreign, "GET", "/static")).toEqual({ data: { path: "/static" } });
+  });
+});
+
 describe("hyphenated param names", () => {
   const router = createRouter([
     "/users/:user-id",

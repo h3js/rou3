@@ -8,7 +8,7 @@ export function findRoute<T = unknown>(
   ctx: RouterContext<T>,
   method: string = "",
   path: string,
-  opts?: { params?: boolean; normalize?: boolean },
+  opts?: { params?: boolean; routes?: boolean; normalize?: boolean },
 ): MatchedRoute<T> | undefined {
   if (opts?.normalize) {
     path = normalizePath(path);
@@ -18,31 +18,49 @@ export function findRoute<T = unknown>(
   }
 
   // Static
+  let match: MethodData<T> | undefined;
   const staticNode = ctx.static[path];
   if (staticNode && staticNode.methods) {
     const staticMatch = staticNode.methods[method] || staticNode.methods[""];
     if (staticMatch !== undefined) {
-      return staticMatch[0];
+      match = staticMatch[0];
     }
   }
 
   // Lookup tree
-  const segments = splitPath(path);
-
-  const match = _lookupTree<T>(ctx.root, method, segments, 0)?.[0];
-
+  let segments: string[] | undefined;
   if (match === undefined) {
-    return;
+    segments = splitPath(path);
+    match = _lookupTree<T>(ctx.root, method, segments, 0)?.[0];
+    if (match === undefined) {
+      return;
+    }
   }
 
   if (opts?.params === false) {
+    // Raw entry — already carries `route`/`method` alongside `data`.
     return match;
   }
 
-  return {
-    data: match.data,
-    params: match.paramsMap ? getMatchParams(segments, match.paramsMap) : undefined,
-  };
+  // Attribution is opt-in and pays for itself: a fresh object per match.
+  if (opts?.routes) {
+    return {
+      data: match.data,
+      params: match.paramsMap ? getMatchParams(segments!, match.paramsMap) : undefined,
+      route: match.route,
+      method: match.method,
+    };
+  }
+
+  // Default hot path — mirrors pre-attribution rou3: a fresh `{ data, params }`
+  // per param match (`segments` is always set when `paramsMap` is); param-less
+  // matches return the entry's precomputed object (zero allocation, and unlike
+  // a raw entry it keeps `route`/`method` off default results). The fallback
+  // covers entries built without `res` (a context from pre-attribution rou3):
+  // degrade to a fresh allocation instead of reporting a match as a miss.
+  return match.paramsMap
+    ? { data: match.data, params: getMatchParams(segments!, match.paramsMap) }
+    : match.res || { data: match.data, params: undefined };
 }
 
 function _lookupTree<T>(

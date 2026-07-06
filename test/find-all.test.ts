@@ -5,6 +5,7 @@ import {
   compareRoutes,
   createRouter as createEmptyRouter,
   findAllRoutes,
+  findRoute,
   type RouterContext,
 } from "../src/index.ts";
 import { compileRouter } from "../src/compiler.ts";
@@ -435,6 +436,93 @@ describe("matcher: method-agnostic fallback", () => {
     expect(_findAllRoutes(router, "POST", "/api")).toEqual(["S-AGN"]);
     expect(_findAllRoutes(router, "GET", "/api/1")).toEqual(["P-GET"]);
     expect(_findAllRoutes(router, "POST", "/api/1")).toEqual(["P-AGN"]);
+  });
+});
+
+describe("matcher: route attribution (routes: true)", () => {
+  // Opt-in `routes: true` attaches the registered pattern + method to each
+  // match. Interpreter and compiled matchAll must agree exactly.
+  const _findAllWithRoutes = (ctx: RouterContext<any>, method: string, path: string) => {
+    const res = findAllRoutes(ctx, method, path, { routes: true });
+    const compiled = compileRouter(ctx, { matchAll: true, routes: true });
+    expect(compiled(method, path)).toEqual(res);
+    return res;
+  };
+
+  it("includes the registered route and method on each match", () => {
+    const router = createEmptyRouter<{ name: string }>();
+    addRoute(router, "GET", "/foo/**", { name: "wild" });
+    addRoute(router, "get", "/foo/:id", { name: "param" });
+    addRoute(router, "GET", "/foo/42", { name: "static" });
+    expect(_findAllWithRoutes(router, "GET", "/foo/42")).toEqual([
+      { data: { name: "wild" }, params: { _: "42" }, route: "/foo/**", method: "GET" },
+      { data: { name: "param" }, params: { id: "42" }, route: "/foo/:id", method: "GET" },
+      { data: { name: "static" }, route: "/foo/42", method: "GET" },
+    ]);
+  });
+
+  it('method-agnostic registrations report method ""', () => {
+    const router = createEmptyRouter<{ name: string }>();
+    addRoute(router, "", "/api/**", { name: "agn" });
+    expect(_findAllWithRoutes(router, "POST", "/api/x")).toEqual([
+      { data: { name: "agn" }, params: { _: "x" }, route: "/api/**", method: "" },
+    ]);
+  });
+
+  it("expanded optional/group syntax reports the pattern as registered", () => {
+    const router = createEmptyRouter<{ name: string }>();
+    addRoute(router, "GET", "/a/:x?", { name: "opt" });
+    addRoute(router, "GET", "/book{s}?", { name: "grp" });
+    expect(_findAllWithRoutes(router, "GET", "/a")).toEqual([
+      { data: { name: "opt" }, route: "/a/:x?", method: "GET" },
+    ]);
+    expect(_findAllWithRoutes(router, "GET", "/a/hi")).toEqual([
+      { data: { name: "opt" }, params: { x: "hi" }, route: "/a/:x?", method: "GET" },
+    ]);
+    expect(_findAllWithRoutes(router, "GET", "/books")).toEqual([
+      { data: { name: "grp" }, route: "/book{s}?", method: "GET" },
+    ]);
+  });
+
+  it("adds a leading slash to the reported route like addRoute does", () => {
+    const router = createEmptyRouter<{ name: string }>();
+    addRoute(router, "GET", "no-slash", { name: "n" });
+    expect(_findAllWithRoutes(router, "GET", "/no-slash")).toEqual([
+      { data: { name: "n" }, route: "/no-slash", method: "GET" },
+    ]);
+  });
+
+  it("params: false returns raw entries even with routes: true (matches findRoute)", () => {
+    const router = createEmptyRouter<{ name: string }>();
+    addRoute(router, "GET", "/dyn/:id", { name: "param" });
+    const opts = { params: false, routes: true };
+    const all = findAllRoutes(router, "GET", "/dyn/42", opts);
+    // Raw MethodData entries: identical to findRoute's, paramsMap intact for
+    // lazy param resolution.
+    expect(all[0]).toBe(findRoute(router, "GET", "/dyn/42", opts));
+    expect(all[0]).toMatchObject({ paramsMap: [[1, "id", false]] });
+  });
+
+  it("treats any truthy routes flag like true (parity with findRoute and compiled)", () => {
+    // Plain-JS callers may pass truthy non-boolean flags; all entry points must
+    // agree with the compiler, which checks truthiness.
+    const router = createEmptyRouter<{ name: string }>();
+    addRoute(router, "GET", "/t/:id", { name: "t" });
+    const opts = { routes: 1 } as unknown as { routes: boolean };
+    const res = findAllRoutes(router, "GET", "/t/1", opts);
+    expect(res).toEqual(compileRouter(router, { matchAll: true, routes: true })("GET", "/t/1"));
+    expect(res[0]).toEqual(findRoute(router, "GET", "/t/1", opts));
+  });
+
+  it("route/method stay off matches and compiled output without the flag", () => {
+    const router = createRouter(["/x/**"]);
+    const m = findAllRoutes(router, "GET", "/x/1")[0];
+    expect("route" in m).toBe(false);
+    expect("method" in m).toBe(false);
+    const compiled = compileRouter(router, { matchAll: true });
+    expect(compiled.toString()).not.toContain("route:");
+    const cm = compiled("GET", "/x/1")[0];
+    expect("route" in cm).toBe(false);
   });
 });
 
