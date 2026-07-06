@@ -203,6 +203,33 @@ describe("findOverlappingRoutes", () => {
     expect(matches.every((m) => m.params === undefined)).toBe(true);
   });
 
+  it("routes: true attaches the registered pattern and method", () => {
+    const router = createRouter<string>();
+    addRoute(router, "", "/**", "root");
+    addRoute(router, "GET", "/protected/**", "auth");
+    addRoute(router, "GET", "/protected/feed/**", "feed");
+
+    expect(findOverlappingRoutes(router, "GET", "/protected/feed/**", { routes: true })).toEqual([
+      { data: "root", route: "/**", method: "" },
+      { data: "auth", route: "/protected/**", method: "GET" },
+      { data: "feed", route: "/protected/feed/**", method: "GET" },
+    ]);
+
+    // Off by default.
+    const plain = findOverlappingRoutes(router, "GET", "/protected/feed/**");
+    expect(plain.every((m) => !("route" in m) && !("method" in m))).toBe(true);
+  });
+
+  it("routes: true reports an expanded route's pattern as registered", () => {
+    const router = createRouter<Record<string, unknown>>();
+    const opt = { name: "opt" };
+    addRoute(router, "GET", "/a/:x?", opt);
+
+    expect(findOverlappingRoutes(router, "GET", "/a/**", { routes: true })).toEqual([
+      { data: opt, route: "/a/:x?", method: "GET" },
+    ]);
+  });
+
   it("does not include disjoint sibling scopes", () => {
     const router = createRouter<string>();
     addRoute(router, "GET", "/**", "root");

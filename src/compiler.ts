@@ -4,6 +4,8 @@ import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 export interface RouterCompilerOptions<T = any> {
   matchAll?: boolean;
   normalize?: boolean;
+  /** Include the registered `route` pattern and `method` on matches (opt-in: enlarges the generated code). */
+  routes?: boolean;
   serialize?: (data: T) => string;
 }
 
@@ -204,6 +206,10 @@ function compileFinalMatch(
           : `..._normalizeGroups((${map[1].toString()}.exec(${params[i]}))?.groups),`;
     }
     ret += "}";
+  }
+
+  if (ctx.opts?.routes) {
+    ret += `,route:${JSON.stringify(data.route)},method:${JSON.stringify(data.method)}`;
   }
 
   const code =

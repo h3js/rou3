@@ -203,6 +203,31 @@ Precisely:
 
 [`findOverlappingRoutes`](#pattern-overlap) follows the same least → most specific order.
 
+### Matched route attribution
+
+By default matches carry only `data` (and `params`), with no way to tell **which registered pattern** produced them. Pass `routes: true` to `findRoute`, `findAllRoutes`, or `findOverlappingRoutes` to include the registered `route` pattern and `method` on each match:
+
+```js
+const router = createRouter();
+addRoute(router, "GET", "/api/**", { name: "api" });
+addRoute(router, "", "/api/:v/users/:id?", { name: "user" });
+
+findAllRoutes(router, "GET", "/api/v1/users/42", { routes: true });
+// [
+//   { data: { name: "api" }, params: { _: "v1/users/42" }, route: "/api/**", method: "GET" },
+//   { data: { name: "user" }, params: { v: "v1", id: "42" }, route: "/api/:v/users/:id?", method: "" },
+// ]
+```
+
+- `route` is the pattern **as registered** (before optional/group syntax like `:id?` or `{s}?` is expanded internally).
+- `method` is the registered method (uppercased), `""` for a method-agnostic registration.
+
+The compiled router supports the same opt-in via the `routes` compiler option — it is opt-in so the generated code size is unchanged for consumers that don't need it:
+
+```js
+const matchAll = compileRouter(router, { matchAll: true, routes: true });
+```
+
 ### Pattern overlap
 
 `findRoute`/`findAllRoutes` match a **concrete path** against registered patterns. Sometimes you instead need to reason about **patterns against patterns** — e.g. to resolve an "effective" merged config over a whole scope, you need to know when two patterns can match a common concrete path.
@@ -246,7 +271,7 @@ findOverlappingRoutes(router, "GET", "/protected/feed/**");
   Useful for ordering patterns by specificity and detecting ambiguous pairs where "most specific match" is undefined. Every verdict's containment claims are proofs, and undecidable cases degrade to a **weaker verdict, never a wrong claim**: containment between two different regex constraints falls back to `"partial"` (even when the sets are actually disjoint — see the over-approximation note below — or actually equal), and an actually-equal pair whose equality is only provable in one direction (e.g. `/u/:id(42)` vs `/u/42`) reports the proven containment instead of `"equal"`.
 
 
-- **`findOverlappingRoutes(router, method, pattern)`** — like `findAllRoutes`, but the query is a **pattern** instead of a concrete path. Returns every registered route whose match-set intersects the pattern, ordered least → most specific, with the same method handling as `findAllRoutes` (falls back to the method-agnostic bucket). Matches carry only `data` — a scope has no single concrete path, so no `params` are resolved. A single route registered with optional/group syntax expands into several tree entries sharing one `data` reference and is reported once; distinct routes are always reported separately, even when they share an equal primitive `data` value (or none).
+- **`findOverlappingRoutes(router, method, pattern, opts?)`** — like `findAllRoutes`, but the query is a **pattern** instead of a concrete path. Returns every registered route whose match-set intersects the pattern, ordered least → most specific, with the same method handling as `findAllRoutes` (falls back to the method-agnostic bucket). Matches carry only `data` — a scope has no single concrete path, so no `params` are resolved — plus the registered `route`/`method` with [`{ routes: true }`](#matched-route-attribution). A single route registered with optional/group syntax expands into several tree entries sharing one `data` reference and is reported once; distinct routes are always reported separately, even when they share an equal primitive `data` value (or none).
 
 **Overlap semantics** are computed with rou3's own segment/radix rules, so they stay consistent with `findRoute`/`findAllRoutes`:
 

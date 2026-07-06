@@ -8,7 +8,7 @@ export function findRoute<T = unknown>(
   ctx: RouterContext<T>,
   method: string = "",
   path: string,
-  opts?: { params?: boolean; normalize?: boolean },
+  opts?: { params?: boolean; routes?: boolean; normalize?: boolean },
 ): MatchedRoute<T> | undefined {
   if (opts?.normalize) {
     path = normalizePath(path);
@@ -36,13 +36,19 @@ export function findRoute<T = unknown>(
   }
 
   if (opts?.params === false) {
+    // Raw entry — already carries `route`/`method` alongside `data`.
     return match;
   }
 
-  return {
+  const res: MatchedRoute<T> = {
     data: match.data,
     params: match.paramsMap ? getMatchParams(segments, match.paramsMap) : undefined,
   };
+  if (opts?.routes) {
+    res.route = match.route;
+    res.method = match.method;
+  }
+  return res;
 }
 
 function _lookupTree<T>(

@@ -101,20 +101,23 @@ export function compareRoutes(patternA: string, patternB: string): RouteComparis
  * {@link routesOverlap}.
  *
  * Returned matches carry only `data` — a pattern describes a whole scope rather
- * than one concrete path, so no `params` can be resolved. A route registered
- * with optional/group syntax expands into several tree entries that share one
- * `data` reference; those are collapsed to a single match. Distinct routes are
- * always reported separately, even when they carry an equal primitive `data`
- * value (or none — `addRoute` stores `null` when no data is given).
+ * than one concrete path, so no `params` can be resolved. With `routes: true`
+ * they also carry the registered `route` pattern and `method` (mirrors
+ * `findAllRoutes`). A route registered with optional/group syntax expands into
+ * several tree entries that share one `data` reference; those are collapsed to
+ * a single match. Distinct routes are always reported separately, even when
+ * they carry an equal primitive `data` value (or none — `addRoute` stores
+ * `null` when no data is given).
  */
 export function findOverlappingRoutes<T>(
   ctx: RouterContext<T>,
   method: string = "",
   pattern: string,
+  opts?: { routes?: boolean },
 ): MatchedRoute<T>[] {
   const query = routeToShapes(pattern);
   const matches: MatchedRoute<T>[] = [];
-  _collectOverlaps(ctx.root, method, query, [], new Set(), matches);
+  _collectOverlaps(ctx.root, method, query, [], new Set(), matches, opts?.routes === true);
   return matches;
 }
 
@@ -143,16 +146,17 @@ function _collectOverlaps<T>(
   edges: Edge[],
   seen: Set<unknown>,
   matches: MatchedRoute<T>[],
+  routes: boolean,
 ): void {
   // Least- to most-specific: wildcard, then param, then static, then self.
   if (node.wildcard) {
     edges.push(1);
-    _collectOverlaps(node.wildcard, method, query, edges, seen, matches);
+    _collectOverlaps(node.wildcard, method, query, edges, seen, matches, routes);
     edges.pop();
   }
   if (node.param) {
     edges.push(0);
-    _collectOverlaps(node.param, method, query, edges, seen, matches);
+    _collectOverlaps(node.param, method, query, edges, seen, matches, routes);
     edges.pop();
   }
   if (node.static) {
@@ -160,7 +164,7 @@ function _collectOverlaps<T>(
       // Static keys are value-constrained: skip subtrees the query can't reach.
       if (mayMatchAt(query, edges.length, key)) {
         edges.push(key);
-        _collectOverlaps(node.static[key], method, query, edges, seen, matches);
+        _collectOverlaps(node.static[key], method, query, edges, seen, matches, routes);
         edges.pop();
       }
     }
@@ -180,7 +184,9 @@ function _collectOverlaps<T>(
         const shape = shapeOf(edges, entry);
         if (query.some((q) => shapesOverlap(q, shape))) {
           if (isRef) seen.add(d);
-          matches.push({ data: d });
+          matches.push(
+            routes ? { data: d, route: entry.route, method: entry.method } : { data: d },
+          );
         }
       }
     }

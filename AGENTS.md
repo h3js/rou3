@@ -54,7 +54,7 @@ findRoute(ctx, method, path, opts?) -> MatchedRoute<T> | undefined
 findAllRoutes(ctx, method, path, opts?) -> MatchedRoute<T>[]
 routesOverlap(patternA, patternB) -> boolean
 compareRoutes(patternA, patternB) -> "disjoint" | "equal" | "superset" | "subset" | "partial"
-findOverlappingRoutes(ctx, method, pattern) -> MatchedRoute<T>[]
+findOverlappingRoutes(ctx, method, pattern, opts?) -> MatchedRoute<T>[]
 routeToRegExp(route) -> RegExp
 regExpToRoute(regexp) -> string
 
@@ -137,6 +137,13 @@ Key invariant: `\uFFFD` (U+FFFD) is used for router-level escaping, `\uFFFE` (U+
 - **Shape canonicalization:** `_computeShape` (`_overlap.ts`) folds trailing `undefined` (any-value) fixed matchers into the tail (`/a/:x` -> `["a"] [1,1]`), and `routeToShapes` merges shapes with *identical* fixed prefixes (`_segmentEqual` — strict identity, never mutual-subsumption proofs) and contiguous length ranges (`/a/:x?` -> `["a"] [0,0]` + `["a"] [1,1]` -> `["a"] [0,1]`) via `mergeShapes` (`_subsume.ts`). Both are match-set-preserving; they make containment see through optional-syntax expansion (`/a/:x?` == `/a/*`).
 - `compareRoutes(a, b)` classifies match-set relations: `disjoint` | `equal` | `superset` (strict unless equality is undecidable) | `subset` | `partial` (no containment proven, sets *may* intersect). Verdict names follow the ES2025 Set methods (`isSupersetOf`/`isSubsetOf`/`isDisjointFrom`); `superset`/`subset` are directional (`compareRoutes(a, b) === "superset"` means `a` ⊇ `b`). Built on `shapeSubsumes()` (`_subsume.ts`): `b`'s total-length range inside `a`'s + per-position matcher containment (`any` ⊇ all; literals by equality; anchored regex ⊇ literal via `test()`; regex ⊇ regex only by source equality modulo named-group names — `_regExpKey` strips `(?<name>` so param names never affect the verdict, `/u/:id(\d+)` == `/u/:x(\d+)`) + `a`'s fixed positions under `b`'s tail must be `any`. Pattern-level containment is proven shape-by-shape (each `b` shape inside a *single* `a` shape) — sufficient, not necessary, so union-split coverage degrades to `partial`. **Containment claims are proofs; undecidable directions degrade to a weaker verdict, never a wrong claim.** Two caveats are inherent: strictness of `subsumes`/`subsumed` is best-effort (an actually-equal pair whose equality is only provable one way — `/u/:id(42)` vs `/u/42` — reports the proven containment, not `equal`), and `partial`'s intersection half is over-approximated (a `partial` regex-vs-regex pair may in fact be disjoint). Both are pinned in `test/overlap.test.ts`.
 - `findOverlappingRoutes` traverses the tree in `findAllRoutes` order (wildcard, param, static, self) so results are least→most specific, prunes static subtrees the query can't reach, and collapses only genuine reference-duplicates (a route with optional/group syntax expands into several entries sharing one `data` reference); distinct routes with equal-or-absent primitive `data` are all reported. Matches carry `data` only (a scope has no single concrete path → no `params`).
+
+### Matched route attribution (`routes: true`)
+
+- `addRoute` stores the **original registered pattern** (`route`, leading-slash-normalized, *before* group/modifier expansion — threaded through the `_addRoute` recursion) and the uppercased `method` on every `MethodData` entry. Cost: two string references per entry, always paid (small; covered by the bundle budget bump in `test/bench/bundle.test.ts`).
+- Opt-in `routes: true` on `findRoute` / `findAllRoutes` (opts), `compileRouter` / `compileRouterToString` (compiler option, applies to both single-match and `matchAll`), and `findOverlappingRoutes` (new 4th `opts` arg) copies `route` + `method` onto matches. `method` is `""` for method-agnostic registrations. Off by default so mapped results and compiled output are unchanged (`find.test.ts` pins that compiled output contains no route strings without the flag).
+- Raw-entry return paths (`params: false`, `findRoute`'s static fast path) return the `MethodData` itself, which now always carries `route`/`method` (like `paramsRegexp` before) — the flag only matters where results are mapped into fresh objects.
+- Interpreter/compiled parity with `routes: true` is pinned in `test/find-all.test.ts` ("route attribution") via exact `toEqual`.
 
 ### Input path normalization
 

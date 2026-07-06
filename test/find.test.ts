@@ -175,6 +175,48 @@ describe("route matching", () => {
   });
 });
 
+describe("route attribution (routes: true)", () => {
+  const router = createRouter(["/static", "/dyn/:id", "/wild/**"]);
+  const compiledLookup = compileRouter(router, { routes: true });
+
+  const lookups = [
+    {
+      name: "findRoute",
+      match: (method: string, path: string) => findRoute(router, method, path, { routes: true }),
+    },
+    {
+      name: "compiledLookup",
+      match: (method: string, path: string) => compiledLookup(method, path),
+    },
+  ];
+
+  for (const { name, match } of lookups) {
+    it(`includes route and method with ${name}`, () => {
+      expect(match("GET", "/dyn/42")).toMatchObject({
+        data: { path: "/dyn/:id" },
+        params: { id: "42" },
+        route: "/dyn/:id",
+        method: "GET",
+      });
+      expect(match("GET", "/wild/a/b")).toMatchObject({
+        data: { path: "/wild/**" },
+        params: { _: "a/b" },
+        route: "/wild/**",
+        method: "GET",
+      });
+      expect(match("GET", "/static")).toMatchObject({
+        data: { path: "/static" },
+        route: "/static",
+        method: "GET",
+      });
+    });
+  }
+
+  it("compiled output stays free of route strings without the flag", () => {
+    expect(compileRouter(router).toString()).not.toContain("route:");
+  });
+});
+
 describe("hyphenated param names", () => {
   const router = createRouter([
     "/users/:user-id",

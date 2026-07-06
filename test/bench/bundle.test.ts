@@ -26,8 +26,12 @@ describe("benchmark", () => {
     // shared helper with a zero-allocation single-sibling fast path —
     // deduplication shrinks raw size, but the filter loop adds tokens the old
     // duplicated blocks gzipped away.
-    expect(bytes).toBeLessThanOrEqual(6180); // <6.18kb
-    expect(gzipSize).toBeLessThanOrEqual(2435); // <2.44kb
+    // +~200B raw / +~85B gzip: route attribution (`routes: true`) — addRoute
+    // stores the original pattern + method on each entry (threaded through
+    // group/modifier expansion), and findRoute/findAllRoutes copy them onto
+    // matches behind the opt-in flag.
+    expect(bytes).toBeLessThanOrEqual(6400); // <6.4kb
+    expect(gzipSize).toBeLessThanOrEqual(2540); // <2.54kb
   });
 });
 
