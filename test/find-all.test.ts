@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { createRouter, formatTree } from "./_utils.ts";
-import { findAllRoutes, type RouterContext } from "../src/index.ts";
+import {
+  addRoute,
+  createRouter as createEmptyRouter,
+  findAllRoutes,
+  type RouterContext,
+} from "../src/index.ts";
 import { compileRouter } from "../src/compiler.ts";
 import { format } from "oxfmt";
 
@@ -368,6 +373,41 @@ describe("matcher: regression #187", () => {
       "/foo/:b",
       "/foo/:a",
     ]);
+  });
+});
+
+describe("matcher: method-agnostic fallback", () => {
+  // `_findAllRoutes` asserts interpreter and compiled matchAll agree.
+  // Runtime resolves `methods[m] || methods[""]` per node: a method-scoped
+  // registration fully shadows the method-agnostic one for that method. The
+  // compiled output must not emit both layers (duplicate agnostic layer bug).
+
+  it("method-scoped entry shadows the agnostic sibling on a wildcard node", () => {
+    const router = createEmptyRouter<{ path: string }>();
+    addRoute(router, "", "/api/**", { path: "AGN" });
+    addRoute(router, "GET", "/api/**", { path: "GET-DATA" });
+    expect(_findAllRoutes(router, "GET", "/api/x")).toEqual(["GET-DATA"]);
+    expect(_findAllRoutes(router, "POST", "/api/x")).toEqual(["AGN"]);
+  });
+
+  it("shadowing is independent of registration order", () => {
+    const router = createEmptyRouter<{ path: string }>();
+    addRoute(router, "GET", "/api/**", { path: "GET-DATA" });
+    addRoute(router, "", "/api/**", { path: "AGN" });
+    expect(_findAllRoutes(router, "GET", "/api/x")).toEqual(["GET-DATA"]);
+    expect(_findAllRoutes(router, "POST", "/api/x")).toEqual(["AGN"]);
+  });
+
+  it("static and param nodes shadow the same way", () => {
+    const router = createEmptyRouter<{ path: string }>();
+    addRoute(router, "", "/api", { path: "S-AGN" });
+    addRoute(router, "GET", "/api", { path: "S-GET" });
+    addRoute(router, "", "/api/:id", { path: "P-AGN" });
+    addRoute(router, "GET", "/api/:id", { path: "P-GET" });
+    expect(_findAllRoutes(router, "GET", "/api")).toEqual(["S-GET"]);
+    expect(_findAllRoutes(router, "POST", "/api")).toEqual(["S-AGN"]);
+    expect(_findAllRoutes(router, "GET", "/api/1")).toEqual(["P-GET"]);
+    expect(_findAllRoutes(router, "POST", "/api/1")).toEqual(["P-AGN"]);
   });
 });
 

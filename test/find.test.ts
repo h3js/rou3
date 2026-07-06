@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { createRouter, formatTree } from "./_utils.ts";
-import { findRoute, removeRoute } from "../src/index.ts";
+import {
+  addRoute,
+  createRouter as createEmptyRouter,
+  findRoute,
+  removeRoute,
+} from "../src/index.ts";
 import { compileRouter, compileRouterToString } from "../src/compiler.ts";
 import { format } from "oxfmt";
 
@@ -208,6 +213,55 @@ describe("hyphenated param names", () => {
       expect(match("GET", "/users/foo/bar")).not.toMatchObject({
         data: { path: "/users/:user-id" },
       });
+    });
+  }
+});
+
+describe("method-agnostic fallback (compiled parity)", () => {
+  // Runtime resolves `methods[m] || methods[""]` per node: when a
+  // method-scoped entry exists, the agnostic sibling is never consulted for
+  // that method — even if the scoped matcher's conditions (regex) fail.
+  const router = createEmptyRouter<{ path: string }>();
+  addRoute(router, "GET", "/x/:id(\\d+)", { path: "GET-DATA" });
+  addRoute(router, "", "/x/:id", { path: "AGN" });
+  const compiledLookup = compileRouter(router);
+
+  const lookups = [
+    { name: "findRoute", match: (m: string, p: string) => findRoute(router, m, p) },
+    { name: "compiledLookup", match: (m: string, p: string) => compiledLookup(m, p) },
+  ];
+
+  for (const { name, match } of lookups) {
+    it(`agnostic sibling is not a fallback for a failed method-scoped matcher (${name})`, () => {
+      expect(match("GET", "/x/42")).toMatchObject({ data: { path: "GET-DATA" } });
+      expect(match("GET", "/x/abc")).toBeUndefined();
+      expect(match("POST", "/x/abc")).toMatchObject({ data: { path: "AGN" } });
+    });
+  }
+});
+
+describe("end-of-path optional fallback with mixed same-node siblings", () => {
+  // One param/wildcard node can hold both required (`:id`, `**:name`) and
+  // optional (`*`, `**`) routes for the same method. The end-of-path fallback
+  // must scan all entries, not just the first-inserted one.
+  const router = createEmptyRouter<{ path: string }>();
+  addRoute(router, "GET", "/p/:id", { path: "P-REQUIRED" });
+  addRoute(router, "GET", "/p/*", { path: "P-OPTIONAL" });
+  addRoute(router, "GET", "/w/**:name", { path: "W-REQUIRED" });
+  addRoute(router, "GET", "/w/**", { path: "W-OPTIONAL" });
+  const compiledLookup = compileRouter(router);
+
+  const lookups = [
+    { name: "findRoute", match: (m: string, p: string) => findRoute(router, m, p) },
+    { name: "compiledLookup", match: (m: string, p: string) => compiledLookup(m, p) },
+  ];
+
+  for (const { name, match } of lookups) {
+    it(`optional sibling matches even when a required one was inserted first (${name})`, () => {
+      expect(match("GET", "/p")).toMatchObject({ data: { path: "P-OPTIONAL" } });
+      expect(match("GET", "/w")).toMatchObject({ data: { path: "W-OPTIONAL" } });
+      expect(match("GET", "/p/1")).toMatchObject({ data: { path: "P-REQUIRED" } });
+      expect(match("GET", "/w/1")).toMatchObject({ data: { path: "W-REQUIRED" } });
     });
   }
 });

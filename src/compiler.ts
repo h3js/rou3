@@ -131,24 +131,30 @@ function compileMethodMatch(
   currentIdx: number, // Set to -1 for non-param node
 ): string {
   let code = "";
+  let fallback = "";
   for (const key in methods) {
     const matchers = methods[key];
     if (matchers && matchers.length > 0) {
-      if (key !== "") code += `if(m==="${key}")${matchers.length > 1 ? "{" : ""}`;
       // Sort descending by weight and emit via `r.unshift`, so the final array
       // is least->most specific. `unshift` reverses emit order, so reverse
       // first to keep equal-weight siblings in insertion order (issue #187).
-      const _matchers = matchers
+      const body = matchers
         .map((m) => compileFinalMatch(ctx, m, currentIdx, params))
         .reverse()
-        .sort((a, b) => b.weight - a.weight);
-      for (const matcher of _matchers) {
-        code += matcher.code;
+        .sort((a, b) => b.weight - a.weight)
+        .map((m) => m.code)
+        .join("");
+      if (key === "") {
+        fallback = body;
+      } else {
+        code += `${code ? "else " : ""}if(m==="${key}"){${body}}`;
       }
-      if (key !== "") code += matchers.length > 1 ? "}" : "";
     }
   }
-  return code;
+  // Method-agnostic ("") entries are a fallback only — runtime resolves
+  // `methods[m] || methods[""]`, so a method-scoped entry shadows them even
+  // when its own conditions fail. Emit behind `else`, not unconditionally.
+  return fallback ? (code ? `${code}else{${fallback}}` : fallback) : code;
 }
 
 function compileFinalMatch(

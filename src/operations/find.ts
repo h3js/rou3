@@ -60,25 +60,11 @@ function _lookupTree<T>(
       }
     }
     // Fallback to dynamic for last child (/test and /test/ matches /test/*)
-    if (node.param && node.param.methods) {
-      const match = node.param.methods[method] || node.param.methods[""];
-      if (match) {
-        const pMap = match[0].paramsMap;
-        if (pMap?.[pMap?.length - 1]?.[2] /* optional */) {
-          return match;
-        }
-      }
-    }
-    if (node.wildcard && node.wildcard.methods) {
-      const match = node.wildcard.methods[method] || node.wildcard.methods[""];
-      if (match) {
-        const pMap = match[0].paramsMap;
-        if (pMap?.[pMap?.length - 1]?.[2] /* optional */) {
-          return match;
-        }
-      }
-    }
-    return undefined;
+    return (
+      (node.param && _optionalMatches(node.param.methods, method)) ||
+      (node.wildcard && _optionalMatches(node.wildcard.methods, method)) ||
+      undefined
+    );
   }
 
   const segment = segments[index];
@@ -115,4 +101,32 @@ function _lookupTree<T>(
 
   // No match
   return;
+}
+
+/**
+ * Resolve a node's entries for the method and filter to those whose last param
+ * is optional (`*`, `**`) — one param/wildcard node can hold both required
+ * (`:id`, `**:name`) and optional routes, in any insertion order (mirrors
+ * findAllRoutes' per-entry filtering and the compiler's per-matcher guards).
+ */
+function _optionalMatches<T>(
+  methods: Record<string, MethodData<T>[] | undefined> | undefined,
+  method: string,
+): MethodData<T>[] | undefined {
+  const match = methods && (methods[method] || methods[""]);
+  if (!match) {
+    return;
+  }
+  let optional: MethodData<T>[] | undefined;
+  for (const m of match) {
+    const pMap = m.paramsMap;
+    if (pMap?.[pMap.length - 1]?.[2] /* optional */) {
+      // Single sibling needs no filtered copy (zero allocation)
+      if (match.length === 1) {
+        return match;
+      }
+      (optional ||= []).push(m);
+    }
+  }
+  return optional;
 }
