@@ -403,6 +403,24 @@ describe("matcher: regression #187", () => {
   });
 });
 
+describe("matcher: out-of-bounds segment vs literal 'undefined' key", () => {
+  // At end of path `segments[index]` is `undefined`; a static-child lookup
+  // with that key must not coerce to a literal "undefined" segment route
+  // (the compiled matcher's bound checks were already immune).
+  const router = createEmptyRouter<{ path: string }>();
+  addRoute(router, "GET", "/undefined/*", { path: "/undefined/*" });
+  addRoute(router, "GET", "/w1/undefined/**", { path: "/w1/undefined/**" });
+  addRoute(router, "GET", "/w1", { path: "/w1" });
+
+  it("does not match phantom 'undefined' segments", () => {
+    expect(_findAllRoutes(router, "GET", "/")).toEqual([]);
+    expect(_findAllRoutes(router, "GET", "/w1")).toEqual(["/w1"]);
+    // a real "undefined" segment still matches normally
+    expect(_findAllRoutes(router, "GET", "/undefined")).toEqual(["/undefined/*"]);
+    expect(_findAllRoutes(router, "GET", "/w1/undefined")).toEqual(["/w1/undefined/**"]);
+  });
+});
+
 describe("matcher: method-agnostic fallback", () => {
   // `_findAllRoutes` asserts interpreter and compiled matchAll agree.
   // Runtime resolves `methods[m] || methods[""]` per node: a method-scoped

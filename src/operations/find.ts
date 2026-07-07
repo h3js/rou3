@@ -29,7 +29,7 @@ export function findRoute<T = unknown>(
   // Lookup tree
   const segments = splitPath(path);
 
-  const match = _lookupTree<T>(ctx.root, method, segments, 0)?.[0];
+  const match = _lookupTree<T>(ctx.root, method, segments, 0);
 
   if (match === undefined) {
     return;
@@ -50,19 +50,20 @@ function _lookupTree<T>(
   method: string,
   segments: string[],
   index: number,
-): MethodData<T>[] | undefined {
+): MethodData<T> | undefined {
   // 0. End of path
   if (index === segments.length) {
     if (node.methods) {
-      const match = node.methods[method] || node.methods[""];
+      const match = _selectMatcher(node.methods, method, segments, node.key === "*", false);
       if (match) {
         return match;
       }
     }
     // Fallback to dynamic for last child (/test and /test/ matches /test/*)
     return (
-      (node.param && _optionalMatches(node.param.methods, method)) ||
-      (node.wildcard && _optionalMatches(node.wildcard.methods, method)) ||
+      (node.param?.methods && _selectMatcher(node.param.methods, method, segments, true, true)) ||
+      (node.wildcard?.methods &&
+        _selectMatcher(node.wildcard.methods, method, segments, true, true)) ||
       undefined
     );
   }
@@ -84,25 +85,13 @@ function _lookupTree<T>(
   if (node.param) {
     const match = _lookupTree(node.param, method, segments, index + 1);
     if (match) {
-      if (node.param.hasRegexParam) {
-        // First regex-constrained sibling that matches wins; the first sibling
-        // without a regex at this index is the fallback (insertion order).
-        let fallback: MethodData<T> | undefined;
-        for (const m of match) {
-          const regexp = m.paramsRegexp[index];
-          if (regexp) {
-            if (regexp.test(segment)) return [m];
-          } else fallback ||= m;
-        }
-        return fallback && [fallback];
-      }
       return match;
     }
   }
 
   // 3. Wildcard
   if (node.wildcard && node.wildcard.methods) {
-    return node.wildcard.methods[method] || node.wildcard.methods[""];
+    return _selectMatcher(node.wildcard.methods, method, segments, true, false);
   }
 
   // No match
@@ -110,29 +99,64 @@ function _lookupTree<T>(
 }
 
 /**
- * Resolve a node's entries for the method and filter to those whose last param
- * is optional (`*`, `**`) — one param/wildcard node can hold both required
- * (`:id`, `**:name`) and optional routes, in any insertion order (mirrors
- * findAllRoutes' per-entry filtering and the compiler's per-matcher guards).
+ * Select the winning entry among same-node siblings: the highest specificity
+ * weight among fully-matching entries wins, ties resolve to the
+ * first-registered (so duplicate registrations return the first). Weight is
+ * the same model as `pushSorted` in find-all.ts and the compiled matcher: one
+ * point per passing regex-constrained param, plus one for a required last
+ * param on a `dynamicTerminal` (param/wildcard node). An entry whose regex
+ * fails is skipped entirely, so lookup falls through to less specific
+ * siblings or other node kinds instead of aborting.
+ *
+ * `optionalOnly` implements the end-of-path fallback: one param/wildcard node
+ * can hold both required (`:id`, `**:name`) and optional (`*`, `**`) routes,
+ * in any insertion order — only the optional ones match zero segments.
  */
-function _optionalMatches<T>(
-  methods: Record<string, MethodData<T>[] | undefined> | undefined,
+function _selectMatcher<T>(
+  methods: Record<string, MethodData<T>[] | undefined>,
   method: string,
-): MethodData<T>[] | undefined {
-  const match = methods && (methods[method] || methods[""]);
+  segments: string[],
+  dynamicTerminal: boolean,
+  optionalOnly: boolean,
+): MethodData<T> | undefined {
+  const match = methods[method] || methods[""];
   if (!match) {
     return;
   }
-  let optional: MethodData<T>[] | undefined;
+  // Fast path: a single sibling with no regex constraints (the common case)
+  const first = match[0];
+  if (match.length === 1 && first.paramsRegexp.length === 0) {
+    if (!optionalOnly) {
+      return first;
+    }
+    const pMap = first.paramsMap;
+    return pMap?.[pMap.length - 1]?.[2] /* optional */ ? first : undefined;
+  }
+  let best: MethodData<T> | undefined;
+  let bestWeight = -1;
   for (const m of match) {
     const pMap = m.paramsMap;
-    if (pMap?.[pMap.length - 1]?.[2] /* optional */) {
-      // Single sibling needs no filtered copy (zero allocation)
-      if (match.length === 1) {
-        return match;
+    const lastOptional = pMap?.[pMap.length - 1]?.[2];
+    if (optionalOnly && !lastOptional) {
+      continue;
+    }
+    // Required last param on a dynamic terminal weighs one point; a failed
+    // regex drops the entry below any candidate (bestWeight starts at -1)
+    let weight = dynamicTerminal && pMap && !lastOptional ? 1 : 0;
+    const regexps = m.paramsRegexp;
+    for (let i = 0; i < regexps.length; i++) {
+      if (regexps[i]) {
+        if (!regexps[i].test(segments[i])) {
+          weight = -1;
+          break;
+        }
+        weight++;
       }
-      (optional ||= []).push(m);
+    }
+    if (weight > bestWeight) {
+      best = m;
+      bestWeight = weight;
     }
   }
-  return optional;
+  return best;
 }

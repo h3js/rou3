@@ -166,13 +166,22 @@ function compileStaticMatch(ctx: CompilerContext): string {
     }
   }
 
+  // The dispatch must also accept the trailing-slash form: "/a//" strips to
+  // "/a/", whose segments equal the static route's, so the tree (and the
+  // interpreter) match it — but static-only routes are not emitted in the
+  // tree code. `p` can only still end with "/" when the request had a
+  // doubled trailing slash (one was already stripped), so that form hides
+  // behind a charCode check the hot path never enters. Root is the nk===""
+  // case ("/" and "//" both reach it).
   if (entries.length <= STATIC_CHAIN_MAX) {
     let code = "";
+    let slashCode = "";
     for (const [nk, node] of entries) {
-      const cond = nk === "" ? `(p===""||p==="/")` : `p===${JSON.stringify(nk)}`;
-      code += `${code ? "else " : ""}if(${cond}){${compileMethodMatch(ctx, node.methods!, [], -1)}}`;
+      const body = compileMethodMatch(ctx, node.methods!, [], -1);
+      code += `${code ? "else " : ""}if(p===${JSON.stringify(nk)}){${body}}`;
+      slashCode += `${slashCode ? "else " : ""}if(p===${JSON.stringify(nk + "/")}){${body}}`;
     }
-    return code;
+    return code && `${code}else if(p.charCodeAt(p.length-1)===47){${slashCode}}`;
   }
 
   // JIT mode passes a prebuilt object; AOT mode emits its literal source.
@@ -196,21 +205,20 @@ function compileStaticMatch(ctx: CompilerContext): string {
     if (jitMethods ? Object.keys(jitMethods).length === 0 : !methodsCode) {
       continue;
     }
-    for (const k of nk === "" ? ["", "/"] : [nk]) {
-      if (jitMap) {
-        jitMap[k] = jitMethods;
-      } else {
-        mapCode += `${JSON.stringify(k)}:{__proto__:null,${methodsCode}},`;
-      }
+    if (jitMap) {
+      jitMap[nk] = jitMethods;
+    } else {
+      mapCode += `${JSON.stringify(nk)}:{__proto__:null,${methodsCode}},`;
     }
   }
   if (jitMap ? Object.keys(jitMap).length === 0 : !mapCode) {
     return "";
   }
   const ref = pushDataSlot(ctx, jitMap ? (jitMap as any) : `{__proto__:null,${mapCode}}`);
+  const lookup = `let _n=${ref}[p];if(_n===void 0&&p.charCodeAt(p.length-1)===47)_n=${ref}[p.slice(0,-1)];`;
   return matchAll
-    ? `let _n=${ref}[p];if(_n!==void 0){let _a=_n[m];if(_a===void 0)_a=_n[""];if(_a!==void 0)for(let _i=_a.length-1;_i>=0;_i--)r.push({data:_a[_i]});}`
-    : `let _n=${ref}[p];if(_n!==void 0){let _d=_n[m];if(_d===void 0)_d=_n[""];if(_d!==void 0)return {data:_d};}`;
+    ? `${lookup}if(_n!==void 0){let _a=_n[m];if(_a===void 0)_a=_n[""];if(_a!==void 0)for(let _i=_a.length-1;_i>=0;_i--)r.push({data:_a[_i]});}`
+    : `${lookup}if(_n!==void 0){let _d=_n[m];if(_d===void 0)_d=_n[""];if(_d!==void 0)return {data:_d};}`;
 }
 
 function compileMethodMatch(

@@ -43,6 +43,36 @@ const findRoute = /* @__PURE__ */ (() => {
       if (m === "GET") {
         return { data: $6 };
       }
+    } else if (p.charCodeAt(p.length - 1) === 47) {
+      if (p === "/test/") {
+        if (m === "GET") {
+          return { data: $0 };
+        }
+      } else if (p === "/test/foo/") {
+        if (m === "GET") {
+          return { data: $1 };
+        }
+      } else if (p === "/test/foo/bar/qux/") {
+        if (m === "GET") {
+          return { data: $2 };
+        }
+      } else if (p === "/test/foo/baz/") {
+        if (m === "GET") {
+          return { data: $3 };
+        }
+      } else if (p === "/test/fooo/") {
+        if (m === "GET") {
+          return { data: $4 };
+        }
+      } else if (p === "/another/path/") {
+        if (m === "GET") {
+          return { data: $5 };
+        }
+      } else if (p === "/static:path/*/**/") {
+        if (m === "GET") {
+          return { data: $6 };
+        }
+      }
     }
     let s = p.split("/");
     if (s.length > 1 && s[s.length - 1] === "") {

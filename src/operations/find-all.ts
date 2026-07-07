@@ -90,10 +90,14 @@ function _findAll<T>(
     }
   }
 
-  // 3. Static
-  const staticChild = node.static?.[segment];
-  if (staticChild) {
-    _findAll(staticChild, method, segments, index + 1, matches);
+  // 3. Static (only while segments remain: at end of path `segment` is
+  // `undefined`, which an object lookup would coerce to a literal "undefined"
+  // segment key)
+  if (index < segments.length) {
+    const staticChild = node.static?.[segment];
+    if (staticChild) {
+      _findAll(staticChild, method, segments, index + 1, matches);
+    }
   }
 
   // 4. End of path

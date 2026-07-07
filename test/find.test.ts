@@ -575,6 +575,125 @@ describe("wildcard tail extraction (compiled parity)", () => {
   }
 });
 
+describe("static routes reached with a doubled trailing slash (compiled parity)", () => {
+  // "/w5//" strips one slash to "/w5/": the raw string misses an exact-match
+  // static dispatch, but its segments equal the static route's, so the
+  // interpreter tree matches — the compiled static dispatch must accept the
+  // trailing-slash form too. Exercise both codegen modes (chain and map).
+  for (const mode of ["chain", "map"] as const) {
+    const router = createEmptyRouter<{ path: string }>();
+    addRoute(router, "GET", "/w5", { path: "/w5" });
+    addRoute(router, "GET", "/:top", { path: "/:top" });
+    if (mode === "map") {
+      for (let i = 0; i < 10; i++) {
+        addRoute(router, "GET", `/page${i}`, { path: `/page${i}` });
+      }
+    }
+    const compiledLookup = compileRouter(router);
+    const compiledMatchAll = compileRouter(router, { matchAll: true });
+
+    const lookups = [
+      { name: "findRoute", match: (m: string, p: string) => findRoute(router, m, p) },
+      { name: "compiledLookup", match: (m: string, p: string) => compiledLookup(m, p) },
+    ];
+
+    for (const { name, match } of lookups) {
+      it(`matches the static route for path//, not beyond (${mode}, ${name})`, () => {
+        expect(match("GET", "/w5//")).toMatchObject({ data: { path: "/w5" } });
+        expect(match("GET", "/w5/")).toMatchObject({ data: { path: "/w5" } });
+        // three slashes leave a real empty segment -> no match anywhere
+        expect(match("GET", "/w5///")).toBeUndefined();
+      });
+    }
+
+    it(`matchAll agrees with findAllRoutes (${mode})`, () => {
+      for (const path of ["/w5//", "/w5/", "/w5", "/w5///"]) {
+        expect(compiledMatchAll("GET", path).map((mr) => mr.data.path)).toEqual(
+          findAllRoutes(router, "GET", path).map((mr) => mr.data.path),
+        );
+      }
+    });
+  }
+});
+
+describe("same-node sibling selection (findRoute/compiled parity)", () => {
+  // One rule everywhere: among fully-matching siblings on one node, the
+  // highest weight (regex count + required-last on a dynamic terminal) wins,
+  // ties resolve to the first-registered — same model as findAllRoutes'
+  // pushSorted and the compiled matcher.
+  const router = createEmptyRouter<{ path: string }>();
+  // optional registered BEFORE required: required is more specific and wins
+  addRoute(router, "GET", "/t/*", { path: "/t/*" });
+  addRoute(router, "GET", "/t/:id", { path: "/t/:id" });
+  addRoute(router, "GET", "/w/**", { path: "/w/**" });
+  addRoute(router, "GET", "/w/**:rest", { path: "/w/**:rest" });
+  // regex fail must fall through to the optional/wildcard sibling, not abort
+  addRoute(router, "GET", "/:y(\\d+)", { path: "/:y(\\d+)" });
+  addRoute(router, "GET", "/*/*", { path: "/*/*" });
+  addRoute(router, "GET", "/x/:id(\\d+)", { path: "/x/:id(\\d+)" });
+  addRoute(router, "GET", "/x/**", { path: "/x/**" });
+  // equal-weight regex siblings at different depths: first-registered wins
+  addRoute(router, "GET", "/d/:a(\\d+)/:x", { path: "/d/:a(\\d+)/:x" });
+  addRoute(router, "GET", "/d/:a/:x([a-z]+)", { path: "/d/:a/:x([a-z]+)" });
+  // a sibling must still match when the greedier one fails its regex
+  addRoute(router, "GET", "/e/:a(\\d+)/:x([a-z]+)", { path: "/e/:a(\\d+)/:x([a-z]+)" });
+  addRoute(router, "GET", "/e/:a/:x([a-z]+)", { path: "/e/:a/:x([a-z]+)" });
+  const compiledLookup = compileRouter(router);
+  const compiledMatchAll = compileRouter(router, { matchAll: true });
+
+  const lookups = [
+    { name: "findRoute", match: (m: string, p: string) => findRoute(router, m, p) },
+    { name: "compiledLookup", match: (m: string, p: string) => compiledLookup(m, p) },
+  ];
+
+  for (const { name, match } of lookups) {
+    it(`required beats optional regardless of insertion order (${name})`, () => {
+      expect(match("GET", "/t/v")).toMatchObject({
+        data: { path: "/t/:id" },
+        params: { id: "v" },
+      });
+      expect(match("GET", "/t")).toMatchObject({ data: { path: "/t/*" } });
+      expect(match("GET", "/w/v")).toMatchObject({
+        data: { path: "/w/**:rest" },
+        params: { rest: "v" },
+      });
+      expect(match("GET", "/w")).toMatchObject({ data: { path: "/w/**" } });
+    });
+
+    it(`regex miss falls through to the less specific sibling (${name})`, () => {
+      expect(match("GET", "/a")).toMatchObject({
+        data: { path: "/*/*" },
+        params: { "0": "a" },
+      });
+      expect(match("GET", "/7")).toMatchObject({
+        data: { path: "/:y(\\d+)" },
+        params: { y: "7" },
+      });
+      expect(match("GET", "/x/a")).toMatchObject({
+        data: { path: "/x/**" },
+        params: { _: "a" },
+      });
+      expect(match("GET", "/x/7")).toMatchObject({
+        data: { path: "/x/:id(\\d+)" },
+        params: { id: "7" },
+      });
+    });
+
+    it(`equal weights resolve to the first-registered sibling (${name})`, () => {
+      expect(match("GET", "/d/9/abc")).toMatchObject({ data: { path: "/d/:a(\\d+)/:x" } });
+      expect(match("GET", "/e/q/abc")).toMatchObject({ data: { path: "/e/:a/:x([a-z]+)" } });
+    });
+  }
+
+  it("single match is the most specific entry of findAllRoutes", () => {
+    for (const path of ["/t/v", "/t", "/w/v", "/w", "/a", "/7", "/x/a", "/x/7", "/e/q/abc"]) {
+      const all = findAllRoutes(router, "GET", path);
+      expect(compiledMatchAll("GET", path)).toEqual(all);
+      expect(findRoute(router, "GET", path)).toEqual(all.at(-1));
+    }
+  });
+});
+
 describe("end-of-path optional fallback with mixed same-node siblings", () => {
   // One param/wildcard node can hold both required (`:id`, `**:name`) and
   // optional (`*`, `**`) routes for the same method. The end-of-path fallback

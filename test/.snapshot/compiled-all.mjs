@@ -13,6 +13,20 @@
     if (m === "GET") {
       r.push({ data: $2 });
     }
+  } else if (p.charCodeAt(p.length - 1) === 47) {
+    if (p === "/foo/") {
+      if (m === "GET") {
+        r.push({ data: $0 });
+      }
+    } else if (p === "/foo/bar/") {
+      if (m === "GET") {
+        r.push({ data: $1 });
+      }
+    } else if (p === "/foo/bar/baz/") {
+      if (m === "GET") {
+        r.push({ data: $2 });
+      }
+    }
   }
   let s = p.split("/");
   if (s.length > 1 && s[s.length - 1] === "") {

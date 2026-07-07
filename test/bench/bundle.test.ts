@@ -35,8 +35,15 @@ describe("benchmark", () => {
     // when the path lacks their trigger char (`\`, `{`, `?+*` suffix,
     // `\uFFFD`), and the five chained escape replaces collapsed into one
     // callback pass (shrinks raw, but the repetitive chain gzipped better).
-    expect(bytes).toBeLessThanOrEqual(6230); // <6.23kb
-    expect(gzipSize).toBeLessThanOrEqual(2510); // <2.51kb
+    // +~125B raw / +~52B gzip: findRoute now selects same-node siblings by the
+    // shared specificity-weight model (regex count + required-last on dynamic
+    // terminals, ties first-registered) so single-match agrees with compiled
+    // and findAllRoutes; a failed regex falls through instead of aborting,
+    // and out-of-bounds segments no longer coerce to a literal "undefined"
+    // static key. Includes a single-sibling fast path that keeps lookup speed
+    // at parity.
+    expect(bytes).toBeLessThanOrEqual(6360); // <6.36kb
+    expect(gzipSize).toBeLessThanOrEqual(2570); // <2.57kb
   });
 });
 
