@@ -49,9 +49,9 @@
           }
         }
       }
-      if (l === 3 || l === 2) {
+      if (l === 3) {
         if (m === "GET") {
-          if (l > 2) return { data: $9, params: { id: s[2] } };
+          return { data: $9, params: { id: s[2] } };
         }
       } else if (s[3] === "y") {
         if (l === 4) {

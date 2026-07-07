@@ -351,12 +351,132 @@ describe("many static routes (compiled static-map parity)", () => {
   });
 });
 
+describe("unusual method names (compiled parity)", () => {
+  // Method keys are user input; the interpreter treats them as plain map keys,
+  // so the compiler must escape them when embedding in generated code (a raw
+  // quote used to be a SyntaxError in JIT mode and code injection in AOT).
+  const router = createEmptyRouter<{ path: string }>();
+  addRoute(router, 'GE"T', "/x/:id", { path: "QUOTED" });
+  addRoute(router, "M\\N", "/x/:id", { path: "BACKSLASH" });
+  const compiledLookup = compileRouter(router);
+
+  const lookups = [
+    { name: "findRoute", match: (m: string, p: string) => findRoute(router, m, p) },
+    { name: "compiledLookup", match: (m: string, p: string) => compiledLookup(m, p) },
+  ];
+
+  for (const { name, match } of lookups) {
+    it(`escapes method names in generated code (${name})`, () => {
+      expect(match('GE"T', "/x/1")).toMatchObject({ data: { path: "QUOTED" } });
+      expect(match("M\\N", "/x/1")).toMatchObject({ data: { path: "BACKSLASH" } });
+      expect(match("GET", "/x/1")).toBeUndefined();
+    });
+  }
+});
+
+describe("wide static fan-out (compiled segment-switch parity)", () => {
+  // More than SEGMENT_CHAIN_MAX static siblings at one tree level switch the
+  // compiled dispatch from an `else if(s[i]==="...")` chain to a null-proto
+  // `{segment: index}` map + integer switch — pin that codegen path: hits at
+  // both ends, misses, prototype/`undefined` segment keys, short paths (the
+  // out-of-bounds `s[i]` must not coerce into the map), deeper subtrees,
+  // matchAll ordering, and the AOT emission.
+  const N = 40;
+  const router = createEmptyRouter<{ path: string }>();
+  for (let i = 0; i < N; i++) {
+    addRoute(router, "GET", `/res${i}/:id`, { path: `/res${i}/:id` });
+  }
+  addRoute(router, "GET", "/undefined/:id", { path: "/undefined/:id" });
+  addRoute(router, "GET", "/__proto__/:id", { path: "/__proto__/:id" });
+  addRoute(router, "GET", "/res0/:id/deep", { path: "/res0/:id/deep" });
+  addRoute(router, "GET", "/:top", { path: "/:top" });
+  addRoute(router, "GET", "/**", { path: "/**" });
+  const compiledLookup = compileRouter(router);
+  const compiledMatchAll = compileRouter(router, { matchAll: true });
+  // eslint-disable-next-line no-new-func
+  const aotLookup = new Function(
+    `return ${compileRouterToString(router)}`,
+  )() as typeof compiledLookup;
+
+  const lookups = [
+    { name: "findRoute", match: (m: string, p: string) => findRoute(router, m, p) },
+    { name: "compiledLookup", match: (m: string, p: string) => compiledLookup(m, p) },
+    { name: "aotLookup", match: (m: string, p: string) => aotLookup(m, p) },
+  ];
+
+  for (const { name, match } of lookups) {
+    it(`dispatches wide sibling sets via the segment switch (${name})`, () => {
+      expect(match("GET", "/res0/1")).toMatchObject({
+        data: { path: "/res0/:id" },
+        params: { id: "1" },
+      });
+      expect(match("GET", `/res${N - 1}/x`)).toMatchObject({
+        data: { path: `/res${N - 1}/:id` },
+        params: { id: "x" },
+      });
+      expect(match("GET", "/res0/1/deep")).toMatchObject({
+        data: { path: "/res0/:id/deep" },
+        params: { id: "1" },
+      });
+      // switch miss falls through to the param/wildcard siblings
+      expect(match("GET", "/nope")).toMatchObject({
+        data: { path: "/:top" },
+        params: { top: "nope" },
+      });
+      expect(match("GET", "/nope/deeper")).toMatchObject({ data: { path: "/**" } });
+      // method miss inside a switch case must not fall through to other cases
+      expect(match("POST", "/res0/1")).toBeUndefined();
+      // segments that collide with object plumbing stay plain map keys
+      expect(match("GET", "/undefined/7")).toMatchObject({
+        data: { path: "/undefined/:id" },
+        params: { id: "7" },
+      });
+      expect(match("GET", "/__proto__/7")).toMatchObject({
+        data: { path: "/__proto__/:id" },
+        params: { id: "7" },
+      });
+      expect(match("GET", "/constructor/7")).toMatchObject({ data: { path: "/**" } });
+      // a short path must not reach the "undefined" map entry via s[i]===undefined
+      expect(match("GET", "/undefined")).toMatchObject({
+        data: { path: "/:top" },
+        params: { top: "undefined" },
+      });
+    });
+  }
+
+  it("matchAll agrees with findAllRoutes (segment-switch codegen)", () => {
+    for (const path of ["/res0/1", "/res39/x", "/res0/1/deep", "/undefined/7", "/nope", "/"]) {
+      expect(compiledMatchAll("GET", path).map((mr) => mr.data.path)).toEqual(
+        findAllRoutes(router, "GET", path).map((mr) => mr.data.path),
+      );
+    }
+  });
+});
+
+describe("data slots above the argument limit (compiled)", () => {
+  it("falls back to a single array argument for huge routers", () => {
+    const router = createEmptyRouter<{ i: number }>();
+    const N = 33_000; // > DATA_ARGS_MAX distinct data values
+    for (let i = 0; i < N; i++) {
+      addRoute(router, "GET", `/r${i}/:id`, { i });
+    }
+    const compiledLookup = compileRouter(router);
+    expect(compiledLookup("GET", "/r0/x")).toMatchObject({ data: { i: 0 }, params: { id: "x" } });
+    expect(compiledLookup("GET", `/r${N - 1}/x`)).toMatchObject({ data: { i: N - 1 } });
+    expect(compiledLookup("GET", "/nope/x")).toBeUndefined();
+    expect(compiledLookup.toString()).toContain("$[0]");
+  });
+});
+
 describe("regex constraints with embedded groups (compiled parity)", () => {
   const router = createEmptyRouter<{ path: string }>();
   addRoute(router, "GET", "/c/:id(a(?<extra>b)?c)", { path: "INNER-NAMED" });
   addRoute(router, "GET", "/m/:a(\\d+)/:b([a-z]+)", { path: "MULTI" });
   addRoute(router, "GET", "/n/:num(\\d+)", { path: "WHOLE" });
   addRoute(router, "GET", "/file/*.png", { path: "MID-WILDCARD" });
+  // Unicode group name: unsafe as a `.name` access, takes the
+  // `_normalizeGroups` runtime-fallback codegen path
+  addRoute(router, "GET", "/uni/:id(a(?<é>b)c)", { path: "UNI-FALLBACK" });
   const compiledLookup = compileRouter(router);
 
   const lookups = [
@@ -389,8 +509,20 @@ describe("regex constraints with embedded groups (compiled parity)", () => {
         data: { path: "MID-WILDCARD" },
         params: { "0": "logo" },
       });
+      expect(match("GET", "/uni/abc")).toMatchObject({
+        data: { path: "UNI-FALLBACK" },
+        params: { id: "abc", é: "b" },
+      });
+      expect(match("GET", "/uni/axc")).toBeUndefined();
     });
   }
+
+  it("hoists regexes into data slots instead of inline literals", () => {
+    // An inline literal would allocate a fresh RegExp per evaluation.
+    const aot = compileRouterToString(router);
+    expect(aot).toMatch(/\$\d+=\/\^/);
+    expect(compiledLookup.toString()).not.toContain("/^(");
+  });
 });
 
 describe("wildcard tail extraction (compiled parity)", () => {

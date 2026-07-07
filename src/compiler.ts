@@ -33,9 +33,16 @@ export function compileRouter<T, O extends RouterCompilerOptions<T> = RouterComp
 ) => O["matchAll"] extends true ? MatchedRoute<T>[] : MatchedRoute<T> | undefined {
   const ctx: CompilerContext = { opts: opts || {}, router, data: [] };
   const compiled = compileRouteMatch(ctx);
-  return new Function(...ctx.data!.map((_, i) => `$${i}`), `return(m,p)=>{${compiled}}`)(
-    ...ctx.data!,
-  );
+  if (ctx.data.length < DATA_ARGS_MAX) {
+    return new Function(...ctx.data.map((_, i) => `$${i}`), `return(m,p)=>{${compiled}}`)(
+      ...ctx.data,
+    );
+  }
+  // Huge routers overflow the engine's formal-parameter/spread-call limits
+  // (65535 in V8) — recompile with data refs reading a single array argument
+  // instead (`$[N]`, measured ~10% slower per data access, so only when needed).
+  const arrayCtx: CompilerContext = { opts: opts || {}, router, data: [], dataArray: true };
+  return new Function("$", `return(m,p)=>{${compileRouteMatch(arrayCtx)}}`)(arrayCtx.data);
 }
 
 /**
@@ -65,32 +72,31 @@ export function compileRouterToString(
   let compiled = `(m,p)=>{${compileRouteMatch(ctx)}}`;
   if (ctx.data.length > 0) {
     const dataCode = `const ${ctx.data.map((v, i) => `$${i}=${v}`).join(",")};`;
-    compiled = `/* @__PURE__ */ (() => { ${dataCode}; return ${compiled}})()`;
+    compiled = `/* @__PURE__ */ (() => { ${dataCode} return ${compiled}})()`;
   }
   return functionName ? `const ${functionName}=${compiled};` : compiled;
 }
 
 // ------- internal functions -------
 
+// Stay well below the engine's formal-parameter and spread-call limits
+// (65535 in V8) — above this, JIT data slots move into a single array arg.
+const DATA_ARGS_MAX = 32_000;
+
 interface CompilerContext {
   opts: RouterCompilerOptions;
   router: RouterContext<any>;
   compileToString?: boolean;
   data: string[];
+  dataArray?: boolean;
   dataMap?: Map<any, number>;
+  regexpMap?: Map<string, number>;
   regexTemps?: number;
   pathSliced?: boolean;
 }
 
 function compileRouteMatch(ctx: CompilerContext): string {
-  let code = "";
-
-  {
-    const staticMatch = compileStaticMatch(ctx);
-    if (staticMatch) {
-      code += staticMatch;
-    }
-  }
+  let code = compileStaticMatch(ctx);
 
   const match = compileNode(ctx, ctx.router.root, [], 1, 1);
   // Empty root node emit an empty bound check
@@ -131,6 +137,14 @@ function compileRouteMatch(ctx: CompilerContext): string {
 // checks); above it the chain's O(N) scan loses to one hashed lookup — by
 // ~2-3x at 20-50 routes with fresh (per-request parsed) path strings.
 const STATIC_CHAIN_MAX = 8;
+
+// Same trade-off for a tree node's static children (one segment, not the
+// whole path): below this an `else if(s[i]==="...")` chain wins (~10% at 24
+// siblings), above it the O(N) scan loses to a null-proto `{segment: index}`
+// map + integer switch — measured crossover ~40, switch ~1.4x faster at 64
+// siblings and ~2x at 200 (where the chain degrades to interpreter speed,
+// and huge chain functions also tier up much more slowly).
+const SEGMENT_CHAIN_MAX = 32;
 
 // Static routes (no params) dispatch either through that small chain or a
 // single null-prototype map lookup — `{path: {method: data}}` (matchAll:
@@ -193,8 +207,7 @@ function compileStaticMatch(ctx: CompilerContext): string {
   if (jitMap ? Object.keys(jitMap).length === 0 : !mapCode) {
     return "";
   }
-  ctx.data.push(jitMap ? (jitMap as any) : `{__proto__:null,${mapCode}}`);
-  const ref = `$${ctx.data.length - 1}`;
+  const ref = pushDataSlot(ctx, jitMap ? (jitMap as any) : `{__proto__:null,${mapCode}}`);
   return matchAll
     ? `let _n=${ref}[p];if(_n!==void 0){let _a=_n[m];if(_a===void 0)_a=_n[""];if(_a!==void 0)for(let _i=_a.length-1;_i>=0;_i--)r.push({data:_a[_i]});}`
     : `let _n=${ref}[p];if(_n!==void 0){let _d=_n[m];if(_d===void 0)_d=_n[""];if(_d!==void 0)return {data:_d};}`;
@@ -228,7 +241,7 @@ function compileMethodMatch(
       if (key === "") {
         fallback = body;
       } else {
-        code += `${code ? "else " : ""}if(m==="${key}"){${body}}`;
+        code += `${code ? "else " : ""}if(m===${JSON.stringify(key)}){${body}}`;
       }
     }
   }
@@ -273,7 +286,9 @@ function compileFinalMatch(
     // renaming), so params read `.groups.<name>` directly instead of spreading
     // `.groups` through a runtime normalization helper. For a whole-segment
     // group (`^(?<name>...)$`) the group always equals the tested segment, so
-    // `.test()` suffices and no `exec()` is emitted at all.
+    // `.test()` suffices and no `exec()` is emitted at all. Regexes live in
+    // `$N` data slots — an inline literal would allocate a fresh RegExp on
+    // every evaluation (ES2015+ semantics), measured ~2-6% per match.
     let paramsCode = "";
     let tmpCount = 0;
     for (let i = 0; i < paramsMap.length; i++) {
@@ -284,12 +299,13 @@ function compileFinalMatch(
       }
       // `params[i]` is the same `s[<idx>]` expression the regex condition must
       // test (regex params are always single-segment param nodes).
-      const regexp = map[1].toString();
+      const regexp = serializeRegExp(ctx, map[1]);
       const groups = scanRegExpGroups(map[1].source);
       if (!groups) {
         // Unrecognized group name — fall back to runtime normalization
-        conditions.push(`${regexp}.test(${params[i]})`);
-        paramsCode += `..._normalizeGroups((${regexp}.exec(${params[i]}))?.groups),`;
+        const tmp = `_m${tmpCount++}`;
+        conditions.push(`(${tmp}=${regexp}.exec(${params[i]}))!==null`);
+        paramsCode += `..._normalizeGroups(${tmp}.groups),`;
       } else if (groups.names.length === 0) {
         conditions.push(`${regexp}.test(${params[i]})`);
       } else if (groups.whole) {
@@ -326,7 +342,13 @@ function compileNode(
   // a param segment makes the offset unknown at compile time.
   staticPrefixLen: number,
 ): string {
-  const hasLastOptionalParam = node.key === "*";
+  // Widen the end-of-path check to `l===c||l===c-1` (and emit the per-matcher
+  // length guards) only when some matcher's last param is actually optional
+  // (`/x` and `/x/` match `/x/*`) — for all-required nodes (plain `:id`, the
+  // common case) a single `l===c` suffices. `node.key === "*"` alone would
+  // also catch every required-only param node and static nodes for escaped
+  // `\*` segments, emitting a dead widened branch.
+  const hasLastOptionalParam = node.key === "*" && hasOptionalLastParam(node.methods);
   let code = "",
     hasIf = false;
 
@@ -344,9 +366,7 @@ function compileNode(
   }
 
   if (node.static) {
-    let staticCode = "";
-    const notNeedBoundCheck = hasIf;
-
+    const children: [key: string, match: string][] = [];
     for (const key in node.static) {
       const match = compileNode(
         ctx,
@@ -356,12 +376,40 @@ function compileNode(
         staticPrefixLen < 0 ? -1 : staticPrefixLen + key.length + 1,
       );
       if (match) {
+        children.push([key, match]);
+      }
+    }
+    if (children.length > SEGMENT_CHAIN_MAX) {
+      // Wide fan-outs dispatch through a hoisted null-proto `{segment: index}`
+      // map + dense integer switch — O(1) vs the chain's O(N) scan (see
+      // SEGMENT_CHAIN_MAX). The `l>` bound check is mandatory here: an
+      // out-of-bounds `s[i]` is `undefined`, which the map lookup would
+      // coerce to the key "undefined" (the chain's `===` compare was immune).
+      const jitMap = ctx.compileToString ? undefined : new NullProtoObj();
+      let mapCode = "";
+      let cases = "";
+      for (const [i, [key, match]] of children.entries()) {
+        if (jitMap) {
+          jitMap[key] = i;
+        } else {
+          // A literal `"__proto__":` property would (re)set the prototype —
+          // a computed key defines a plain own property instead.
+          mapCode += `${key === "__proto__" ? '["__proto__"]' : JSON.stringify(key)}:${i},`;
+        }
+        cases += `case ${i}:{${match}}break;`;
+      }
+      const ref = pushDataSlot(ctx, jitMap ? (jitMap as any) : `{__proto__:null,${mapCode}}`);
+      code += `${hasIf ? "else " : ""}if(l>${currentIdx}){switch(${ref}[s[${currentIdx}]]){${cases}}}`;
+      hasIf = true;
+    } else if (children.length > 0) {
+      let staticCode = "";
+      const notNeedBoundCheck = hasIf;
+      for (const [key, match] of children) {
         staticCode += `${hasIf ? "else " : ""}if(s[${currentIdx}]===${JSON.stringify(key)}){${match}}`;
         hasIf = true;
       }
+      code += notNeedBoundCheck ? staticCode : `if(l>${currentIdx}){${staticCode}}`;
     }
-
-    if (staticCode) code += notNeedBoundCheck ? staticCode : `if(l>${currentIdx}){${staticCode}}`;
   }
 
   if (node.param) {
@@ -484,5 +532,43 @@ function serializeData(ctx: CompilerContext, value: any): string {
     index = ctx.data.push(value) - 1;
     dataMap.set(value, index);
   }
-  return `$${index}`;
+  return dataRef(ctx, index);
+}
+
+// Data slots hold RegExp objects too (JIT: the object itself, AOT: its
+// literal source), deduped by source+flags in a map separate from `dataMap`
+// so a regex can never collide with an equal-looking string data value.
+function serializeRegExp(ctx: CompilerContext, value: RegExp): string {
+  const key = value.toString();
+  const regexpMap = (ctx.regexpMap ??= new Map());
+  let index = regexpMap.get(key);
+  if (index === undefined) {
+    index = ctx.data.push(ctx.compileToString ? key : (value as any)) - 1;
+    regexpMap.set(key, index);
+  }
+  return dataRef(ctx, index);
+}
+
+function pushDataSlot(ctx: CompilerContext, value: any): string {
+  return dataRef(ctx, ctx.data.push(value) - 1);
+}
+
+function dataRef(ctx: CompilerContext, index: number): string {
+  return ctx.dataArray ? `$[${index}]` : `$${index}`;
+}
+
+// One param node can hold both required (`:id`, `:id(\d+)`) and optional
+// (`*`) routes for the same or different methods, in any insertion order.
+function hasOptionalLastParam(
+  methods: Record<string, MethodData<any>[] | undefined> | undefined,
+): boolean {
+  for (const key in methods) {
+    for (const m of methods[key] || []) {
+      const pMap = m.paramsMap;
+      if (pMap?.[pMap.length - 1]?.[2] /* optional */) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
