@@ -29,20 +29,20 @@
   "devDependencies": {
     "0x": "^6.0.0",
     "@mitata/counters": "^0.0.8",
-    "@types/node": "^25.9.4",
-    "@typescript/native-preview": "7.0.0-dev.20260308.1",
-    "@vitest/coverage-v8": "^4.1.9",
+    "@types/node": "^26.1.0",
+    "@typescript/native-preview": "latest",
+    "@vitest/coverage-v8": "^4.1.10",
     "automd": "^0.4.3",
     "changelogen": "^0.6.2",
-    "esbuild": "^0.27.7",
+    "esbuild": "^0.28.1",
     "eslint-config-unjs": "^0.6.2",
     "mitata": "^1.0.34",
     "obuild": "^0.4.37",
-    "oxfmt": "^0.36.0",
+    "oxfmt": "^0.57.0",
     "oxlint": "^1.72.0",
-    "rou3-latest": "npm:rou3@^0.7.12",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.9"
+    "rou3-latest": "npm:rou3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   },
   "packageManager": "pnpm@11.9.0"
 }
