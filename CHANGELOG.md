@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.9.1
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.9.0...v0.9.1)
+
+### 🚀 Enhancements
+
+- Add `compareRoutes()` util ([#191](https://github.com/h3js/rou3/pull/191))
+
+### 🔥 Performance
+
+- **find:** Remove avoidable allocations in dynamic lookup path ([e023038](https://github.com/h3js/rou3/commit/e023038))
+- **compiler:** Faster static, regex, wildcard and matchAll matching ([1c51df2](https://github.com/h3js/rou3/commit/1c51df2))
+- **add:** Skip escape, group and modifier scans for plain paths ([cabbe2d](https://github.com/h3js/rou3/commit/cabbe2d))
+- **compiler:** Segment switch dispatch, hoisted regexes and narrower length checks ([4bc0e3c](https://github.com/h3js/rou3/commit/4bc0e3c))
+
+### 🩹 Fixes
+
+- **compiler:** Resolve method-agnostic fallback like runtime ([#190](https://github.com/h3js/rou3/pull/190))
+- Unify same-node route selection across interpreter and compiled matchers ([f09ca03](https://github.com/h3js/rou3/commit/f09ca03))
+
+### 📖 Documentation
+
+- Clarify multi route matching order ([236612e](https://github.com/h3js/rou3/commit/236612e))
+
+### 🏡 Chore
+
+- Update deps ([5394dcc](https://github.com/h3js/rou3/commit/5394dcc))
+- Update tsconfig ([2df42a4](https://github.com/h3js/rou3/commit/2df42a4))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.9.0
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.8.1...v0.9.0)
