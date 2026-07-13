@@ -1,9 +1,6 @@
 import { expandGroupDelimiters } from "../_group-delimiters.ts";
-import {
-  hasSegmentWildcard,
-  replaceSegmentWildcards,
-  toUnnamedGroupKey,
-} from "../_segment-wildcards.ts";
+import { toGroupName, toUnnamedGroupKey } from "../_group-names.ts";
+import { hasSegmentWildcard, replaceSegmentWildcards } from "../_segment-wildcards.ts";
 import { NullProtoObj } from "../object.ts";
 import type { RouterContext, ParamsIndexMap } from "../types.ts";
 import { decodeEscaped, encodeEscapes, expandModifiers, splitPath } from "./_utils.ts";
@@ -153,7 +150,7 @@ function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
   [_s, _i] = replaceSegmentWildcards(_s, _i);
 
   const regex = _s
-    .replace(/:([\w-]+)(?:\(([^)]*)\))?/g, (_, id, p) => `(?<${id}>${p || "[^/]+"})`)
+    .replace(/:([\w-]+)(?:\(([^)]*)\))?/g, (_, id, p) => `(?<${toGroupName(id)}>${p || "[^/]+"})`)
     .replace(/\((?![?<])/g, () => `(?<${toUnnamedGroupKey(_i++)}>`)
     .replace(/\uFFFE(.)/g, (_, c) => (/[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c));
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { routeToRegExp, createRouter, addRoute, findRoute } from "../src/index.ts";
 import { compileRouter } from "../src/compiler.ts";
-import { normalizeUnnamedGroupKey } from "../src/_segment-wildcards.ts";
+import { fromGroupName } from "../src/_group-names.ts";
 import { normalizePath } from "../src/operations/_utils.ts";
 
 // https://github.com/web-platform-tests/wpt/blob/master/urlpattern/resources/urlpatterntestdata.json
@@ -19,7 +19,7 @@ function normalizeGroups(groups: Record<string, string> | undefined): Record<str
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(groups)) {
     if (key === "_") continue;
-    const normalized = normalizeUnnamedGroupKey(key).replace(/^_(\d+)$/, "$1");
+    const normalized = fromGroupName(key).replace(/^_(\d+)$/, "$1");
     result[normalized] = value;
   }
   return result;

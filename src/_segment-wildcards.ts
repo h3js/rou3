@@ -1,5 +1,4 @@
-export const UNNAMED_GROUP_PREFIX = "__rou3_unnamed_";
-const _unnamedGroupPrefixLength = UNNAMED_GROUP_PREFIX.length;
+import { toUnnamedGroupKey } from "./_group-names.ts";
 
 export function hasSegmentWildcard(segment: string): boolean {
   let depth = 0;
@@ -67,12 +66,4 @@ export function replaceSegmentWildcards(
   }
 
   return [replaced, nextIndex];
-}
-
-export function toUnnamedGroupKey(index: number): string {
-  return `${UNNAMED_GROUP_PREFIX}${index}`;
-}
-
-export function normalizeUnnamedGroupKey(key: string): string {
-  return key.startsWith(UNNAMED_GROUP_PREFIX) ? key.slice(_unnamedGroupPrefixLength) : key;
 }

@@ -1,4 +1,4 @@
-import { normalizeUnnamedGroupKey } from "../_segment-wildcards.ts";
+import { fromGroupName } from "../_group-names.ts";
 import { NullProtoObj } from "../object.ts";
 import type { MatchedRoute, ParamsIndexMap } from "../types.ts";
 
@@ -64,7 +64,7 @@ export function getMatchParams(
       const match = segment.match(name);
       if (match) {
         for (const key in match.groups) {
-          params[normalizeUnnamedGroupKey(key)] = match.groups[key];
+          params[fromGroupName(key)] = match.groups[key];
         }
       }
     }

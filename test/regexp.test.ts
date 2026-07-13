@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { routeToRegExp, createRouter, addRoute, findRoute } from "../src/index.ts";
-import { normalizeUnnamedGroupKey } from "../src/_segment-wildcards.ts";
+import { fromGroupName } from "../src/_group-names.ts";
 import { regexpCases as routes, PCRE2_DUPLICATE_NAME_ROUTES } from "./_regexp-cases.ts";
 
 function normalizeGroups(groups?: Record<string, string>) {
@@ -10,7 +10,7 @@ function normalizeGroups(groups?: Record<string, string>) {
 
   const normalized: Record<string, string> = {};
   for (const key in groups) {
-    const normalizedKey = normalizeUnnamedGroupKey(key).replace(/^_(\d+)$/, "$1");
+    const normalizedKey = fromGroupName(key).replace(/^_(\d+)$/, "$1");
     normalized[normalizedKey] = groups[key];
   }
 

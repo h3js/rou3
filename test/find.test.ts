@@ -218,6 +218,64 @@ describe("hyphenated param names", () => {
   }
 });
 
+describe("param names that are not valid capture-group names", () => {
+  // Param names accept `[\w-]+`, but a JS/PCRE capture group name must be an
+  // identifier (no `-`, no leading digit). Whole-segment params store the name
+  // as a plain string key and always worked; every regex-compiled position
+  // (mixed segments, inline constraints, segment wildcards) used to emit the
+  // raw name as `(?<test-id>…)` and throw `SyntaxError: Invalid capture group
+  // name` from addRoute().
+  const router = createRouter([
+    "/files/:file-name.json",
+    "/blog/:post-id(\\d+)",
+    "/n/:0.txt",
+    "/mix/:a-b.:a_b",
+    "/run/:a--b.:a_-b",
+    "/w/:file-name.*",
+  ]);
+
+  const compiledLookup = compileRouter(router);
+
+  const lookups = [
+    { name: "findRoute", match: (m: string, p: string) => findRoute(router, m, p) },
+    { name: "compiledLookup", match: (m: string, p: string) => compiledLookup(m, p) },
+  ];
+
+  for (const { name, match } of lookups) {
+    it(`params surface under their original names (${name})`, () => {
+      expect(match("GET", "/files/readme.json")).toMatchObject({
+        data: { path: "/files/:file-name.json" },
+        params: { "file-name": "readme" },
+      });
+      expect(match("GET", "/blog/123")).toMatchObject({
+        data: { path: "/blog/:post-id(\\d+)" },
+        params: { "post-id": "123" },
+      });
+      expect(match("GET", "/blog/abc")).toBeUndefined();
+      expect(match("GET", "/n/42.txt")).toMatchObject({
+        data: { path: "/n/:0.txt" },
+        params: { "0": "42" },
+      });
+      // Distinct names must stay distinct through the escape. A `-` -> `_`
+      // sanitize collapses `a-b`/`a_b` onto one group name, corrupts `a--b`
+      // into `a_b`, and makes `a-_b`/`a_-b` a duplicate group (SyntaxError).
+      expect(match("GET", "/mix/x.y")).toMatchObject({
+        data: { path: "/mix/:a-b.:a_b" },
+        params: { "a-b": "x", a_b: "y" },
+      });
+      expect(match("GET", "/run/x.y")).toMatchObject({
+        data: { path: "/run/:a--b.:a_-b" },
+        params: { "a--b": "x", "a_-b": "y" },
+      });
+      // Escaped name alongside an unnamed segment wildcard capture.
+      expect(match("GET", "/w/logo.dark")).toMatchObject({
+        data: { path: "/w/:file-name.*" },
+        params: { "file-name": "logo", "0": "dark" },
+      });
+    });
+  }
+});
+
 describe("method-agnostic fallback (compiled parity)", () => {
   // Runtime resolves `methods[m] || methods[""]` per node: when a
   // method-scoped entry exists, the agnostic sibling is never consulted for

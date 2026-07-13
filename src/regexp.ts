@@ -1,4 +1,5 @@
 import { expandGroupDelimiters, scanFirstGroup } from "./_group-delimiters.ts";
+import { toGroupName } from "./_group-names.ts";
 import {
   escapeBareDots,
   replaceEscapesOutsideGroups,
@@ -134,7 +135,7 @@ function routeToRegExpSegments(route: string): string[] {
     if (segment === "*") {
       reSegments.push(`(?<${toRegExpUnnamedKey(idCtr++)}>[^/]*)`);
     } else if (segment.startsWith("**")) {
-      reSegments.push(segment === "**" ? "?(?<_>.*)" : `?(?<${segment.slice(3)}>.+)`);
+      reSegments.push(segment === "**" ? "?(?<_>.*)" : `?(?<${toGroupName(segment.slice(3))}>.+)`);
     } else if (
       segment.includes(":") ||
       /(^|[^\\])\(/.test(segment) ||
@@ -143,13 +144,13 @@ function routeToRegExpSegments(route: string): string[] {
       const modMatch = segment.match(/^(.*:[\w-]+(?:\([^)]*\))?)([?+*])$/);
       if (modMatch) {
         const [, base, mod] = modMatch;
-        const name = base.match(/:([\w-]+)/)?.[1] || `_${idCtr++}`;
+        const name = toGroupName(base.match(/:([\w-]+)/)?.[1] || `_${idCtr++}`);
 
         if (mod === "?") {
           const inner = escapeBareDots(
             base.replace(
               /:([\w-]+)(?:\(([^)]*)\))?/g,
-              (_, id, pattern) => `(?<${id}>${pattern || "[^/]+"})`,
+              (_, id, pattern) => `(?<${toGroupName(id)}>${pattern || "[^/]+"})`,
             ),
           );
           if (reSegments.length > 0) {
@@ -163,7 +164,7 @@ function routeToRegExpSegments(route: string): string[] {
         }
 
         // + or * (preserve inline constraint when present)
-        const pattern = base.match(/:(\w+)(?:\(([^)]*)\))?/)?.[2];
+        const pattern = base.match(/:([\w-]+)(?:\(([^)]*)\))?/)?.[2];
         if (reSegments.length > 0) {
           const prevMod: string = reSegments.pop()!;
           if (pattern) {
@@ -200,7 +201,7 @@ function routeToRegExpSegments(route: string): string[] {
             dynamicSegment
               .replace(
                 /:([\w-]+)(?:\(([^)]*)\))?/g,
-                (_, id, pattern) => `(?<${id}>${pattern || "[^/]+"})`,
+                (_, id, pattern) => `(?<${toGroupName(id)}>${pattern || "[^/]+"})`,
               )
               .replace(/(^|[^\\])\((?![?<])/g, (_, p) => `${p}(?<${toRegExpUnnamedKey(idCtr++)}>`),
           ),

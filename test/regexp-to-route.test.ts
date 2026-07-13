@@ -34,6 +34,19 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(/^\/path\/(?<rest>.+)\/?$/)).toBe("/path/:rest+");
   });
 
+  it("decodes escaped capture-group names back to the original param name", () => {
+    // Param names that aren't valid capture-group names (`-`, leading digit) are
+    // emitted escaped; reversing must restore the original name, not leak the
+    // internal form as `:__rou3_esc_test_hid`.
+    expect(regExpToRoute(/^\/api\/(?<__rou3_esc_test_hid>[^/]+)\/?$/)).toBe("/api/:test-id");
+    expect(regExpToRoute(/^\/api\/?(?<__rou3_esc_test_hid>.+)\/?$/)).toBe("/api/**:test-id");
+    expect(regExpToRoute(/^\/api(?:\/(?<__rou3_esc_test_hid>[^/]+))?\/?$/)).toBe("/api/:test-id?");
+    expect(regExpToRoute(/^\/api\/(?<__rou3_esc_0>[^/]+)\/?$/)).toBe("/api/:0");
+    expect(regExpToRoute(/^\/mix\/(?<__rou3_esc_a_hb>[^/]+)\.(?<a_b>[^/]+)\/?$/)).toBe(
+      "/mix/:a-b.:a_b",
+    );
+  });
+
   it("re-escapes literal route-syntax characters", () => {
     // A literal `*` in the source must come back escaped so it stays literal.
     expect(regExpToRoute(/^\/static\/\*\/\*\*\/?$/)).toBe("/static/\\*/\\*\\*");

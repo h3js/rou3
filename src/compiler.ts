@@ -1,4 +1,4 @@
-import { normalizeUnnamedGroupKey, UNNAMED_GROUP_PREFIX } from "./_segment-wildcards.ts";
+import { ESCAPED_GROUP_PREFIX, fromGroupName, UNNAMED_GROUP_PREFIX } from "./_group-names.ts";
 import { NullProtoObj } from "./object.ts";
 import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 
@@ -117,8 +117,10 @@ function compileRouteMatch(ctx: CompilerContext): string {
     return ctx.opts?.matchAll ? `return [];` : "";
   }
 
+  // Mirrors `fromGroupName()`: strip the unnamed prefix, or decode an escaped
+  // param name (`__` -> `_`, `_h` -> `-`) back to its original form.
   const normalizeHelper = code.includes("_normalizeGroups(")
-    ? `const _prefix=${JSON.stringify(UNNAMED_GROUP_PREFIX)},_prefixLen=${UNNAMED_GROUP_PREFIX.length};const _normalizeGroups=(g)=>{if(!g)return g;for(const k in g){if(k.startsWith(_prefix)){g[k.slice(_prefixLen)]=g[k];delete g[k]}}return g;};`
+    ? `const _u=${JSON.stringify(UNNAMED_GROUP_PREFIX)},_e=${JSON.stringify(ESCAPED_GROUP_PREFIX)};const _normalizeGroups=(g)=>{if(!g)return g;for(const k in g){const n=k.startsWith(_u)?k.slice(_u.length):(k.startsWith(_e)?k.slice(_e.length).replace(/__|_h/g,(c)=>c==="__"?"_":"-"):k);if(n!==k){g[n]=g[k];delete g[k]}}return g;};`
     : "";
 
   const normalizePathHelper = ctx.opts?.normalize
@@ -318,12 +320,12 @@ function compileFinalMatch(
         conditions.push(`${regexp}.test(${params[i]})`);
       } else if (groups.whole) {
         conditions.push(`${regexp}.test(${params[i]})`);
-        paramsCode += `${JSON.stringify(normalizeUnnamedGroupKey(groups.names[0]))}:${params[i]},`;
+        paramsCode += `${JSON.stringify(fromGroupName(groups.names[0]))}:${params[i]},`;
       } else {
         const tmp = `_m${tmpCount++}`;
         conditions.push(`(${tmp}=${regexp}.exec(${params[i]}))!==null`);
         for (const name of groups.names) {
-          paramsCode += `${JSON.stringify(normalizeUnnamedGroupKey(name))}:${tmp}.groups.${name},`;
+          paramsCode += `${JSON.stringify(fromGroupName(name))}:${tmp}.groups.${name},`;
         }
       }
     }

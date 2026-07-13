@@ -42,8 +42,13 @@ describe("benchmark", () => {
     // and out-of-bounds segments no longer coerce to a literal "undefined"
     // static key. Includes a single-sibling fast path that keeps lookup speed
     // at parity.
-    expect(bytes).toBeLessThanOrEqual(6360); // <6.36kb
-    expect(gzipSize).toBeLessThanOrEqual(2570); // <2.57kb
+    // +~210B raw / +~95B gzip: param names accept `[\w-]+` but a capture group
+    // name must be an identifier, so `_group-names.ts` encodes the ones that
+    // aren't (`-`, leading digit) into a reserved injective form and decodes
+    // them back when groups are read — `:file-name.json` / `:id(\d+)` with such
+    // a name used to throw `SyntaxError: Invalid capture group name` at addRoute.
+    expect(bytes).toBeLessThanOrEqual(6580); // <6.58kb
+    expect(gzipSize).toBeLessThanOrEqual(2670); // <2.67kb
   });
 });
 

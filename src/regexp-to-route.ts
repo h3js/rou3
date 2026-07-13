@@ -4,6 +4,8 @@
 // catch-alls, `(?:/...)?` optional groups). Hand-written regexes that follow the
 // same conventions convert too; constructs outside the dialect throw.
 
+import { fromGroupName } from "./_group-names.ts";
+
 // Chars a literal must be backslash-escaped as so `routeToRegExp` re-emits them
 // verbatim: rou3 route syntax (`: ( ) { } * \`) plus regex metacharacters its
 // dynamic-segment branch does not auto-escape (`? + | ^ $ [ ]`). `.` is omitted
@@ -242,7 +244,12 @@ interface NamedGroup {
   end: number;
 }
 
-/** Parse `(?<name>...)` at `start`, returning its name, body and end index. */
+/**
+ * Parse `(?<name>...)` at `start`, returning its name, body and end index. The
+ * name is decoded back to its route form, so a param whose name is not a valid
+ * capture-group name (`:test-id`, `:0`) round-trips instead of leaking the
+ * escaped group name.
+ */
 function matchNamedGroup(src: string, start: number): NamedGroup | undefined {
   if (!src.startsWith("(?<", start)) {
     return undefined;
@@ -257,7 +264,7 @@ function matchNamedGroup(src: string, start: number): NamedGroup | undefined {
     return undefined;
   }
   const end = readGroup(src, start);
-  return { name: src.slice(start + 3, gt), body: src.slice(gt + 1, end - 1), end };
+  return { name: fromGroupName(src.slice(start + 3, gt)), body: src.slice(gt + 1, end - 1), end };
 }
 
 /** Index just past the `)` matching the `(` at `start`, class/escape aware. */
