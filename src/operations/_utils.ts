@@ -51,6 +51,13 @@ export function splitPath(path: string): string[] {
   return s;
 }
 
+/** Like `splitPath`, for route patterns: `/a//` and `/a/` canonicalize to `/a`. */
+export function splitRoute(path: string): string[] {
+  const s = splitPath(path);
+  while (s[s.length - 1] === "") s.pop();
+  return s;
+}
+
 export function getMatchParams(
   segments: string[],
   paramsMap: ParamsIndexMap,

@@ -6,6 +6,7 @@ import {
   resolveEscapePlaceholders,
 } from "./_escape.ts";
 import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcards.ts";
+import { splitRoute } from "./operations/_utils.ts";
 
 /**
  * Convert a rou3 route pattern into an anchored {@link RegExp}.
@@ -26,6 +27,10 @@ import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcard
  * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
  */
 export function routeToRegExp(route: string = "/"): RegExp {
+  if (route.charCodeAt(0) !== 47 /* '/' */) {
+    route = `/${route}`;
+  }
+
   // Compile a trailing single optional group (`{...}?`) inline as `(?:...)?`
   // instead of expanding it into an alternation of full routes. The alternation
   // form re-emits every param before the group in both branches, producing
@@ -129,8 +134,14 @@ function routeToRegExpSegments(route: string): string[] {
   const reSegments = [];
   let idCtr = 0;
 
-  for (const segment of route.split("/")) {
-    if (!segment) continue;
+  for (const segment of splitRoute(route)) {
+    // An empty *middle* segment (`/a//b`) is a real static segment in the tree,
+    // so it must stay in the regex; `splitRoute` has already dropped the leading
+    // and trailing empties (`/a//` = `/a/` = `/a`).
+    if (!segment) {
+      reSegments.push("");
+      continue;
+    }
 
     if (segment === "*") {
       reSegments.push(`(?<${toRegExpUnnamedKey(idCtr++)}>[^/]*)`);

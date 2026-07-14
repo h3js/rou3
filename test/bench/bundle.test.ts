@@ -47,8 +47,14 @@ describe("benchmark", () => {
     // aren't (`-`, leading digit) into a reserved injective form and decodes
     // them back when groups are read — `:file-name.json` / `:id(\d+)` with such
     // a name used to throw `SyntaxError: Invalid capture group name` at addRoute.
-    expect(bytes).toBeLessThanOrEqual(6580); // <6.58kb
-    expect(gzipSize).toBeLessThanOrEqual(2670); // <2.67kb
+    // +~56B raw / +~13B gzip: addRoute/removeRoute split route patterns with
+    // splitRoute(), which drops *all* trailing empty segments, so `/a//` is
+    // registered as `/a` (#193). Keeping just one (splitPath) left the tree, the
+    // ctx.static key and the compiled static dispatch each matching a different
+    // set of paths. Lookup paths still use splitPath (one popped empty segment,
+    // i.e. `/a//` reaches `/a` but `/a///` does not) — unchanged.
+    expect(bytes).toBeLessThanOrEqual(6640); // <6.64kb
+    expect(gzipSize).toBeLessThanOrEqual(2690); // <2.69kb
   });
 });
 

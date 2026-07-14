@@ -6,6 +6,7 @@ import {
   findAllRoutes,
   findRoute,
   removeRoute,
+  routeToRegExp,
 } from "../src/index.ts";
 import { compileRouter, compileRouterToString } from "../src/compiler.ts";
 import { format } from "oxfmt";
@@ -672,6 +673,61 @@ describe("static routes reached with a doubled trailing slash (compiled parity)"
       }
     });
   }
+});
+
+describe("route patterns with trailing empty segments (#193)", () => {
+  // A route registered as "/a//" used to keep a trailing empty segment, so the
+  // radix tree ("/a///"), the ctx.static key ("/a/") and the compiled static
+  // dispatch ("/a") each matched a different set of paths. Trailing slashes are
+  // already "don't care" for routes (/a === /a/), so the extras fold in too:
+  // /a// registers exactly as /a. Middle empties stay meaningful (see "/a//b").
+  for (const route of ["/a", "/a/", "/a//", "/a///"]) {
+    const router = createEmptyRouter<{ route: string }>();
+    addRoute(router, "GET", route, { route });
+    const compiledLookup = compileRouter(router);
+    const compiledMatchAll = compileRouter(router, { matchAll: true });
+
+    it(`route "${route}" matches /a, /a/ and /a// in every matcher`, () => {
+      for (const path of ["/a", "/a/", "/a//"]) {
+        expect(findRoute(router, "GET", path), `findRoute ${path}`).toMatchObject({
+          data: { route },
+        });
+        expect(compiledLookup("GET", path), `compiled ${path}`).toMatchObject({ data: { route } });
+        expect(findAllRoutes(router, "GET", path).map((m) => m.data.route)).toEqual([route]);
+        expect(compiledMatchAll("GET", path).map((m) => m.data.route)).toEqual([route]);
+      }
+      // beyond the doubled slash a real empty segment remains -> no match
+      expect(findRoute(router, "GET", "/a///")).toBeUndefined();
+      expect(compiledLookup("GET", "/a///")).toBeUndefined();
+    });
+
+    it(`route "${route}" is removable by its registered form`, () => {
+      const r = createEmptyRouter<{ route: string }>();
+      addRoute(r, "GET", route, { route });
+      removeRoute(r, "GET", route);
+      expect(findRoute(r, "GET", "/a")).toBeUndefined();
+    });
+  }
+});
+
+describe("routes with an empty middle segment", () => {
+  // Unlike trailing empties, an empty segment inside the path is a real static
+  // segment (the request path keeps it too), so "/a//b" must not answer "/a/b".
+  const router = createEmptyRouter<{ route: string }>();
+  addRoute(router, "GET", "/a//b", { route: "/a//b" });
+  const compiledLookup = compileRouter(router);
+
+  it("matches only the doubled-slash path", () => {
+    for (const match of [
+      (p: string) => findRoute(router, "GET", p),
+      (p: string) => compiledLookup("GET", p),
+    ]) {
+      expect(match("/a//b")).toMatchObject({ data: { route: "/a//b" } });
+      expect(match("/a/b")).toBeUndefined();
+    }
+    expect(routeToRegExp("/a//b").test("/a//b")).toBe(true);
+    expect(routeToRegExp("/a//b").test("/a/b")).toBe(false);
+  });
 });
 
 describe("same-node sibling selection (findRoute/compiled parity)", () => {
