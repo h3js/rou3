@@ -165,6 +165,15 @@ Param names accept `[\w-]+`, but a named capture group must be a valid identifie
 
 `normalizePath()` in `_utils.ts` resolves `.` and `..` segments in lookup paths (fast-path: skip if no `/.` found). Both `findRoute()` and `findAllRoutes()` normalize before matching. The compiler inlines equivalent logic in generated code.
 
+### Empty segments (trailing vs middle)
+
+Two different rules, and they must not be conflated:
+
+- **Trailing** empties are canonicalized away at **registration**: `add`/`remove` split patterns with `splitRoute()` (`splitPath()` + pop *all* remaining trailing empties), so `/a//` ≡ `/a/` ≡ `/a` (#193). `splitPath()` alone pops only one, which used to leave `/a//` as segments `["a", ""]` — the radix tree then matched only `/a///`, the `ctx.static` key was `/a/`, and the compiled static dispatch stripped to `/a`: three matchers, three answers. This mirrors the trailing-slash policy already documented for routes (`/a` ≡ `/a/`). Pinned in `find.test.ts` "route patterns with trailing empty segments (#193)".
+- **Lookup paths** are unchanged: `findRoute`/`findAllRoutes` slice one trailing `/` and `splitPath` pops one empty segment, so `/a//` reaches a `/a` route but `/a///` does not (a real empty segment remains). This bound is deliberate — `find.test.ts` "matches the static route for path//, **not beyond**" and the compiled static chain/map (which retries `p.slice(0,-1)` exactly once) both pin it. Do **not** turn `splitPath`'s `if` into a `while`.
+- **Middle** empties are *meaningful* and preserved everywhere: `/a//b` is a static segment `""` in the tree and matches only the doubled-slash path, never `/a/b` (request paths keep their empty segments too, so collapsing would create the classic normalization-mismatch bypass; URLPattern also treats `//` literally). `routeToRegExpSegments()` used to `continue` on every empty segment, so `routeToRegExp("/a//b")` emitted `^\/a\/b\/?$` — matching the one path the router won't and missing the one it will. It now splits with `splitRoute()` and re-emits middle empties. Pinned by the `/path//sub` + `/path//:id` fixtures in `_regexp-cases.ts` (which assert tree and regex agree) and `find.test.ts` "routes with an empty middle segment".
+- Known residual: an empty segment directly before a wildcard (`/a//**`, `/a//*`) still has the regex over-matching relative to the tree — the `**` emission makes its preceding separator optional (`\/\/?`), and lookup-side trailing normalization erases the empty segment in that position anyway. Pathological; not modeled.
+
 ### Wildcard segment captures
 
 - **Breaking change:** unnamed captures now use URLPattern-style numeric keys (`"0"`, `"1"`, ...) instead of legacy `_0`, `_1`, ...

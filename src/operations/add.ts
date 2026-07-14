@@ -3,7 +3,7 @@ import { toGroupName, toUnnamedGroupKey } from "../_group-names.ts";
 import { hasSegmentWildcard, replaceSegmentWildcards } from "../_segment-wildcards.ts";
 import { NullProtoObj } from "../object.ts";
 import type { RouterContext, ParamsIndexMap } from "../types.ts";
-import { decodeEscaped, encodeEscapes, expandModifiers, splitPath } from "./_utils.ts";
+import { decodeEscaped, encodeEscapes, expandModifiers, splitRoute } from "./_utils.ts";
 
 /**
  * Add a route to the router context.
@@ -29,7 +29,7 @@ export function addRoute<T>(
 
   path = encodeEscapes(path);
 
-  const segments = splitPath(path);
+  const segments = splitRoute(path);
 
   // Expand modifiers (:name?, :name+, :name*) into multiple route entries
   const expanded = expandModifiers(segments);

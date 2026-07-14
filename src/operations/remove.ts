@@ -1,7 +1,7 @@
 import { expandGroupDelimiters } from "../_group-delimiters.ts";
 import { hasSegmentWildcard } from "../_segment-wildcards.ts";
 import type { RouterContext, Node } from "../types.ts";
-import { decodeEscaped, encodeEscapes, expandModifiers, splitPath } from "./_utils.ts";
+import { decodeEscaped, encodeEscapes, expandModifiers, splitRoute } from "./_utils.ts";
 
 /**
  * Remove a route from the router context.
@@ -17,7 +17,7 @@ export function removeRoute<T>(ctx: RouterContext<T>, method: string, path: stri
 
   path = encodeEscapes(path);
 
-  const segments = splitPath(path);
+  const segments = splitRoute(path);
 
   const modExpanded = expandModifiers(segments);
   if (modExpanded) {
