@@ -51,8 +51,9 @@ describe("Route matcher", function () {
     "/foo/baz",
     "/foo/baz/**",
     "/foo/*/sub",
-    "/:foo/qux",
-    "/:bar/quux",
+    "/*/qux",
+    "/:foo/quux",
+    "/:bar/corge",
     "/without-trailing",
     "/with-trailing/",
     "/c/**",
@@ -84,10 +85,13 @@ describe("Route matcher", function () {
             "dynamic": Map {},
             "static": Map {
               "/qux" => {
-                "pattern": "/:foo/qux",
+                "pattern": "/*/qux",
               },
               "/quux" => {
-                "pattern": "/:bar/quux",
+                "pattern": "/:foo/quux",
+              },
+              "/corge" => {
+                "pattern": "/:bar/corge",
               },
             },
             "wildcard": Map {},
@@ -172,12 +176,17 @@ describe("Route matcher", function () {
     `);
     expect(_match("/123/qux")).to.toMatchInlineSnapshot(`
       [
-        "/:foo/qux",
+        "/*/qux",
       ]
     `);
     expect(_match("/123/quux")).to.toMatchInlineSnapshot(`
       [
-        "/:bar/quux",
+        "/:foo/quux",
+      ]
+    `);
+    expect(_match("/123/corge")).to.toMatchInlineSnapshot(`
+      [
+        "/:bar/corge",
       ]
     `);
   });
@@ -226,11 +235,14 @@ describe("Route matcher", function () {
           "": {
             "dynamic": {},
             "static": {
+              "/corge": {
+                "pattern": "/:bar/corge",
+              },
               "/quux": {
-                "pattern": "/:bar/quux",
+                "pattern": "/:foo/quux",
               },
               "/qux": {
-                "pattern": "/:foo/qux",
+                "pattern": "/*/qux",
               },
             },
             "wildcard": {},
