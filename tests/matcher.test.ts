@@ -51,6 +51,9 @@ describe("Route matcher", function () {
     "/foo/baz",
     "/foo/baz/**",
     "/foo/*/sub",
+    "/*/qux",
+    "/:foo/quux",
+    "/:bar/corge",
     "/without-trailing",
     "/with-trailing/",
     "/c/**",
@@ -74,6 +77,21 @@ describe("Route matcher", function () {
               },
               "/" => {
                 "pattern": "/foo/*",
+              },
+            },
+            "wildcard": Map {},
+          },
+          "" => {
+            "dynamic": Map {},
+            "static": Map {
+              "/qux" => {
+                "pattern": "/*/qux",
+              },
+              "/quux" => {
+                "pattern": "/:foo/quux",
+              },
+              "/corge" => {
+                "pattern": "/:bar/corge",
               },
             },
             "wildcard": Map {},
@@ -156,6 +174,21 @@ describe("Route matcher", function () {
         "/foo/*",
       ]
     `);
+    expect(_match("/123/qux")).to.toMatchInlineSnapshot(`
+      [
+        "/*/qux",
+      ]
+    `);
+    expect(_match("/123/quux")).to.toMatchInlineSnapshot(`
+      [
+        "/:foo/quux",
+      ]
+    `);
+    expect(_match("/123/corge")).to.toMatchInlineSnapshot(`
+      [
+        "/:bar/corge",
+      ]
+    `);
   });
 
   it("trailing slash", () => {
@@ -199,6 +232,21 @@ describe("Route matcher", function () {
     expect(jsonData).toMatchInlineSnapshot(`
       {
         "dynamic": {
+          "": {
+            "dynamic": {},
+            "static": {
+              "/corge": {
+                "pattern": "/:bar/corge",
+              },
+              "/quux": {
+                "pattern": "/:foo/quux",
+              },
+              "/qux": {
+                "pattern": "/*/qux",
+              },
+            },
+            "wildcard": {},
+          },
           "/foo": {
             "dynamic": {},
             "static": {
