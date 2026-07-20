@@ -128,6 +128,33 @@ function _sortRoutesMap(m: Map<string, any>) {
   return [...m.entries()].sort((a, b) => a[0].length - b[0].length);
 }
 
+function _mergeRouteTables(a: RouteTable, b: RouteTable): RouteTable {
+  const merged = _createRouteTable();
+  for (const [key, value] of a.static) {
+    merged.static.set(key, value);
+  }
+  for (const [key, value] of b.static) {
+    merged.static.set(key, value);
+  }
+  for (const [key, value] of a.wildcard) {
+    merged.wildcard.set(key, value);
+  }
+  for (const [key, value] of b.wildcard) {
+    merged.wildcard.set(key, value);
+  }
+  for (const [key, value] of a.dynamic) {
+    merged.dynamic.set(key, value);
+  }
+  for (const [key, value] of b.dynamic) {
+    const existing = merged.dynamic.get(key);
+    merged.dynamic.set(
+      key,
+      existing ? _mergeRouteTables(existing, value) : value,
+    );
+  }
+  return merged;
+}
+
 function _routerNodeToTable(
   initialPath: string,
   initialNode: RadixNode,
@@ -149,7 +176,14 @@ function _routerNodeToTable(
         if (node.data) {
           subTable.static.set("/", node.data);
         }
-        table.dynamic.set(path.replace(/\/\*|\/:\w+/, ""), subTable);
+        // Sibling placeholders share the same dynamic key so we need
+        // to merge them for shorter patterns to remain matchable.
+        const key = path.replace(/\/\*|\/:\w+/, "");
+        const existing = table.dynamic.get(key);
+        table.dynamic.set(
+          key,
+          existing ? _mergeRouteTables(existing, subTable) : subTable,
+        );
         return;
       }
     }
