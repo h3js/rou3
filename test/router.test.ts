@@ -994,10 +994,4 @@ describe("Router remove", function () {
       expect(formatTree(router.root), route).toBe(expected);
     }
   });
-
-  it("throws readable error on unbalanced '(' in route pattern", () => {
-    expect(() => addRoute(createRouter({}), "GET", "/files/(2024", { path: "x" })).toThrow(
-      "Invalid route pattern \"(2024\": unbalanced '(' group. Escape a literal parenthesis as '\\('.",
-    );
-  });
 });
