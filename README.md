@@ -139,7 +139,7 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 
 - **Named params** (`:name`) match a single segment.
 - **Single-segment wildcards** (`*`) capture unnamed params (`0`, `1`, ...) and can be used as full or mid-segment tokens (for example `/*` or `/*.png`).
-- **Wildcards** (`**`) match zero or more segments. Use `**:name` to capture.
+- **Wildcards** (`**`) match zero or more segments. Use `**:name` to capture. A wildcard is **terminal**: anything written after it is ignored.
 - **Regex constraints** (`:name(regex)`) restrict matching. Constrained and unconstrained params can coexist on the same node (constrained checked first).
 - **Unnamed groups** (`(regex)`) capture into auto-indexed keys `0`, `1`, etc.
 - **Modifiers:** `:name?` (optional), `:name+` (one or more), `:name*` (zero or more). Can combine with regex: `:id(\d+)?`.
@@ -154,7 +154,7 @@ rou3 aims for URLPattern-compatible syntax but has intentional differences due t
 | Feature                       | URLPattern                         | rou3                                                          |
 | ----------------------------- | ---------------------------------- | ------------------------------------------------------------- |
 | `*` (single star)             | Greedy catch-all `(.*)` across `/` | Single-segment unnamed param `([^/]*)`                        |
-| `**` (double star)            | Literal `**`                       | Catch-all wildcard (zero or more segments)                    |
+| `**` (double star)            | Literal `**`                       | Catch-all wildcard (zero or more segments), always terminal   |
 | `(.*)` in segment             | Greedy match across `/`            | Segment-scoped (does not cross `/`)                           |
 | `{...}+` / `{...}*` groups    | Cross-segment group repetition     | Only supported within a single segment (no `/` in group body) |
 | Path normalization (`.`/`..`) | Resolves `.`/`..` in input paths   | Not done by default (opt-in with `{ normalize: true }`)       |

@@ -59,7 +59,18 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/path/anything/more", { _: "anything/more" }],
     ],
   },
+  "/path/**/suffix": {
+    regex: /^\/path\/?(?<_>.*)\/?$/,
+    match: [
+      ["/path/anything/more", { _: "anything/more" }],
+      ["/path/suffix", { _: "suffix" }],
+    ],
+  },
   "/base/**:path": {
+    regex: /^\/base\/?(?<path>.+)\/?$/,
+    match: [["/base/anything/more", { path: "anything/more" }]],
+  },
+  "/base/**:path/suffix": {
     regex: /^\/base\/?(?<path>.+)\/?$/,
     match: [["/base/anything/more", { path: "anything/more" }]],
   },

@@ -147,6 +147,7 @@ function routeToRegExpSegments(route: string): string[] {
       reSegments.push(`(?<${toRegExpUnnamedKey(idCtr++)}>[^/]*)`);
     } else if (segment.startsWith("**")) {
       reSegments.push(segment === "**" ? "?(?<_>.*)" : `?(?<${toGroupName(segment.slice(3))}>.+)`);
+      break;
     } else if (
       segment.includes(":") ||
       /(^|[^\\])\(/.test(segment) ||
