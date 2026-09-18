@@ -24,25 +24,24 @@
     "lint:fix": "automd && oxlint --fix . && oxfmt src test",
     "release": "pnpm test && pnpm build && changelogen --release && git push --follow-tags && npm publish",
     "test": "pnpm lint && pnpm test:types && vitest run --coverage",
-    "test:types": "tsgo --noEmit"
+    "test:types": "tsc --noEmit"
   },
   "devDependencies": {
     "0x": "^6.0.0",
     "@mitata/counters": "^0.0.8",
-    "@types/node": "^26.1.0",
-    "@typescript/native-preview": "latest",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@types/node": "^26.6.1",
+    "@vitest/coverage-v8": "^5.0.1",
     "automd": "^0.4.3",
     "changelogen": "^0.6.2",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "eslint-config-unjs": "^0.6.2",
     "mitata": "^1.0.34",
-    "obuild": "^0.4.37",
-    "oxfmt": "^0.57.0",
-    "oxlint": "^1.72.0",
-    "rou3-latest": "npm:rou3",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "obuild": "^0.4.40",
+    "oxfmt": ">=0.68.0",
+    "oxlint": "^1.83.0",
+    "rou3-latest": "npm:rou3@^0.9.2",
+    "typescript": "^6",
+    "vitest": "^5.0.1"
   },
-  "packageManager": "pnpm@11.9.0"
+  "packageManager": "pnpm@11.26.0"
 }
