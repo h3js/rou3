@@ -124,7 +124,7 @@ function compileRouteMatch(ctx: CompilerContext): string {
     : "";
 
   const normalizePathHelper = ctx.opts?.normalize
-    ? `if(p.includes("/.")){let _r=[];for(let _v of p.split("/")){if(_v===".")continue;_v===".."&&_r.length>1?_r.pop():_r.push(_v)}p=_r.join("/")||"/"}`
+    ? `if(p.includes("/.")){let _r=[];for(let _v of p.split("/")){if(_v===".")continue;if(_v==="..")_r.length>1&&_r.pop();else _r.push(_v)}p=_r.join("/")||"/"}`
     : "";
 
   // Trailing slash is stripped; root "/" collapses to "" (0 segments) so its

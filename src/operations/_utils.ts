@@ -64,8 +64,10 @@ export function normalizePath(path: string): string {
   const r: string[] = [];
   for (const s of path.split("/")) {
     if (s === ".") continue;
-    else if (s === ".." && r.length > 1) r.pop();
-    else r.push(s);
+    // r[0] is the leading "" — a ".." at the root is a no-op, never a literal
+    else if (s === "..") {
+      if (r.length > 1) r.pop();
+    } else r.push(s);
   }
   return r.join("/") || "/";
 }

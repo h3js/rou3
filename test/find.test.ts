@@ -9,6 +9,7 @@ import {
   routeToRegExp,
 } from "../src/index.ts";
 import { compileRouter, compileRouterToString } from "../src/compiler.ts";
+import { normalizePath } from "../src/operations/_utils.ts";
 import { format } from "oxfmt";
 
 describe("route matching", () => {
@@ -786,6 +787,48 @@ describe("routes with an empty middle segment", () => {
     }
     expect(routeToRegExp("/a//b").test("/a//b")).toBe(true);
     expect(routeToRegExp("/a//b").test("/a/b")).toBe(false);
+  });
+});
+
+describe("path normalization above the root (normalize: true)", () => {
+  // A ".." that would climb above "/" is a no-op (like path.posix.normalize),
+  // never a literal ".." segment. It used to leak one when the path was
+  // already unwound to the root, so a "/**" route captured "../foo/bar".
+  const router = createEmptyRouter<{ route: string }>();
+  addRoute(router, "GET", "/**", { route: "/**" });
+  addRoute(router, "GET", "/files/**", { route: "/files/**" });
+  const compiledLookup = compileRouter(router, { normalize: true });
+  const compiledMatchAll = compileRouter(router, { normalize: true, matchAll: true });
+
+  it("normalizePath() drops excess .. segments", () => {
+    expect(normalizePath("/x/../../foo/bar")).toBe("/foo/bar");
+    expect(normalizePath("/../foo/bar")).toBe("/foo/bar");
+    expect(normalizePath("/x/../../../foo/bar")).toBe("/foo/bar");
+    expect(normalizePath("/..")).toBe("/");
+    expect(normalizePath("/../..")).toBe("/");
+    expect(normalizePath("/a/b/../c")).toBe("/a/c");
+  });
+
+  it("never captures a literal .. (findRoute/compiled parity)", () => {
+    for (const match of [
+      (p: string) => findRoute(router, "GET", p, { normalize: true }),
+      (p: string) => compiledLookup("GET", p),
+      (p: string) => findAllRoutes(router, "GET", p, { normalize: true }).at(-1),
+      (p: string) => compiledMatchAll("GET", p).at(-1),
+    ]) {
+      expect(match("/x/../../foo/bar")).toEqual({
+        data: { route: "/**" },
+        params: { _: "foo/bar" },
+      });
+      expect(match("/../foo/bar")).toEqual({
+        data: { route: "/**" },
+        params: { _: "foo/bar" },
+      });
+      expect(match("/../files/a")).toEqual({
+        data: { route: "/files/**" },
+        params: { _: "a" },
+      });
+    }
   });
 });
 
