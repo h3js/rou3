@@ -631,10 +631,10 @@ describe("wildcard tail extraction (compiled parity)", () => {
         data: { path: "PRE" },
         params: { x: "v", rest: "a/b" },
       });
-      expect(match("GET", "/segment")).toMatchObject({
-        data: { path: "SEGMENT" },
-        params: { "0": undefined },
-      });
+      // trailing bare `*` matches zero segments: the key is present, the value undefined
+      const segment = match("GET", "/segment");
+      expect(segment).toMatchObject({ data: { path: "SEGMENT" } });
+      expect(segment?.params).toHaveProperty("0", undefined);
     });
   }
 });

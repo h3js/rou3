@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, it } from "vitest";
-import type { InferRouteParams } from "../src/index.ts";
+import type { InferRouteParams, MatchedRoute } from "../src/index.ts";
 
 describe("types", () => {
   describe("infer route params", () => {
@@ -21,6 +21,8 @@ describe("types", () => {
       type Expected = { "0": string | undefined };
       expectTypeOf<Params>().toEqualTypeOf<Expected>();
       expectTypeOf<InferRouteParams<"/test/*/">>().toEqualTypeOf<Expected>();
+      // the generic (non-inferred) params type stays narrow
+      expectTypeOf<NonNullable<MatchedRoute["params"]>>().toEqualTypeOf<Record<string, string>>();
     });
 
     it("should infer multiple wildcard params", () => {

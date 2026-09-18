@@ -260,10 +260,7 @@ const ROUTER_KNOWN_DIFFS = new Set([
 
 type MatchStrategy = {
   name: string;
-  match: (
-    pattern: string,
-    input: string,
-  ) => { matched: boolean; params: Record<string, string | undefined> };
+  match: (pattern: string, input: string) => { matched: boolean; params: Record<string, string> };
   shouldSkip?: (pattern: string) => boolean;
 };
 

@@ -24,7 +24,7 @@ export interface Node<T = unknown> {
 
 export type MatchedRoute<T = unknown> = {
   data: T;
-  params?: Record<string, string | undefined>;
+  params?: Record<string, string>;
 };
 
 type ExtractWildcards<
