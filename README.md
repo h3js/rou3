@@ -116,6 +116,14 @@ The result ordering is a documented contract — see [Result ordering](#result-o
 > [!TIP]
 > If you need to register a pattern containing literal `:` or `*`, you can escape them with `\\`. For example, `/static\\:path/\\*\\*` matches only the static `/static:path/**` route.
 
+**Remove a route:**
+
+```js
+removeRoute(router, "GET", "/path/:name");
+```
+
+Removal is by registered pattern: it removes every entry that `addRoute` call created (including optional/group expansions and duplicate registrations) and leaves routes registered under other patterns alone, even ones that share a tree node (`/path/:id` vs `/path/:name`, `/path/**` vs `/path/**:rest`). Pass the pattern as it was registered — spellings the tree cannot tell apart (`/a/` vs `/a`, escaped statics, segments after a terminal `**`) are equivalent, but `/path/*` does not remove `/path/:name`.
+
 ## Route Patterns
 
 rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API)-compatible syntax.

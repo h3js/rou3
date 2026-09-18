@@ -18,11 +18,31 @@ export function addRoute<T>(
   if (path.charCodeAt(0) !== 47 /* '/' */) {
     path = `/${path}`;
   }
+  _add(ctx, method, path, data);
+}
 
+/**
+ * `route` is the registration identity `removeRoute` splices entries by. A
+ * pattern that expands (groups, `?`/`+`/`*` modifiers) stamps its
+ * *pre-expansion* text on every entry, so the `/admin` entry of `/admin/:page?`
+ * is never confused with a separately registered `/admin` on the same node. A
+ * plain pattern's identity is its rewritten segment join — the string the loop
+ * below builds anyway (and `ctx.static` is keyed by), so the hot path pays no
+ * extra pass, and spellings the tree cannot tell apart (`\)` vs `)`, `/a/` vs
+ * `/a`, segments after a terminal `**`) share one identity.
+ */
+function _add<T>(
+  ctx: RouterContext<T>,
+  method: string,
+  path: string,
+  data: T | undefined,
+  route?: string,
+): void {
   const groupExpanded = expandGroupDelimiters(path);
   if (groupExpanded) {
+    route ??= path;
     for (const expandedPath of groupExpanded) {
-      addRoute(ctx, method, expandedPath, data);
+      _add(ctx, method, expandedPath, data, route);
     }
     return;
   }
@@ -34,16 +54,14 @@ export function addRoute<T>(
   // Expand modifiers (:name?, :name+, :name*) into multiple route entries
   const expanded = expandModifiers(segments);
   if (expanded) {
+    route ??= path;
     for (const p of expanded) {
-      addRoute(ctx, method, p, data);
+      _add(ctx, method, p, data, route);
     }
     return;
   }
 
   let node = ctx.root;
-
-  // Identity for removeRoute: canonical segments, before static keys are rewritten.
-  const route = "/" + segments.join("/");
 
   let _unnamedParamIndex = 0;
 
@@ -61,6 +79,7 @@ export function addRoute<T>(
       }
       node = node.wildcard;
       paramsMap.push([-(i + 1), segment.split(":")[1] || "_", segment.length === 2 /* no id */]);
+      segments.length = i + 1; // terminal: trailing segments are not part of the identity
       break;
     }
 
@@ -101,17 +120,18 @@ export function addRoute<T>(
 
   // Assign index, params and data to the node
   const hasParams = paramsMap.length > 0;
+  const key = "/" + segments.join("/");
   const methods = (node.methods ??= new NullProtoObj());
   (methods[method] ??= []).push({
     data: data || (null as T),
     paramsRegexp,
     paramsMap: hasParams ? paramsMap : undefined,
-    route,
+    route: route ?? key,
   });
 
   // Static
   if (!hasParams) {
-    ctx.static["/" + segments.join("/")] = node;
+    ctx.static[key] = node;
   }
 }
 

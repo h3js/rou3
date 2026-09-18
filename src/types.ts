@@ -8,7 +8,12 @@ export type MethodData<T = unknown> = {
   data: T;
   paramsMap?: ParamsIndexMap;
   paramsRegexp: RegExp[];
-  /** Source pattern after addRoute normalization; used to splice one same-node sibling. */
+  /**
+   * Registration identity shared by every entry one `addRoute` call creates;
+   * `removeRoute` splices entries by it. Not the source pattern: a plain
+   * pattern stores its rewritten segment join, an expanding one its
+   * pre-expansion text (see `_add` in operations/add.ts).
+   */
   route: string;
 };
 

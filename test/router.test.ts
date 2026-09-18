@@ -751,8 +751,9 @@ describe("Router remove", function () {
 
     removeRoute(router, "GET", "choot");
     expect(findRoute(router, "GET", "choot")).to.deep.equal(undefined);
-    removeRoute(router, "GET", "choot/*");
+    removeRoute(router, "GET", "choot/:choo");
     expect(findRoute(router, "GET", "choot")).to.deep.equal(undefined);
+    expect(findRoute(router, "GET", "choot/x")).to.deep.equal(undefined);
 
     expect(findRoute(router, "GET", "/ui/components/snackbars")).to.deep.equal({
       data: { path: "/ui/components/**" },
@@ -991,6 +992,70 @@ describe("Router remove", function () {
     }
   });
 
+  it("removes only the registration that was asked for (#202)", function () {
+    // Identity is the *pre-expansion* pattern: `/admin/:page?` expands into an
+    // `/admin` entry that must not be confused with a separately registered
+    // `/admin` on the same node (main deleted both, a per-expansion identity
+    // deleted whichever came first).
+    for (const [keep, remove, keepPath] of [
+      ["/admin", "/admin/:page?", "/admin"],
+      ["/admin/:page?", "/admin", "/admin"],
+      ["/a/b", "/a{/b}?", "/a/b"],
+      ["/f/**:path", "/f/:path+", "/f/x/y"],
+      ["/a", "/a/:x*", "/a"],
+    ] as const) {
+      for (const order of [
+        [keep, remove],
+        [remove, keep],
+      ]) {
+        const router = createRouter(order);
+        removeRoute(router, "GET", remove);
+        const msg = `register ${order.join(", ")} / remove ${remove}`;
+        expect(findRoute(router, "GET", keepPath), msg).toMatchObject({ data: { path: keep } });
+        expect(compileRouter(router)("GET", keepPath), `compiled ${msg}`).toMatchObject({
+          data: { path: keep },
+        });
+        expect(formatTree(router.root), msg).toBe(formatTree(createRouter([keep]).root));
+      }
+    }
+  });
+
+  it("removes every duplicate registration of a pattern at once", function () {
+    const router = createRouter<{ path: string }>({});
+    addRoute(router, "GET", "/a/:id", { path: "1" });
+    addRoute(router, "GET", "/a/:id", { path: "2" });
+    addRoute(router, "GET", "/s", { path: "3" });
+    addRoute(router, "GET", "/s/", { path: "4" });
+    removeRoute(router, "GET", "/a/:id");
+    removeRoute(router, "GET", "/s");
+    expect(findRoute(router, "GET", "/a/x")).toBeUndefined();
+    expect(findRoute(router, "GET", "/s")).toBeUndefined();
+    expect(router.static["/s"]).toBeUndefined();
+    expect(formatTree(router.root)).toBe(formatTree(createRouter([]).root));
+  });
+
+  it("removes by tree identity: escaped statics and terminal wildcards", function () {
+    // The stored identity is keyed exactly like the tree, so spellings that
+    // register the same entry remove each other.
+    for (const [add, remove, path] of [
+      [String.raw`/a/\)`, "/a/)", "/a/)"],
+      ["/a/)", String.raw`/a/\)`, "/a/)"],
+      ["/a/**/b", "/a/**", "/a/x/y"],
+      ["/a/**", "/a/**/b", "/a/x/y"],
+      ["/a/**:rest/x", "/a/**:rest", "/a/x/y"],
+      ["/a/b/", "/a/b//", "/a/b"],
+    ] as const) {
+      const router = createRouter([add]);
+      expect(findRoute(router, "GET", path), `add ${add}`).toBeDefined();
+      removeRoute(router, "GET", remove);
+      expect(findRoute(router, "GET", path), `add ${add} / remove ${remove}`).toBeUndefined();
+      expect(formatTree(router.root), `add ${add} / remove ${remove}`).toBe(
+        formatTree(createRouter([]).root),
+      );
+      expect(Object.keys(router.static), `add ${add} / remove ${remove}`).toEqual([]);
+    }
+  });
+
   it("drops ctx.static when a static route has no methods left", function () {
     const router = createRouter(["/a/b", "/a/c"]);
     expect(router.static["/a/b"]).toBeDefined();
@@ -1023,6 +1088,11 @@ describe("Router remove", function () {
     const base = ["/a/b", "/a/:id", "/a/**"];
     const routes = [
       "/a/b/c",
+      // same-node siblings of `base` entries (spliced at index > 0)
+      "/a/:userId",
+      "/a/:n(\\d+)",
+      "/a/*",
+      "/a/**:rest",
       "/x/:id",
       "/x/:id(\\d+)",
       "/x/*",
