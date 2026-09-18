@@ -50,7 +50,14 @@ export function routeToRegExp(route: string = "/"): RegExp {
     // that can't be inlined. This is valid in modern JS engines (Node 22+,
     // Chrome 125+, Firefox 129+, Safari 17+) per TC39 proposal, but is not
     // portable to PCRE2 without PCRE2_DUPNAMES.
-    return new RegExp(`^(?:${sources.join("|")})$`);
+    try {
+      return new RegExp(`^(?:${sources.join("|")})$`);
+    } catch (error) {
+      throw new Error(
+        `Invalid route pattern "${route}": unterminated group or invalid regular expression: ${(error as Error).message}`,
+        { cause: error },
+      );
+    }
   }
 
   return _routeToRegExp(route);
@@ -127,7 +134,15 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
 }
 
 function _routeToRegExp(route: string): RegExp {
-  return new RegExp(`^/${routeToRegExpSegments(route).join("/")}/?$`);
+  const segments = routeToRegExpSegments(route);
+  try {
+    return new RegExp(`^/${segments.join("/")}/?$`);
+  } catch (error) {
+    throw new Error(
+      `Invalid route pattern "${route}": unterminated group or invalid regular expression: ${(error as Error).message}`,
+      { cause: error },
+    );
+  }
 }
 
 function routeToRegExpSegments(route: string): string[] {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { RouterContext } from "../src/types.ts";
 import { createRouter, formatTree } from "./_utils.ts";
-import { addRoute, findRoute, removeRoute } from "../src/index.ts";
+import { addRoute, findRoute, removeRoute, routeToRegExp } from "../src/index.ts";
 import { compileRouter } from "../src/compiler.ts";
 
 type TestRoute = {
@@ -993,5 +993,15 @@ describe("Router remove", function () {
       removeRoute(router, "GET", route);
       expect(formatTree(router.root), route).toBe(expected);
     }
+  });
+
+  it("throws a descriptive error when a route pattern has an unterminated parenthesis group", () => {
+    const router = createRouter([]);
+    expect(() => addRoute(router, "GET", "/files/(2024", { path: "/files/(2024" })).toThrowError(
+      /Invalid route pattern.*unterminated.*group/,
+    );
+    expect(() => routeToRegExp("/files/(2024")).toThrowError(
+      /Invalid route pattern.*unterminated.*group/,
+    );
   });
 });

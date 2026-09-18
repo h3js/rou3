@@ -56,8 +56,11 @@ describe("benchmark", () => {
     // ctx.static key and the compiled static dispatch each matching a different
     // set of paths. Lookup paths still use splitPath (one popped empty segment,
     // i.e. `/a//` reaches `/a` but `/a///` does not) — unchanged.
-    expect(bytes).toBeLessThanOrEqual(6640); // <6.64kb
-    expect(gzipSize).toBeLessThanOrEqual(2690); // <2.69kb
+    // +~130B raw / +~70B gzip: getParamRegexp and routeToRegExp catch
+    // unterminated group / syntax errors and throw descriptive Invalid route
+    // pattern errors (#199).
+    expect(bytes).toBeLessThanOrEqual(6800); // <6.80kb
+    expect(gzipSize).toBeLessThanOrEqual(2800); // <2.80kb
   });
 });
 
