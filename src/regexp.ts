@@ -34,8 +34,8 @@ const TRAILING_SLASH = "(?:(?<=/)/|(?<!/)/?)$";
  * but requiring `PCRE2_DUPNAMES` for strict PCRE2 engines).
  *
  * @example
- * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)(?:\/\/|(?<!\/)\/?)$/
- * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?(?:\/\/|(?<!\/)\/?)$/
+ * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)(?:(?<=\/)\/|(?<!\/)\/?)$/
+ * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?(?:(?<=\/)\/|(?<!\/)\/?)$/
  */
 export function routeToRegExp(route: string = "/"): RegExp {
   if (route.charCodeAt(0) !== 47 /* '/' */) {
@@ -232,8 +232,8 @@ function routeToRegExpSegments(route: string): [segments: string[], ownSeparator
       // The separator before a catch-all must stay anchored to the prefix: a
       // bare optional `/?` would let `/api/**` match `/apifoo`. `**` matches
       // zero or more segments (`/api` too), `**:name` one or more. A segment may
-      // be empty, so one-or-more is the separator plus `.*` (`/api///` reaches
-      // `/api/**:p` with `p: ""`; `/api//` is `/api` after trailing stripping).
+      // be empty, so one-or-more is the separator plus `.*` (`/api//` reaches
+      // `/api/**:p` with `p: ""`; `/api/` is `/api` after trailing stripping).
       if (segment !== "**") {
         reSegments.push(`(?<${toGroupName(segment.slice(3))}>.*)`);
       } else if (reSegments.length > 0) {

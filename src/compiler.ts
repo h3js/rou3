@@ -156,9 +156,9 @@ function compileStaticMatch(ctx: CompilerContext): string {
   for (const key in ctx.router.static) {
     const node = ctx.router.static[key];
     if (node?.methods) {
-      // Root "/" collapses to "" after the trailing-slash strip (mirrors the
-      // interpreter's `ctx.static` fast path, whose root key is "/")
-      entries.push([key.replace(/\/$/, ""), node]);
+      // Keys are already in the stripped lookup form (root is ""), mirroring
+      // the interpreter's `ctx.static` fast path
+      entries.push([key, node]);
     }
   }
 

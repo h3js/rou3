@@ -10,6 +10,12 @@ export interface RegExpCase {
 export const regexpCases: Record<string, RegExpCase> = {
   // Lookup ignores at most one trailing slash (#209). A second leaves a real
   // empty last segment, which only a param can take.
+  // Root: `//` is an empty segment, not root with a trailing slash (#209).
+  "/": {
+    regex: /^\/$/,
+    match: [["/"]],
+    noMatch: ["//", "///", "/a"],
+  },
   "/path": {
     regex: /^\/path(?:(?<=\/)\/|(?<!\/)\/?)$/,
     match: [["/path"], ["/path/"]],

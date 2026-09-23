@@ -32,7 +32,7 @@ const ROUTE_SPECIAL = new Set([
  * {@link routeToRegExp} back into a rou3 route pattern.
  *
  * @example
- * regExpToRoute(/^\/users\/(?<id>\d+)(?:\/\/|(?<!\/)\/?)$/); // "/users/:id(\\d+)"
+ * regExpToRoute(/^\/users\/(?<id>\d+)(?:(?<=\/)\/|(?<!\/)\/?)$/); // "/users/:id(\\d+)"
  * regExpToRoute(/^\/path\/(?<param>[^/]+)\/?$/); // "/path/:param"
  * regExpToRoute(/^\/path(?:\/(?<_>.*))?\/?$/); // "/path/**"
  */
