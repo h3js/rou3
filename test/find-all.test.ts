@@ -376,13 +376,19 @@ describe("matcher: root path parity", () => {
     expect(_findAllRoutes(router, "GET", "/a")).toEqual(["/*"]);
   });
 
-  it("collapses a trailing empty segment like splitPath (`//`, `/a//`)", () => {
-    // Required wildcards/params must not see the phantom segment `//` splits into.
-    expect(_findAllRoutes(createRouter(["/**:all"]), "GET", "//")).toEqual([]);
-    expect(_findAllRoutes(createRouter(["/:x"]), "GET", "//")).toEqual([]);
-    expect(_findAllRoutes(createRouter(["/a/**:x"]), "GET", "/a//")).toEqual([]);
-    // But a root static route matches `//` via the un-split fast path.
-    expect(_findAllRoutes(createRouter(["/"]), "GET", "//")).toEqual(["/"]);
+  it("ignores only one trailing slash (`/`, `//`, `/a/`, `/a//`) (#209)", () => {
+    // Required wildcards/params don't match an empty path...
+    expect(_findAllRoutes(createRouter(["/**:all"]), "GET", "/")).toEqual([]);
+    expect(_findAllRoutes(createRouter(["/:x"]), "GET", "/")).toEqual([]);
+    expect(_findAllRoutes(createRouter(["/a/**:x"]), "GET", "/a/")).toEqual([]);
+    // ...but the second slash of `//` ends a real empty segment they take.
+    expect(_findAllRoutes(createRouter(["/**:all"]), "GET", "//")).toEqual(["/**:all"]);
+    expect(_findAllRoutes(createRouter(["/:x"]), "GET", "//")).toEqual(["/:x"]);
+    expect(_findAllRoutes(createRouter(["/a/**:x"]), "GET", "/a//")).toEqual(["/a/**:x"]);
+    // Static routes, root included, don't match beyond one trailing slash.
+    expect(_findAllRoutes(createRouter(["/"]), "GET", "/")).toEqual(["/"]);
+    expect(_findAllRoutes(createRouter(["/"]), "GET", "//")).toEqual([]);
+    expect(_findAllRoutes(createRouter(["/a"]), "GET", "/a//")).toEqual([]);
   });
 });
 

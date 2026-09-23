@@ -441,7 +441,8 @@ describe("many static routes (compiled static-map parity)", () => {
       expect(match("GET", "/page9")).toMatchObject({ data: { path: "/page9" } });
       expect(match("GET", "/page9/")).toMatchObject({ data: { path: "/page9" } });
       expect(match("GET", "/")).toMatchObject({ data: { path: "ROOT" } });
-      expect(match("GET", "//")).toMatchObject({ data: { path: "ROOT" } });
+      expect(match("GET", "//")).toBeUndefined();
+      expect(match("GET", "/page9//")).toBeUndefined();
       expect(match("GET", "/nope")).toBeUndefined();
       // method-agnostic fallback + method miss falling through to the tree
       expect(match("DELETE", "/any")).toMatchObject({ data: { path: "ANY" } });
@@ -666,10 +667,10 @@ describe("wildcard tail extraction (compiled parity)", () => {
         data: { path: "FILES" },
         params: { path: "a/b" },
       });
-      // doubled trailing slash: one is stripped, one is a popped empty segment
+      // doubled trailing slash: one is stripped, the other ends a real empty segment
       expect(match("GET", "/files/a//")).toMatchObject({
         data: { path: "FILES" },
-        params: { path: "a" },
+        params: { path: "a/" },
       });
       // doubled internal slash is preserved in the tail
       expect(match("GET", "/files//a")).toMatchObject({
@@ -681,6 +682,7 @@ describe("wildcard tail extraction (compiled parity)", () => {
       expect(match("GET", "/files/")).toBeUndefined();
       // optional tail matches empty (with and without doubled slash)
       expect(match("GET", "/opt")).toMatchObject({ data: { path: "OPT" }, params: { _: "" } });
+      expect(match("GET", "/opt/")).toMatchObject({ data: { path: "OPT" }, params: { _: "" } });
       expect(match("GET", "/opt//")).toMatchObject({ data: { path: "OPT" }, params: { _: "" } });
       expect(match("GET", "/opt/a/b")).toMatchObject({
         data: { path: "OPT" },
@@ -699,15 +701,17 @@ describe("wildcard tail extraction (compiled parity)", () => {
   }
 });
 
-describe("static routes reached with a doubled trailing slash (compiled parity)", () => {
-  // "/w5//" strips one slash to "/w5/": the raw string misses an exact-match
-  // static dispatch, but its segments equal the static route's, so the
-  // interpreter tree matches — the compiled static dispatch must accept the
-  // trailing-slash form too. Exercise both codegen modes (chain and map).
+describe("at most one trailing slash is ignored (#209)", () => {
+  // Lookup strips exactly one trailing "/"; whatever remains is matched
+  // literally, so "/w5//" leaves a real empty last segment and misses the
+  // static route (it used to strip a second one). Exercise both static
+  // codegen modes (chain and map) plus the tree.
   for (const mode of ["chain", "map"] as const) {
     const router = createEmptyRouter<{ path: string }>();
     addRoute(router, "GET", "/w5", { path: "/w5" });
-    addRoute(router, "GET", "/:top", { path: "/:top" });
+    addRoute(router, "GET", "/users/:id", { path: "/users/:id" });
+    addRoute(router, "GET", "/opt/**", { path: "/opt/**" });
+    addRoute(router, "GET", "/", { path: "/" });
     if (mode === "map") {
       for (let i = 0; i < 10; i++) {
         addRoute(router, "GET", `/page${i}`, { path: `/page${i}` });
@@ -722,16 +726,23 @@ describe("static routes reached with a doubled trailing slash (compiled parity)"
     ];
 
     for (const { name, match } of lookups) {
-      it(`matches the static route for path//, not beyond (${mode}, ${name})`, () => {
-        expect(match("GET", "/w5//")).toMatchObject({ data: { path: "/w5" } });
+      it(`matches path/ but not path// (${mode}, ${name})`, () => {
+        expect(match("GET", "/w5")).toMatchObject({ data: { path: "/w5" } });
         expect(match("GET", "/w5/")).toMatchObject({ data: { path: "/w5" } });
-        // three slashes leave a real empty segment -> no match anywhere
-        expect(match("GET", "/w5///")).toBeUndefined();
+        expect(match("GET", "/w5//")).toBeUndefined();
+        expect(match("GET", "/")).toMatchObject({ data: { path: "/" } });
+        expect(match("GET", "//")).toBeUndefined();
+        expect(match("GET", "/users/123/")).toMatchObject({ params: { id: "123" } });
+        expect(match("GET", "/users/123//")).toBeUndefined();
+        // a slash after a real empty last segment is still the one ignored
+        expect(match("GET", "/users//")).toMatchObject({ params: { id: "" } });
+        expect(match("GET", "/users/")).toBeUndefined();
+        expect(match("GET", "/opt/a//")).toMatchObject({ params: { _: "a/" } });
       });
     }
 
     it(`matchAll agrees with findAllRoutes (${mode})`, () => {
-      for (const path of ["/w5//", "/w5/", "/w5", "/w5///"]) {
+      for (const path of ["/", "//", "/w5//", "/w5/", "/w5", "/users/1//", "/users//", "/opt//"]) {
         expect(compiledMatchAll("GET", path).map((mr) => mr.data.path)).toEqual(
           findAllRoutes(router, "GET", path).map((mr) => mr.data.path),
         );
@@ -752,8 +763,8 @@ describe("route patterns with trailing empty segments (#193)", () => {
     const compiledLookup = compileRouter(router);
     const compiledMatchAll = compileRouter(router, { matchAll: true });
 
-    it(`route "${route}" matches /a, /a/ and /a// in every matcher`, () => {
-      for (const path of ["/a", "/a/", "/a//"]) {
+    it(`route "${route}" matches /a and /a/ in every matcher`, () => {
+      for (const path of ["/a", "/a/"]) {
         expect(findRoute(router, "GET", path), `findRoute ${path}`).toMatchObject({
           data: { route },
         });
@@ -761,9 +772,13 @@ describe("route patterns with trailing empty segments (#193)", () => {
         expect(findAllRoutes(router, "GET", path).map((m) => m.data.route)).toEqual([route]);
         expect(compiledMatchAll("GET", path).map((m) => m.data.route)).toEqual([route]);
       }
-      // beyond the doubled slash a real empty segment remains -> no match
-      expect(findRoute(router, "GET", "/a///")).toBeUndefined();
-      expect(compiledLookup("GET", "/a///")).toBeUndefined();
+      // beyond one trailing slash a real empty segment remains -> no match (#209)
+      for (const path of ["/a//", "/a///"]) {
+        expect(findRoute(router, "GET", path), `findRoute ${path}`).toBeUndefined();
+        expect(compiledLookup("GET", path), `compiled ${path}`).toBeUndefined();
+        expect(findAllRoutes(router, "GET", path)).toEqual([]);
+        expect(compiledMatchAll("GET", path)).toEqual([]);
+      }
     });
 
     it(`route "${route}" is removable by its registered form`, () => {
