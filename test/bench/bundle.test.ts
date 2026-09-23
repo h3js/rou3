@@ -18,6 +18,9 @@ describe("benchmark", () => {
     // same-node siblings by specificity so it agrees with compiled matchAll
     // regardless of insertion order (#187). Previous bump was for #184.
     // regExpToRoute() is tree-shakeable, so it does not affect this budget.
+    // routeNodeKeys() likewise: it only reuses createRouter/addRoute (already in
+    // this bundle) and is dropped entirely when unimported — measured identical
+    // with and without its `src/index.ts` re-export.
     // +~15B: getParamRegexp() now escapes only literal dots *outside* (...) groups
     // so a `.` inside a regex constraint (`:id(\d+\.\d+)`) stays verbatim instead
     // of being double-escaped; gzip is unchanged (2383).
@@ -53,8 +56,14 @@ describe("benchmark", () => {
     // ctx.static key and the compiled static dispatch each matching a different
     // set of paths. Lookup paths still use splitPath (one popped empty segment,
     // i.e. `/a//` reaches `/a` but `/a///` does not) — unchanged.
-    expect(bytes).toBeLessThanOrEqual(6640); // <6.64kb
-    expect(gzipSize).toBeLessThanOrEqual(2690); // <2.69kb
+    // +~77B raw / +~41B gzip: addRoute stamps a registration identity on each
+    // MethodData (the rewritten segment join for plain patterns, the
+    // pre-expansion text for optional/group ones) so removeRoute can splice
+    // one same-node sibling without touching the others (#201, #202).
+    // +~90B raw / +~30B gzip: expandedRouteId() normalizes that pre-expansion
+    // text (trailing empties, escaped statics) so `/a/:x?/` removes `/a/:x?`.
+    expect(bytes).toBeLessThanOrEqual(6820); // <6.82kb
+    expect(gzipSize).toBeLessThanOrEqual(2760); // <2.76kb
   });
 });
 

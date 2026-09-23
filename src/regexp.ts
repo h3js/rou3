@@ -146,7 +146,17 @@ function routeToRegExpSegments(route: string): string[] {
     if (segment === "*") {
       reSegments.push(`(?<${toRegExpUnnamedKey(idCtr++)}>[^/]*)`);
     } else if (segment.startsWith("**")) {
-      reSegments.push(segment === "**" ? "?(?<_>.*)" : `?(?<${toGroupName(segment.slice(3))}>.+)`);
+      // The separator before a catch-all must stay anchored to the prefix: a
+      // bare optional `/?` would let `/api/**` match `/apifoo`. `**` matches
+      // zero or more segments (`/api` too), `**:name` one or more.
+      if (segment !== "**") {
+        reSegments.push(`(?<${toGroupName(segment.slice(3))}>.+)`);
+      } else if (reSegments.length > 0) {
+        reSegments.push(`${reSegments.pop()}(?:/(?<_>.*))?`);
+      } else {
+        reSegments.push("?(?<_>.*)");
+      }
+      break;
     } else if (
       segment.includes(":") ||
       /(^|[^\\])\(/.test(segment) ||
@@ -195,7 +205,9 @@ function routeToRegExpSegments(route: string): string[] {
             const repeated = `${pattern}(?:/${pattern})*`;
             reSegments.push(mod === "+" ? `?(?<${name}>${repeated})` : `?(?<${name}>${repeated})?`);
           } else {
-            reSegments.push(mod === "+" ? `?(?<${name}>.+)` : `?(?<${name}>.*)`);
+            // `+` needs at least one segment, so its separator is required (an
+            // optional one would let `/` match with the param captured as `/`).
+            reSegments.push(mod === "+" ? `(?<${name}>.+)` : `?(?<${name}>.*)`);
           }
         }
 

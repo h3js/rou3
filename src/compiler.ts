@@ -124,7 +124,7 @@ function compileRouteMatch(ctx: CompilerContext): string {
     : "";
 
   const normalizePathHelper = ctx.opts?.normalize
-    ? `if(p.includes("/.")){let _r=[];for(let _v of p.split("/")){if(_v===".")continue;_v===".."&&_r.length>1?_r.pop():_r.push(_v)}p=_r.join("/")||"/"}`
+    ? `if(p.includes("/.")){let _r=[];for(let _v of p.split("/")){if(_v===".")continue;if(_v==="..")_r.length>1&&_r.pop();else _r.push(_v)}p=_r.join("/")||"/"}`
     : "";
 
   // Trailing slash is stripped; root "/" collapses to "" (0 segments) so its
@@ -304,7 +304,7 @@ function compileFinalMatch(
     for (let i = 0; i < paramsMap.length; i++) {
       const map = paramsMap[i];
       if (typeof map[1] === "string") {
-        paramsCode += `${JSON.stringify(map[1])}:${params[i]},`;
+        paramsCode += `${propKey(map[1])}:${params[i]},`;
         continue;
       }
       // `params[i]` is the same `s[<idx>]` expression the regex condition must
@@ -320,12 +320,12 @@ function compileFinalMatch(
         conditions.push(`${regexp}.test(${params[i]})`);
       } else if (groups.whole) {
         conditions.push(`${regexp}.test(${params[i]})`);
-        paramsCode += `${JSON.stringify(fromGroupName(groups.names[0]))}:${params[i]},`;
+        paramsCode += `${propKey(fromGroupName(groups.names[0]))}:${params[i]},`;
       } else {
         const tmp = `_m${tmpCount++}`;
         conditions.push(`(${tmp}=${regexp}.exec(${params[i]}))!==null`);
         for (const name of groups.names) {
-          paramsCode += `${JSON.stringify(fromGroupName(name))}:${tmp}.groups.${name},`;
+          paramsCode += `${propKey(fromGroupName(name))}:${tmp}.groups.${name},`;
         }
       }
     }
@@ -402,9 +402,7 @@ function compileNode(
         if (jitMap) {
           jitMap[key] = i;
         } else {
-          // A literal `"__proto__":` property would (re)set the prototype —
-          // a computed key defines a plain own property instead.
-          mapCode += `${key === "__proto__" ? '["__proto__"]' : JSON.stringify(key)}:${i},`;
+          mapCode += `${propKey(key)}:${i},`;
         }
         cases += `case ${i}:{${match}}break;`;
       }
@@ -565,6 +563,14 @@ function pushDataSlot(ctx: CompilerContext, value: any): string {
 
 function dataRef(ctx: CompilerContext, index: number): string {
   return ctx.dataArray ? `$[${index}]` : `$${index}`;
+}
+
+// Object-literal property key. A literal `"__proto__":` property is the
+// prototype setter, not a data property (the param/segment would silently
+// vanish from the emitted object) — only that one name needs the computed
+// form, so every other key stays byte-identical to the plain `JSON.stringify`.
+function propKey(name: string): string {
+  return name === "__proto__" ? '["__proto__"]' : JSON.stringify(name);
 }
 
 // One param node can hold both required (`:id`, `:id(\d+)`) and optional

@@ -117,7 +117,7 @@ describe("routeToRegExp PCRE compatibility", () => {
 
   for (const tool of tools) {
     describe(tool.name, () => {
-      for (const [route, { match }] of Object.entries(regexpCases)) {
+      for (const [route, { match, noMatch = [] }] of Object.entries(regexpCases)) {
         const source = routeToRegExp(route).source;
         const isDuplicateName = PCRE2_DUPLICATE_NAME_ROUTES.has(route);
 
@@ -136,6 +136,12 @@ describe("routeToRegExp PCRE compatibility", () => {
               tool.match(source, input),
               `${tool.name} should match ${JSON.stringify(input)}`,
             ).toBe(true);
+          }
+          for (const input of noMatch) {
+            expect(
+              tool.match(source, input),
+              `${tool.name} should not match ${JSON.stringify(input)}`,
+            ).toBe(false);
           }
         });
       }

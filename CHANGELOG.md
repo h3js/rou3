@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.9.2
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.9.1...v0.9.2)
+
+### 🚀 Enhancements
+
+- Add routeNodeKeys() for radix-node identity ([454e856](https://github.com/h3js/rou3/commit/454e856))
+
+### 🩹 Fixes
+
+- Escape param names that are invalid capture group names ([5d3a3d1](https://github.com/h3js/rou3/commit/5d3a3d1))
+- Canonicalize empty segments in route patterns ([#195](https://github.com/h3js/rou3/pull/195))
+- **compiler:** Emit a computed key for a __proto__ route param ([d345121](https://github.com/h3js/rou3/commit/d345121))
+- **remove:** Key and classify segments exactly like addRoute ([204726a](https://github.com/h3js/rou3/commit/204726a))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+- Pi0x <x@pi0.io>
+
 ## v0.9.1
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.9.0...v0.9.1)

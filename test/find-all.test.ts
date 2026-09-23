@@ -243,6 +243,8 @@ describe("matcher: ordering contract", () => {
   // the subsumption order (broader scopes first). Merge/fold consumers
   // (take-last resolution) depend on this — an intentional change to the
   // traversal order is a breaking change, not an internal detail.
+  // The guarantee is scoped to patterns without optional syntax — see
+  // "matcher: ordering contract: optional-syntax carve-out" below.
   const chain = ["/**", "/api/**", "/api/:v/**", "/api/:v/users/**", "/api/:v/users/:id"];
 
   it("chain is strictly ordered by subsumption (compareRoutes)", () => {
@@ -258,6 +260,79 @@ describe("matcher: ordering contract", () => {
       const router = createRouter(routes);
       // `_findAllRoutes` also asserts compiled matchAll returns the same order.
       expect(_findAllRoutes(router, "GET", "/api/v1/users/42")).toEqual(chain);
+    }
+  });
+});
+
+describe("matcher: ordering contract: optional-syntax carve-out", () => {
+  // Pins the *known-divergent* half of the ordering contract, documented in
+  // README "Result ordering" (the "Carve-out — optional syntax" bullet).
+  // `findAllRoutes` orders tree entries (post-`expandModifiers`); `compareRoutes`
+  // compares whole patterns. A pattern with `:name?`/`:name*`/`{...}?` registers
+  // several entries, so a pattern-level superset can be ordered last. These
+  // assertions exist so the carve-out cannot silently drift — they are not a
+  // statement that the order is desirable.
+  // `_findAllRoutes` also asserts compiled matchAll returns the same order.
+
+  it("A1: byte-identical expansion — registration order decides", () => {
+    expect(compareRoutes("/admin/:page?", "/admin")).toBe("superset");
+    // `/admin/:page?` expands to `/admin` + `/admin/:page`; the matched entry is
+    // an equal-specificity sibling of the static `/admin`, so the tie is broken
+    // by insertion order and the two registration orders disagree.
+    const first = _findAllRoutes(createRouter(["/admin", "/admin/:page?"]), "GET", "/admin");
+    const second = _findAllRoutes(createRouter(["/admin/:page?", "/admin"]), "GET", "/admin");
+    expect(first).toEqual(["/admin", "/admin/:page?"]);
+    expect(second).toEqual(["/admin/:page?", "/admin"]);
+    expect(first).not.toEqual(second);
+  });
+
+  it("A1: `:id*` vs `:id+` and `{/b}?` vs the expanded route", () => {
+    expect(compareRoutes("/p/:id*", "/p/:id+")).toBe("superset");
+    expect(_findAllRoutes(createRouter(["/p/:id+", "/p/:id*"]), "GET", "/p/a")).toEqual([
+      "/p/:id+",
+      "/p/:id*",
+    ]);
+    expect(_findAllRoutes(createRouter(["/p/:id*", "/p/:id+"]), "GET", "/p/a")).toEqual([
+      "/p/:id*",
+      "/p/:id+",
+    ]);
+
+    expect(compareRoutes("/p/a{/b}?", "/p/a/b")).toBe("superset");
+    expect(_findAllRoutes(createRouter(["/p/a/b", "/p/a{/b}?"]), "GET", "/p/a/b")).toEqual([
+      "/p/a/b",
+      "/p/a{/b}?",
+    ]);
+    expect(_findAllRoutes(createRouter(["/p/a{/b}?", "/p/a/b"]), "GET", "/p/a/b")).toEqual([
+      "/p/a{/b}?",
+      "/p/a/b",
+    ]);
+  });
+
+  it("A2: same node, the superset's matched entry is narrower (both orders)", () => {
+    // `/api/*/:path*` matches `/api` (the dropped `:path*` leaves a bare `*`),
+    // `/api/*/**` does not — so the `superset` verdict is correct.
+    expect(compareRoutes("/api/*/:path*", "/api/*/**")).toBe("superset");
+    for (const routes of [
+      ["/api/*/:path*", "/api/*/**"],
+      ["/api/*/**", "/api/*/:path*"],
+    ]) {
+      expect(_findAllRoutes(createRouter(routes), "GET", "/api/v1/x")).toEqual([
+        "/api/*/**",
+        "/api/*/:path*",
+      ]);
+    }
+  });
+
+  it("A3: matched entries in different nodes, traversal order decides (both orders)", () => {
+    expect(compareRoutes("/p/:id/:id*", "/p/:id/*")).toBe("superset");
+    for (const routes of [
+      ["/p/:id/:id*", "/p/:id/*"],
+      ["/p/:id/*", "/p/:id/:id*"],
+    ]) {
+      expect(_findAllRoutes(createRouter(routes), "GET", "/p/a")).toEqual([
+        "/p/:id/*",
+        "/p/:id/:id*",
+      ]);
     }
   });
 });

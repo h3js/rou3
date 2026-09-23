@@ -9,6 +9,7 @@ import {
   routeToRegExp,
 } from "../src/index.ts";
 import { compileRouter, compileRouterToString } from "../src/compiler.ts";
+import { normalizePath } from "../src/operations/_utils.ts";
 import { format } from "oxfmt";
 
 describe("route matching", () => {
@@ -150,7 +151,7 @@ describe("route matching", () => {
 
   it("remove works", () => {
     removeRoute(router, "GET", "/test");
-    removeRoute(router, "GET", "/test/*");
+    removeRoute(router, "GET", "/test/:id");
     removeRoute(router, "GET", "/test/foo/*");
     removeRoute(router, "GET", "/test/foo/**");
     removeRoute(router, "GET", "/**");
@@ -351,6 +352,65 @@ describe("prototype-key lookups (compiled parity)", () => {
       });
     });
   }
+});
+
+describe("__proto__ param names (compiled parity)", () => {
+  // A `"__proto__":` property in an object literal is the prototype setter, not
+  // a data property — the compiled params literal must use a computed key or
+  // the param silently disappears from the compiled result (the interpreter
+  // builds params on a null-proto object and keeps it).
+  const router = createEmptyRouter<{ path: string }>();
+  addRoute(router, "GET", "/p/:__proto__", { path: "PARAM" });
+  addRoute(router, "GET", "/r/:__proto__(\\d+)", { path: "REGEX" });
+  addRoute(router, "GET", "/rp/x:__proto__(\\d+)y", { path: "REGEX-PARTIAL" });
+  addRoute(router, "GET", "/w/**:__proto__", { path: "WILDCARD" });
+  addRoute(router, "GET", "/o/:__proto__?", { path: "OPTIONAL" });
+  addRoute(router, "GET", "/u/*", { path: "UNNAMED" });
+  const compiledLookup = compileRouter(router);
+  const compiledMatchAll = compileRouter(router, { matchAll: true });
+  // eslint-disable-next-line no-new-func
+  const aotLookup = new Function(
+    `return ${compileRouterToString(router)}`,
+  )() as typeof compiledLookup;
+
+  const cases: [path: string, data: string, key: string, value: string][] = [
+    ["/p/EVIL", "PARAM", "__proto__", "EVIL"],
+    ["/r/42", "REGEX", "__proto__", "42"],
+    ["/rp/x42y", "REGEX-PARTIAL", "__proto__", "42"],
+    ["/w/a/b", "WILDCARD", "__proto__", "a/b"],
+    ["/o/EVIL", "OPTIONAL", "__proto__", "EVIL"],
+    ["/u/EVIL", "UNNAMED", "0", "EVIL"],
+  ];
+
+  const lookups = [
+    { name: "findRoute", match: (m: string, p: string) => findRoute(router, m, p) },
+    { name: "compiledLookup", match: (m: string, p: string) => compiledLookup(m, p) },
+    { name: "aotLookup", match: (m: string, p: string) => aotLookup(m, p) },
+  ];
+
+  for (const { name, match } of lookups) {
+    it(`keeps a "__proto__" param as an own property (${name})`, () => {
+      for (const [path, data, key, value] of cases) {
+        const matched = match("GET", path);
+        expect(matched?.data).toMatchObject({ path: data });
+        // A bare `toEqual` passes vacuously against a prototype-setter result
+        const params = matched!.params!;
+        expect(Object.keys(params)).toEqual([key]);
+        expect(Object.hasOwn(params, key)).toBe(true);
+        expect(params[key]).toBe(value);
+      }
+      // The optional form still matches without the param
+      expect(match("GET", "/o")).toMatchObject({ data: { path: "OPTIONAL" } });
+    });
+  }
+
+  it("matchAll agrees with findAllRoutes (__proto__ params)", () => {
+    for (const [path] of cases) {
+      expect(compiledMatchAll("GET", path).map((mr) => [mr.data.path, { ...mr.params }])).toEqual(
+        findAllRoutes(router, "GET", path).map((mr) => [mr.data.path, { ...mr.params }]),
+      );
+    }
+  });
 });
 
 describe("many static routes (compiled static-map parity)", () => {
@@ -732,6 +792,48 @@ describe("routes with an empty middle segment", () => {
     }
     expect(routeToRegExp("/a//b").test("/a//b")).toBe(true);
     expect(routeToRegExp("/a//b").test("/a/b")).toBe(false);
+  });
+});
+
+describe("path normalization above the root (normalize: true)", () => {
+  // A ".." that would climb above "/" is a no-op (like path.posix.normalize),
+  // never a literal ".." segment. It used to leak one when the path was
+  // already unwound to the root, so a "/**" route captured "../foo/bar".
+  const router = createEmptyRouter<{ route: string }>();
+  addRoute(router, "GET", "/**", { route: "/**" });
+  addRoute(router, "GET", "/files/**", { route: "/files/**" });
+  const compiledLookup = compileRouter(router, { normalize: true });
+  const compiledMatchAll = compileRouter(router, { normalize: true, matchAll: true });
+
+  it("normalizePath() drops excess .. segments", () => {
+    expect(normalizePath("/x/../../foo/bar")).toBe("/foo/bar");
+    expect(normalizePath("/../foo/bar")).toBe("/foo/bar");
+    expect(normalizePath("/x/../../../foo/bar")).toBe("/foo/bar");
+    expect(normalizePath("/..")).toBe("/");
+    expect(normalizePath("/../..")).toBe("/");
+    expect(normalizePath("/a/b/../c")).toBe("/a/c");
+  });
+
+  it("never captures a literal .. (findRoute/compiled parity)", () => {
+    for (const match of [
+      (p: string) => findRoute(router, "GET", p, { normalize: true }),
+      (p: string) => compiledLookup("GET", p),
+      (p: string) => findAllRoutes(router, "GET", p, { normalize: true }).at(-1),
+      (p: string) => compiledMatchAll("GET", p).at(-1),
+    ]) {
+      expect(match("/x/../../foo/bar")).toEqual({
+        data: { route: "/**" },
+        params: { _: "foo/bar" },
+      });
+      expect(match("/../foo/bar")).toEqual({
+        data: { route: "/**" },
+        params: { _: "foo/bar" },
+      });
+      expect(match("/../files/a")).toEqual({
+        data: { route: "/files/**" },
+        params: { _: "a" },
+      });
+    }
   });
 });
 

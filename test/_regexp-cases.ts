@@ -3,6 +3,8 @@
 export interface RegExpCase {
   regex: RegExp;
   match: ReadonlyArray<readonly [string, Record<string, string>?]>;
+  /** Paths neither the router nor the regex may match. */
+  noMatch?: ReadonlyArray<string>;
 }
 
 export const regexpCases: Record<string, RegExpCase> = {
@@ -52,15 +54,30 @@ export const regexpCases: Record<string, RegExpCase> = {
     match: [["/path/file-a-b.png", { "0": "a", "1": "b" }]],
   },
   "/path/**": {
-    regex: /^\/path\/?(?<_>.*)\/?$/,
+    regex: /^\/path(?:\/(?<_>.*))?\/?$/,
     match: [
       ["/path/", { _: "" }],
-      ["/path", { _: "" }],
+      // The whole catch-all group is skipped, so the regex leaves `_` unset
+      // while the router reports `""`.
+      ["/path"],
       ["/path/anything/more", { _: "anything/more" }],
+    ],
+    noMatch: ["/pathfoo", "/pathfoo/bar"],
+  },
+  "/path/**/suffix": {
+    regex: /^\/path(?:\/(?<_>.*))?\/?$/,
+    match: [
+      ["/path/anything/more", { _: "anything/more" }],
+      ["/path/suffix", { _: "suffix" }],
     ],
   },
   "/base/**:path": {
-    regex: /^\/base\/?(?<path>.+)\/?$/,
+    regex: /^\/base\/(?<path>.+)\/?$/,
+    match: [["/base/anything/more", { path: "anything/more" }]],
+    noMatch: ["/base", "/base/", "/basefoo", "/basefoo/bar"],
+  },
+  "/base/**:path/suffix": {
+    regex: /^\/base\/(?<path>.+)\/?$/,
     match: [["/base/anything/more", { path: "anything/more" }]],
   },
   "/static%3Apath/\\*/\\*\\*": {
@@ -74,6 +91,19 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/anything", { _: "anything" }],
       ["/any/deep/path", { _: "any/deep/path" }],
     ],
+  },
+  "/**:path": {
+    regex: /^\/(?<path>.+)\/?$/,
+    match: [
+      ["/anything", { path: "anything" }],
+      ["/any/deep/path", { path: "any/deep/path" }],
+    ],
+    noMatch: ["/"],
+  },
+  "/:path+": {
+    regex: /^\/(?<path>.+)\/?$/,
+    match: [["/a/b", { path: "a/b" }]],
+    noMatch: ["/"],
   },
   "/path/:id(\\d+)": {
     regex: /^\/path\/(?<id>\d+)\/?$/,
@@ -163,8 +193,9 @@ export const regexpCases: Record<string, RegExpCase> = {
     match: [["/api/abc", { "test-id": "abc" }], ["/api"]],
   },
   "/api/**:test-id": {
-    regex: /^\/api\/?(?<__rou3_esc_test_hid>.+)\/?$/,
+    regex: /^\/api\/(?<__rou3_esc_test_hid>.+)\/?$/,
     match: [["/api/a/b", { "test-id": "a/b" }]],
+    noMatch: ["/api", "/api/", "/apifoo"],
   },
   "/files/:file-name.json": {
     regex: /^\/files\/(?<__rou3_esc_file_hname>[^/]+)\.json\/?$/,

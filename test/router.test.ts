@@ -751,8 +751,9 @@ describe("Router remove", function () {
 
     removeRoute(router, "GET", "choot");
     expect(findRoute(router, "GET", "choot")).to.deep.equal(undefined);
-    removeRoute(router, "GET", "choot/*");
+    removeRoute(router, "GET", "choot/:choo");
     expect(findRoute(router, "GET", "choot")).to.deep.equal(undefined);
+    expect(findRoute(router, "GET", "choot/x")).to.deep.equal(undefined);
 
     expect(findRoute(router, "GET", "/ui/components/snackbars")).to.deep.equal({
       data: { path: "/ui/components/**" },
@@ -792,9 +793,8 @@ describe("Router remove", function () {
       },
     });
 
-    // TODO
-    // removeRoute(router, "GET", "/placeholder/:choo");
-    // expect(findRoute(router,"/placeholder/route")).to.deep.equal(undefined);
+    removeRoute(router, "GET", "/placeholder/:choo");
+    expect(findRoute(router, "GET", "/placeholder/route")).to.deep.equal(undefined);
 
     expect(findRoute(router, "GET", "/placeholder/route/route2")).to.deep.equal({
       data: { path: "/placeholder/:choo/:choo2" },
@@ -891,5 +891,237 @@ describe("Router remove", function () {
 
     expect(findRoute(router, "GET", "/files/a/b/c")).toBeUndefined();
     expect(findRoute(router, "GET", "/files")).toBeUndefined();
+  });
+
+  // `addRoute` maps an escaped literal segment to a *static* node key
+  // (`\*` -> `*`, `\*\*` -> `**`, `\uFFFD` placeholders -> `:(){}`); `removeRoute`
+  // has to key it identically or it walks to a nonexistent node and silently
+  // removes nothing. Both now go through `segmentKey()` in `operations/_utils`.
+  describe("remove escaped literal segments", () => {
+    for (const [route, path] of [
+      [String.raw`/a/\*`, "/a/*"],
+      [String.raw`/a/\*\*`, "/a/**"],
+      [String.raw`/\:a/\*`, "/:a/*"],
+      [String.raw`/static\:path/\*\*`, "/static:path/**"],
+      [String.raw`/a/\(x\)`, "/a/(x)"],
+      [String.raw`/a/\{x\}`, "/a/{x}"],
+    ] as const) {
+      it(`${route} (matches ${path})`, function () {
+        const router = createRouter([route]);
+        expect(findRoute(router, "GET", path)).toMatchObject({ data: { path: route } });
+
+        removeRoute(router, "GET", route);
+
+        expect(findRoute(router, "GET", path)).toBeUndefined();
+        expect(formatTree(router.root)).toBe("<root>");
+      });
+    }
+  });
+
+  it("remove routes with segments after a wildcard", function () {
+    // `addRoute` stops at `**`, so `/a/**/b` *is* `/a/**` — removal must stop
+    // there too instead of walking on into a nonexistent `/b` static child.
+    const route = "/a/**/b";
+    const router = createRouter([route]);
+
+    expect(findRoute(router, "GET", "/a/x/y")).toMatchObject({ data: { path: route } });
+
+    removeRoute(router, "GET", route);
+
+    expect(findRoute(router, "GET", "/a/x/y")).toBeUndefined();
+    expect(formatTree(router.root)).toBe("<root>");
+  });
+
+  it("normalizes method and path like addRoute", function () {
+    const router = createRouter<{ path: string }>({});
+    addRoute(router, "get", "a/b", { path: "/a/b" });
+    addRoute(router, "GET", "/b", { path: "/b" });
+
+    // Lower-case method: `addRoute` upper-cases, so removal must too
+    removeRoute(router, "get", "/a/b");
+    expect(findRoute(router, "GET", "/a/b")).toBeUndefined();
+
+    // Missing leading slash used to shift every segment left, removing `/b`
+    expect(findRoute(router, "GET", "/b")).toMatchObject({ data: { path: "/b" } });
+  });
+
+  it("removing a route does not remove a distinct route that shares a node", function () {
+    // Escaped literals live on a *static* node, the unescaped forms on the
+    // param/wildcard node of the same parent: removing one must not touch the
+    // other (in either order).
+    for (const [remove, keep] of [
+      [String.raw`/a/\*`, "/a/*"],
+      ["/a/*", String.raw`/a/\*`],
+      [String.raw`/a/\*\*`, "/a/**"],
+      ["/a/**", String.raw`/a/\*\*`],
+      [String.raw`/a/\:x`, "/a/:x"],
+      ["/a/:x", String.raw`/a/\:x`],
+    ] as const) {
+      const router = createRouter([remove, keep]);
+      removeRoute(router, "GET", remove);
+      // Same tree as if `remove` had never been added
+      expect(formatTree(router.root), `remove ${remove} / keep ${keep}`).toBe(
+        formatTree(createRouter([keep]).root),
+      );
+    }
+  });
+
+  it("removing one same-node sibling leaves the others", function () {
+    // Same-node siblings share methods[method] (param names / wildcard names /
+    // regex constraints). Removal used to `delete` the whole bucket.
+    for (const [remove, keep, keepPath] of [
+      ["/a/:id", "/a/:userId", "/a/x"],
+      ["/a/**", "/a/**:rest", "/a/x"],
+      ["/a/:id", "/a/:n(\\d+)", "/a/1"],
+      ["/a/*", "/a/:id", "/a/x"],
+    ] as const) {
+      const router = createRouter([remove, keep]);
+      removeRoute(router, "GET", remove);
+      expect(findRoute(router, "GET", keepPath), `remove ${remove} / keep ${keep}`).toMatchObject({
+        data: { path: keep },
+      });
+      expect(
+        compileRouter(router)("GET", keepPath),
+        `compiled remove ${remove} / keep ${keep}`,
+      ).toMatchObject({
+        data: { path: keep },
+      });
+      expect(formatTree(router.root), `remove ${remove} / keep ${keep}`).toBe(
+        formatTree(createRouter([keep]).root),
+      );
+    }
+  });
+
+  it("removes only the registration that was asked for (#202)", function () {
+    // Identity is the *pre-expansion* pattern: `/admin/:page?` expands into an
+    // `/admin` entry that must not be confused with a separately registered
+    // `/admin` on the same node (main deleted both, a per-expansion identity
+    // deleted whichever came first).
+    for (const [keep, remove, keepPath] of [
+      ["/admin", "/admin/:page?", "/admin"],
+      ["/admin/:page?", "/admin", "/admin"],
+      ["/a/b", "/a{/b}?", "/a/b"],
+      ["/f/**:path", "/f/:path+", "/f/x/y"],
+      ["/a", "/a/:x*", "/a"],
+    ] as const) {
+      for (const order of [
+        [keep, remove],
+        [remove, keep],
+      ]) {
+        const router = createRouter(order);
+        removeRoute(router, "GET", remove);
+        const msg = `register ${order.join(", ")} / remove ${remove}`;
+        expect(findRoute(router, "GET", keepPath), msg).toMatchObject({ data: { path: keep } });
+        expect(compileRouter(router)("GET", keepPath), `compiled ${msg}`).toMatchObject({
+          data: { path: keep },
+        });
+        expect(formatTree(router.root), msg).toBe(formatTree(createRouter([keep]).root));
+      }
+    }
+  });
+
+  it("removes every duplicate registration of a pattern at once", function () {
+    const router = createRouter<{ path: string }>({});
+    addRoute(router, "GET", "/a/:id", { path: "1" });
+    addRoute(router, "GET", "/a/:id", { path: "2" });
+    addRoute(router, "GET", "/s", { path: "3" });
+    addRoute(router, "GET", "/s/", { path: "4" });
+    removeRoute(router, "GET", "/a/:id");
+    removeRoute(router, "GET", "/s");
+    expect(findRoute(router, "GET", "/a/x")).toBeUndefined();
+    expect(findRoute(router, "GET", "/s")).toBeUndefined();
+    expect(router.static["/s"]).toBeUndefined();
+    expect(formatTree(router.root)).toBe(formatTree(createRouter([]).root));
+  });
+
+  it("removes by tree identity: escaped statics and terminal wildcards", function () {
+    // The stored identity is keyed exactly like the tree, so spellings that
+    // register the same entry remove each other — including patterns that
+    // expand (optional/group syntax), whose identity is normalized the same way.
+    for (const [add, remove, path] of [
+      [String.raw`/a/\)`, "/a/)", "/a/)"],
+      ["/a/)", String.raw`/a/\)`, "/a/)"],
+      ["/a/**/b", "/a/**", "/a/x/y"],
+      ["/a/**", "/a/**/b", "/a/x/y"],
+      ["/a/**:rest/x", "/a/**:rest", "/a/x/y"],
+      ["/a/b/", "/a/b//", "/a/b"],
+      ["/admin/:page?/", "/admin/:page?", "/admin/x"],
+      ["/admin/:page?", "/admin/:page?/", "/admin/x"],
+      [String.raw`/a/\)/:x?`, "/a/)/:x?", "/a/)/y"],
+      ["/a/)/:x?", String.raw`/a/\)/:x?`, "/a/)/y"],
+      ["/a{/b}?/", "/a{/b}?", "/a/b"],
+      ["/a{/b}?", "/a{/b}?//", "/a/b"],
+    ] as const) {
+      const router = createRouter([add]);
+      expect(findRoute(router, "GET", path), `add ${add}`).toBeDefined();
+      removeRoute(router, "GET", remove);
+      expect(findRoute(router, "GET", path), `add ${add} / remove ${remove}`).toBeUndefined();
+      expect(formatTree(router.root), `add ${add} / remove ${remove}`).toBe(
+        formatTree(createRouter([]).root),
+      );
+      expect(Object.keys(router.static), `add ${add} / remove ${remove}`).toEqual([]);
+    }
+  });
+
+  it("drops ctx.static when a static route has no methods left", function () {
+    const router = createRouter(["/a/b", "/a/c"]);
+    expect(router.static["/a/b"]).toBeDefined();
+    expect(router.static["/a/c"]).toBeDefined();
+
+    removeRoute(router, "GET", "/a/b");
+
+    expect(router.static["/a/b"]).toBeUndefined();
+    expect(router.static["/a/c"]).toBeDefined();
+    expect(findRoute(router, "GET", "/a/c")).toMatchObject({ data: { path: "/a/c" } });
+  });
+
+  it("keeps ctx.static while another method remains on the same path", function () {
+    const router = createRouter<{ path: string }>({});
+    addRoute(router, "GET", "/a/b", { path: "get" });
+    addRoute(router, "POST", "/a/b", { path: "post" });
+
+    removeRoute(router, "GET", "/a/b");
+
+    expect(router.static["/a/b"]).toBeDefined();
+    expect(findRoute(router, "POST", "/a/b")).toMatchObject({ data: { path: "post" } });
+
+    removeRoute(router, "POST", "/a/b");
+
+    expect(router.static["/a/b"]).toBeUndefined();
+    expect(findRoute(router, "POST", "/a/b")).toBeUndefined();
+  });
+
+  it("add -> remove restores the original tree", function () {
+    const base = ["/a/b", "/a/:id", "/a/**"];
+    const routes = [
+      "/a/b/c",
+      // same-node siblings of `base` entries (spliced at index > 0)
+      "/a/:userId",
+      "/a/:n(\\d+)",
+      "/a/*",
+      "/a/**:rest",
+      "/x/:id",
+      "/x/:id(\\d+)",
+      "/x/*",
+      "/x/*.png",
+      "/x/pre-:id-suf",
+      "/x/**",
+      "/x/**:rest",
+      String.raw`/x/\*`,
+      String.raw`/x/\*\*`,
+      String.raw`/x/\:id`,
+      "/x{/y}?",
+      "/x/:opt?",
+      "/x/:many*",
+      "/x/:some+",
+      "/x/y/",
+      "/x/y//",
+    ];
+    const expected = formatTree(createRouter(base).root);
+    for (const route of routes) {
+      const router = createRouter([...base, route]);
+      removeRoute(router, "GET", route);
+      expect(formatTree(router.root), route).toBe(expected);
+    }
   });
 });

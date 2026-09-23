@@ -1,4 +1,5 @@
 import { fromGroupName } from "../_group-names.ts";
+import { hasSegmentWildcard } from "../_segment-wildcards.ts";
 import { NullProtoObj } from "../object.ts";
 import type { MatchedRoute, ParamsIndexMap } from "../types.ts";
 
@@ -7,7 +8,32 @@ export function encodeEscapes(path: string): string {
   return path.replace(/\\([:(){}])/g, (_, c) => "\uFFFD" + "ABCDE"[":(){}".indexOf(c)]);
 }
 
-export function decodeEscaped(segment: string): string {
+/**
+ * Where a route-pattern segment goes in the tree, exactly as `addRoute` inserts
+ * it: `2` = `node.wildcard`, `1` = `node.param`, otherwise the returned string
+ * is the `node.static` key — an escaped `\*` / `\*\*` is the literal `*` / `**`
+ * (the escape is what keeps it out of the wildcard/param branches), and
+ * `\uFFFD` placeholders decode back to `:(){}`.
+ *
+ * Shared by `addRoute` and `removeRoute`: the two must classify *and* key
+ * segments identically, otherwise removal walks to a different — usually
+ * nonexistent — node and silently does nothing.
+ *
+ * A wildcard is **terminal**: `addRoute` stops at `**`, so any segments after
+ * it are not part of the tree path.
+ */
+export function segmentKey(segment: string): string | 1 | 2 {
+  if (segment.startsWith("**")) return 2;
+  if (
+    segment === "*" ||
+    segment.includes(":") ||
+    segment.includes("(") ||
+    hasSegmentWildcard(segment)
+  ) {
+    return 1;
+  }
+  if (segment === "\\*") return "*";
+  if (segment === "\\*\\*") return "**";
   if (!segment.includes("\uFFFD")) return segment;
   return segment.replace(/\uFFFD([A-E])/g, (_, c) =>
     // eslint-disable-next-line unicorn/no-nested-ternary
@@ -38,8 +64,10 @@ export function normalizePath(path: string): string {
   const r: string[] = [];
   for (const s of path.split("/")) {
     if (s === ".") continue;
-    else if (s === ".." && r.length > 1) r.pop();
-    else r.push(s);
+    // r[0] is the leading "" — a ".." at the root is a no-op, never a literal
+    else if (s === "..") {
+      if (r.length > 1) r.pop();
+    } else r.push(s);
   }
   return r.join("/") || "/";
 }
@@ -56,6 +84,25 @@ export function splitRoute(path: string): string[] {
   const s = splitPath(path);
   while (s[s.length - 1] === "") s.pop();
   return s;
+}
+
+/**
+ * Registration identity of a pattern that expands (groups, `?`/`+`/`*`
+ * modifiers), shared by `addRoute` and `removeRoute`: its pre-expansion text
+ * with trailing empties dropped and static segments keyed like the tree, so
+ * spellings the tree cannot tell apart (`/a/:x?/` vs `/a/:x?`, `\)` vs `)`)
+ * share one identity.
+ */
+export function expandedRouteId(path: string): string {
+  return (
+    "/" +
+    splitRoute(encodeEscapes(path))
+      .map((segment) => {
+        const key = segmentKey(segment);
+        return typeof key === "string" ? key : segment;
+      })
+      .join("/")
+  );
 }
 
 export function getMatchParams(

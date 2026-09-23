@@ -1,7 +1,14 @@
 import { describe, expectTypeOf, it } from "vitest";
+import { routeNodeKeys } from "../src/index.ts";
 import type { InferRouteParams, MatchedRoute } from "../src/index.ts";
 
 describe("types", () => {
+  describe("routeNodeKeys", () => {
+    it("returns a string array", () => {
+      expectTypeOf(routeNodeKeys("/a")).toEqualTypeOf<string[]>();
+    });
+  });
+
   describe("infer route params", () => {
     it("should infer params from path", () => {
       type Params = InferRouteParams<"/test/:id/:name">;
