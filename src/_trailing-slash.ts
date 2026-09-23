@@ -44,48 +44,45 @@ export function withTrailingSlash(body: string): string {
   while (end > 0 && /^\(\?:\/.*\)\?$/s.test(tokens[end - 1])) {
     end--;
   }
-  const optionals = tokens.slice(end);
-
-  // Last segment of what precedes them.
-  let sep = end - 1;
-  while (sep >= 0 && tokens[sep] !== "/") {
-    sep--;
+  // The last segment before them (none if the body is only optionals), then
+  // each optional's inner regex. Only the last of these may match empty.
+  const sep = tokens.slice(0, end).lastIndexOf("/");
+  const parts = [
+    end > 0 ? tokens.slice(sep + 1, end).join("") : "x",
+    ...tokens.slice(end).map((group) => group.slice(4, -2)),
+  ];
+  const last = parts.length - 1;
+  // An inline group can span segments (`{/bar/:id}?`): only its last one can
+  // leave the match ending in `/`, and stripping that `/` is then no match.
+  const tail = tokenize(parts[last]);
+  const multi = tail.lastIndexOf("/") + 1;
+  parts[last] = tail.slice(multi).join("");
+  const empty = parts.findIndex((part) => canBeEmpty(part));
+  if (empty < 0) {
+    return `${body}/?$`;
   }
-  // A body of only optional groups (`/:x?`, `/*`) has no segment before them.
-  if (sep < 0 && end > 0) {
+  if (empty < last || multi > 0) {
     return body + LOOKBEHIND_SUFFIX;
   }
-  const head = tokens.slice(0, sep + 1).join("");
-  const segment = end > 0 ? tokens.slice(sep + 1, end).join("") : "x";
 
-  if (optionals.length === 0) {
-    if (!canBeEmpty(segment)) {
-      return `${body}/?$`;
+  if (last === 0) {
+    const param = /^\(\?<(\w+)>(\[\^\/\]\*|\.\*)\)$/.exec(parts[0]);
+    if (!param) {
+      return body + LOOKBEHIND_SUFFIX;
     }
-    const param = /^\(\?<(\w+)>(\[\^\/\]\*|\.\*)\)$/.exec(segment);
-    if (param) {
-      return param[2] === ".*"
-        ? `${head}(?:/|(?<${param[1]}>.+?)/?)$`
-        : `${head}(?:(?<${param[1]}>[^/]+)/?|/)$`;
-    }
-    return body + LOOKBEHIND_SUFFIX;
+    const head = tokens.slice(0, sep + 1).join("");
+    return param[2] === ".*"
+      ? `${head}(?:/|(?<${param[1]}>.+?)/?)$`
+      : `${head}(?:(?<${param[1]}>[^/]+)/?|/)$`;
   }
 
   // Every match ending in `/` then ends in the last group, taken empty, and is
   // still a match without it, so `/?$` is exact. Captures need that group
   // lazy, which only works when no earlier one can be empty (it would shift
   // values into later groups: `/*/:y?` capturing `y` instead of `0`).
-  const inners = optionals.map((group) => group.slice(4, -2));
-  const last = inners.length - 1;
-  if (canBeEmpty(segment) || inners.slice(0, last).some((inner) => canBeEmpty(inner))) {
-    return body + LOOKBEHIND_SUFFIX;
-  }
-  if (!canBeEmpty(inners[last])) {
-    return `${body}/?$`;
-  }
   // `.*` must not swallow the stripped slash. The router reports `**` as `""`
   // on `/a/` (group taken), every other optional as unset (group skipped).
-  const inner = inners[last].replace(/^(\(\?<\w+>\.\*)\)$/, "$1?)");
+  const inner = parts[last].replace(/^(\(\?<\w+>\.\*)\)$/, "$1?)");
   const lazy = inner.startsWith("(?<_>") ? "" : "?";
   return `${tokens.slice(0, -1).join("")}(?:/${inner})?${lazy}/?$`;
 }
@@ -105,46 +102,12 @@ function canBeEmpty(fragment: string): boolean {
  */
 function tokenize(body: string): string[] {
   const tokens: string[] = [];
-  let i = 0;
-  while (i < body.length) {
-    const start = i;
-    const c = body[i];
-    if (c === "\\") {
-      i += 2;
-    } else if (c === "[") {
-      i = classEnd(body, i);
-    } else if (c === "(") {
-      let depth = 0;
-      while (i < body.length) {
-        const d = body[i];
-        if (d === "\\") {
-          i += 2;
-          continue;
-        }
-        if (d === "[") {
-          i = classEnd(body, i);
-          continue;
-        }
-        i++;
-        if (d === "(") depth++;
-        else if (d === ")" && --depth === 0) break;
-      }
-      if (/[?*+]/.test(body[i] || "")) i++;
-    } else {
-      i++;
-    }
-    tokens.push(body.slice(start, i));
+  let depth = 0;
+  for (const atom of body.match(/\\[^]|\[\^?\]?(?:\\[^]|[^\\\]])*\]?|\)[?*+]?|[^]/g) || []) {
+    if (depth === 0) tokens.push("");
+    tokens[tokens.length - 1] += atom;
+    if (atom === "(") depth++;
+    else if (atom[0] === ")" && depth > 0) depth--;
   }
   return tokens;
-}
-
-/** Index just past the `]` closing the class that opens at `start`. */
-function classEnd(body: string, start: number): number {
-  let i = start + 1;
-  if (body[i] === "^") i++;
-  if (body[i] === "]") i++;
-  while (i < body.length && body[i] !== "]") {
-    i += body[i] === "\\" ? 2 : 1;
-  }
-  return i + 1;
 }

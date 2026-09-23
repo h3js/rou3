@@ -341,6 +341,13 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/path", "/path/", "/path/1/t//"],
   },
+  // An optional group spanning segments whose last one can be empty: `/path/sub/`
+  // must not match (it strips to `/path/sub`, which is neither branch).
+  "/path{/sub/:id}?": {
+    regex: /^\/path(?:\/sub\/(?<id>[^/]*))?(?:(?<=\/)\/|(?<!\/)\/?)$/,
+    match: [["/path"], ["/path/"], ["/path/sub/1", { id: "1" }], ["/path/sub//", { id: "" }]],
+    noMatch: ["/path/sub", "/path/sub/"],
+  },
   // A constraint that can match empty has no non-empty form to branch on.
   "/path/:id(\\d*)": {
     regex: /^\/path\/(?<id>\d*)(?:(?<=\/)\/|(?<!\/)\/?)$/,
@@ -364,6 +371,7 @@ export const regexpCases: Record<string, RegExpCase> = {
 export const LOOKBEHIND_ROUTES: ReadonlySet<string> = new Set([
   "/path/:id/:tab?",
   "/path/:id(\\d*)",
+  "/path{/sub/:id}?",
 ]);
 
 // Routes whose generated regex reuses the same named capture group across
@@ -411,6 +419,8 @@ export function sweepPatterns(): string[] {
     "/a/b{s}?",
     "/a/:x+/b{/c}?",
     "/{en}?/:page?",
+    // An optional group spanning segments ends in an empty-capable one.
+    "/a{/b/:x}?",
     ...Object.keys(regexpCases),
   ]);
   for (const u of units) {
