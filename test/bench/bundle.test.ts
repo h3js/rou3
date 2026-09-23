@@ -60,8 +60,10 @@ describe("benchmark", () => {
     // MethodData (the rewritten segment join for plain patterns, the
     // pre-expansion text for optional/group ones) so removeRoute can splice
     // one same-node sibling without touching the others (#201, #202).
-    expect(bytes).toBeLessThanOrEqual(6720); // <6.72kb
-    expect(gzipSize).toBeLessThanOrEqual(2720); // <2.72kb
+    // +~90B raw / +~30B gzip: expandedRouteId() normalizes that pre-expansion
+    // text (trailing empties, escaped statics) so `/a/:x?/` removes `/a/:x?`.
+    expect(bytes).toBeLessThanOrEqual(6820); // <6.82kb
+    expect(gzipSize).toBeLessThanOrEqual(2760); // <2.76kb
   });
 });
 

@@ -84,6 +84,25 @@ export function splitRoute(path: string): string[] {
   return s;
 }
 
+/**
+ * Registration identity of a pattern that expands (groups, `?`/`+`/`*`
+ * modifiers), shared by `addRoute` and `removeRoute`: its pre-expansion text
+ * with trailing empties dropped and static segments keyed like the tree, so
+ * spellings the tree cannot tell apart (`/a/:x?/` vs `/a/:x?`, `\)` vs `)`)
+ * share one identity.
+ */
+export function expandedRouteId(path: string): string {
+  return (
+    "/" +
+    splitRoute(encodeEscapes(path))
+      .map((segment) => {
+        const key = segmentKey(segment);
+        return typeof key === "string" ? key : segment;
+      })
+      .join("/")
+  );
+}
+
 export function getMatchParams(
   segments: string[],
   paramsMap: ParamsIndexMap,

@@ -122,7 +122,7 @@ The result ordering is a documented contract — see [Result ordering](#result-o
 removeRoute(router, "GET", "/path/:name");
 ```
 
-Removal is by registered pattern: it removes every entry that `addRoute` call created (including optional/group expansions and duplicate registrations) and leaves routes registered under other patterns alone, even ones that share a tree node (`/path/:id` vs `/path/:name`, `/path/**` vs `/path/**:rest`). Pass the pattern as it was registered — spellings the tree cannot tell apart (`/a/` vs `/a`, escaped statics, segments after a terminal `**`) are equivalent, but `/path/*` does not remove `/path/:name`.
+Removal is by registered pattern: it removes every entry that `addRoute` call created (including optional/group expansions and duplicate registrations) and leaves routes registered under other patterns alone, even ones that share a tree node (`/path/:id` vs `/path/:name`, `/path/**` vs `/path/**:rest`). Pass the pattern as it was registered — spellings the tree cannot tell apart (`/a/` vs `/a`, `/a/:x?/` vs `/a/:x?`, escaped statics, segments after a terminal `**`) are equivalent, but `/path/*` does not remove `/path/:name` and `/ab` does not remove `/a{b}`.
 
 ## Route Patterns
 

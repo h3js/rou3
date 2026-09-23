@@ -1,6 +1,12 @@
 import { expandGroupDelimiters } from "../_group-delimiters.ts";
 import type { RouterContext, Node } from "../types.ts";
-import { encodeEscapes, expandModifiers, segmentKey, splitRoute } from "./_utils.ts";
+import {
+  encodeEscapes,
+  expandedRouteId,
+  expandModifiers,
+  segmentKey,
+  splitRoute,
+} from "./_utils.ts";
 
 /**
  * Remove a route from the router context.
@@ -25,7 +31,7 @@ export function removeRoute<T>(ctx: RouterContext<T>, method: string = "", path:
 function _removeRoute(ctx: RouterContext, method: string, path: string, route?: string): void {
   const groupExpanded = expandGroupDelimiters(path);
   if (groupExpanded) {
-    route ??= path;
+    route ??= expandedRouteId(path);
     for (const expandedPath of groupExpanded) {
       _removeRoute(ctx, method, expandedPath, route);
     }
@@ -38,7 +44,7 @@ function _removeRoute(ctx: RouterContext, method: string, path: string, route?: 
 
   const modExpanded = expandModifiers(segments);
   if (modExpanded) {
-    route ??= path;
+    route ??= expandedRouteId(path);
     for (const expandedPath of modExpanded) {
       _removeRoute(ctx, method, expandedPath, route);
     }

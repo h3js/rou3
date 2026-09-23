@@ -1036,7 +1036,8 @@ describe("Router remove", function () {
 
   it("removes by tree identity: escaped statics and terminal wildcards", function () {
     // The stored identity is keyed exactly like the tree, so spellings that
-    // register the same entry remove each other.
+    // register the same entry remove each other — including patterns that
+    // expand (optional/group syntax), whose identity is normalized the same way.
     for (const [add, remove, path] of [
       [String.raw`/a/\)`, "/a/)", "/a/)"],
       ["/a/)", String.raw`/a/\)`, "/a/)"],
@@ -1044,6 +1045,12 @@ describe("Router remove", function () {
       ["/a/**", "/a/**/b", "/a/x/y"],
       ["/a/**:rest/x", "/a/**:rest", "/a/x/y"],
       ["/a/b/", "/a/b//", "/a/b"],
+      ["/admin/:page?/", "/admin/:page?", "/admin/x"],
+      ["/admin/:page?", "/admin/:page?/", "/admin/x"],
+      [String.raw`/a/\)/:x?`, "/a/)/:x?", "/a/)/y"],
+      ["/a/)/:x?", String.raw`/a/\)/:x?`, "/a/)/y"],
+      ["/a{/b}?/", "/a{/b}?", "/a/b"],
+      ["/a{/b}?", "/a{/b}?//", "/a/b"],
     ] as const) {
       const router = createRouter([add]);
       expect(findRoute(router, "GET", path), `add ${add}`).toBeDefined();

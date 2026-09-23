@@ -3,7 +3,13 @@ import { toGroupName, toUnnamedGroupKey } from "../_group-names.ts";
 import { replaceSegmentWildcards } from "../_segment-wildcards.ts";
 import { NullProtoObj } from "../object.ts";
 import type { RouterContext, ParamsIndexMap } from "../types.ts";
-import { encodeEscapes, expandModifiers, segmentKey, splitRoute } from "./_utils.ts";
+import {
+  encodeEscapes,
+  expandedRouteId,
+  expandModifiers,
+  segmentKey,
+  splitRoute,
+} from "./_utils.ts";
 
 /**
  * Add a route to the router context.
@@ -23,13 +29,13 @@ export function addRoute<T>(
 
 /**
  * `route` is the registration identity `removeRoute` splices entries by. A
- * pattern that expands (groups, `?`/`+`/`*` modifiers) stamps its
- * *pre-expansion* text on every entry, so the `/admin` entry of `/admin/:page?`
- * is never confused with a separately registered `/admin` on the same node. A
- * plain pattern's identity is its rewritten segment join — the string the loop
- * below builds anyway (and `ctx.static` is keyed by), so the hot path pays no
- * extra pass, and spellings the tree cannot tell apart (`\)` vs `)`, `/a/` vs
- * `/a`, segments after a terminal `**`) share one identity.
+ * pattern that expands (groups, `?`/`+`/`*` modifiers) stamps its normalized
+ * *pre-expansion* text (`expandedRouteId`) on every entry, so the `/admin`
+ * entry of `/admin/:page?` is never confused with a separately registered
+ * `/admin` on the same node. A plain pattern's identity is its rewritten
+ * segment join — the string `ctx.static` is keyed by (one `join` per entry,
+ * no extra parsing) — so spellings the tree cannot tell apart (`\)` vs `)`,
+ * `/a/` vs `/a`, segments after a terminal `**`) share one identity.
  */
 function _add<T>(
   ctx: RouterContext<T>,
@@ -40,7 +46,7 @@ function _add<T>(
 ): void {
   const groupExpanded = expandGroupDelimiters(path);
   if (groupExpanded) {
-    route ??= path;
+    route ??= expandedRouteId(path);
     for (const expandedPath of groupExpanded) {
       _add(ctx, method, expandedPath, data, route);
     }
@@ -54,7 +60,7 @@ function _add<T>(
   // Expand modifiers (:name?, :name+, :name*) into multiple route entries
   const expanded = expandModifiers(segments);
   if (expanded) {
-    route ??= path;
+    route ??= expandedRouteId(path);
     for (const p of expanded) {
       _add(ctx, method, p, data, route);
     }
