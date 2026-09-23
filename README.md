@@ -320,16 +320,30 @@ If you keep your own per-route metadata (route rules, middleware, auth gates) in
 import { routeToRegExp } from "rou3";
 
 routeToRegExp("/users/:id(\\d+)");
-// /^\/users\/(?<id>\d+)(?:(?<=\/)\/|(?<!\/)\/?)$/  ->  "/users/123".match(re).groups // { id: "123" }
+// /^\/users\/(?<id>\d+)\/?$/  ->  "/users/123".match(re).groups // { id: "123" }
 ```
 
-The regex matches **exactly** the paths `findRoute()` matches for a router holding only that route, so it is safe to use as a guard or scope check in place of the router. That includes the router's lookup tolerances: one optional trailing slash (`/users/123/`, but not `/users/123//`), empty segments for whole-segment `:name` and `*` params (`/a//b` matches `/a/:x/b`), and an optional trailing `*` (`/a` matches `/a/*`). The trailing `(?:(?<=\/)\/|(?<!\/)\/?)` encodes the slash rule: at most one trailing slash, and exactly one when the path's last segment is empty (`/a//` matches `/a/:x` with `x: ""`, `/a/` does not). Paths are compared as-is, like `findRoute()` without `{ normalize: true }`, so resolve `.`/`..` segments first if the router normalizes them. The fixed-length look-behinds are supported by JavaScript, PCRE and Perl, but not by RE2-based engines (Go, the Rust `regex` crate).
+The regex matches **exactly** the paths `findRoute()` matches for a router holding only that route, so it is safe to use as a guard or scope check in place of the router. That includes the router's lookup tolerances: one optional trailing slash (`/users/123/`, but not `/users/123//`), empty segments for whole-segment `:name` and `*` params (`/a//b` matches `/a/:x/b`), and an optional trailing `*` (`/a` matches `/a/*`). Paths are compared as-is, like `findRoute()` without `{ normalize: true }`, so resolve `.`/`..` segments first if the router normalizes them.
+
+The slash rule is at most one trailing slash, and exactly one when the path's last segment is empty (`/a//` matches `/a/:x`, `/a/` does not). How the regex ends depends on the route's last segment:
+
+| Route ends in                                  | Regex ending                         |
+| ---------------------------------------------- | ------------------------------------ |
+| static or non-empty segment (`/users/:id(\d+)`) | `\/?$`                               |
+| optional segment (`:x?`, `*`, `:x*`, `**`)     | lazy `(?:\/…)??\/?$`                 |
+| required `:x`                                  | `(?:(?<x>[^/]+)\/?\|\/)$`             |
+| `**:x` / `:x+`                                 | `(?:\/\|(?<x>.+?)\/?)$`               |
+| anything else (see below)                      | `(?:(?<=\/)\/\|(?<!\/)\/?)$` (look-behind) |
+
+For a required `:x` or `**:x` whose last segment is empty (`/a//` on `/a/:x`), the regex takes the slash-only branch and leaves the group **unset**, where `findRoute()` reports `""`. (Without look-around, keeping `""` would need the same named group in two branches.)
+
+The look-behind form remains only where no look-behind-free equivalent exists: a required empty-capable param followed by optional segments (`/a/:x/:y?`, `/a/*/**`), a constraint that can match empty (`:x(\d*)`), an empty segment before a trailing wildcard (`/a//*`), or several empty-capable optional segments in a row (`/a/:x?/:y?`). Fixed-length look-behinds work in JavaScript, PCRE and Perl, but not in RE2-family engines (RE2, Go, the Rust `regex` crate). Every other route compiles to a regex those engines accept, except the duplicate-name alternations in the note below (RE2 has no `DUPNAMES` option) and constraints that themselves use unsupported syntax.
 
 The output is **PCRE-compatible**: it uses `(?<name>...)` named groups and avoids JS-only constructs, so the generated `.source` also compiles in PCRE2 engines (`grep -P`, `rg -P`, `pcre2grep`, PHP `preg_*`) and Perl — not just JavaScript. In particular, trailing optional groups are compiled inline as `(?:...)?` instead of an alternation, so a param is never emitted twice as a duplicate named group (which PCRE2 rejects unless `PCRE2_DUPNAMES` is set):
 
 ```js
 routeToRegExp("/blog/:id(\\d+){-:title}?");
-// /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?(?:(?<=\/)\/|(?<!\/)\/?)$/
+// /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
 ```
 
 > [!NOTE]
@@ -340,7 +354,7 @@ routeToRegExp("/blog/:id(\\d+){-:title}?");
 ```js
 import { regExpToRoute } from "rou3";
 
-regExpToRoute(/^\/users\/(?<id>\d+)(?:(?<=\/)\/|(?<!\/)\/?)$/); // "/users/:id(\\d+)"
+regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
 regExpToRoute(/^\/path\/(?<param>[^/]+)\/?$/); // "/path/:param"
 regExpToRoute(/^\/path(?:\/(?<_>.*))?\/?$/); // "/path/**"
 regExpToRoute("^\\/files\\/(?<_0>[^/]*)\\.png\\/?$"); // "/files/*.png"

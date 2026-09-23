@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { routeToRegExp, createRouter, addRoute, findRoute } from "../src/index.ts";
 import { fromGroupName } from "../src/_group-names.ts";
-import { regexpCases as routes, PCRE2_DUPLICATE_NAME_ROUTES } from "./_regexp-cases.ts";
+import {
+  regexpCases as routes,
+  LOOKBEHIND_ROUTES,
+  PCRE2_DUPLICATE_NAME_ROUTES,
+  sweepPaths,
+  sweepPatterns,
+} from "./_regexp-cases.ts";
 
 function normalizeGroups(groups?: Record<string, string>) {
   if (!groups) {
@@ -54,55 +60,12 @@ describe("routeToRegExp", () => {
   // The regex must be a drop-in for the router: consumers use it as a guard or
   // scope check, so any path where it disagrees with `findRoute` is a bypass
   // (regex misses a routed path) or a false positive (#200). Sweep every
-  // pattern built from the segment forms below against every short path,
+  // pattern from `sweepPatterns()` against every short path from `sweepPaths()`,
   // including empty segments and runs of trailing slashes.
   it("matches exactly the paths findRoute matches", () => {
-    // `""` is an empty middle segment and `{b}?` an optional one; both can turn
-    // into a trailing empty segment the tree drops (`/docs/{v2}?/:page?`).
-    const units = [
-      "a",
-      "",
-      "{b}?",
-      ":x",
-      "*",
-      "**",
-      "**:r",
-      ":x?",
-      ":x+",
-      ":x*",
-      ":x(\\d+)",
-      ":x(\\d+)?",
-    ];
-    const tails = ["", "a", ":y", "*", ":y?", "**", "*.png", "x-:y", "b{.json}?"];
-    const patterns = new Set([
-      "/",
-      "/a{/b}?",
-      "/a/b{s}?",
-      "/a/:x+/b{/c}?",
-      "/{en}?/:page?",
-      ...Object.keys(routes),
-    ]);
-    for (const u of units) {
-      for (const t of tails) {
-        patterns.add(t ? `/${u}/${t}` : `/${u}`);
-        patterns.add(t ? `/a/${u}/${t}` : `/a/${u}`);
-      }
-    }
-    const paths = ["/", "//", "///"];
-    const walk = (prefix: string, depth: number) => {
-      for (const seg of ["a", "b", "1", "x.png", ""]) {
-        const path = `${prefix}/${seg}`;
-        paths.push(path, `${path}/`, `${path}//`, `${path}///`);
-        if (depth > 1) walk(path, depth - 1);
-      }
-    };
-    walk("", 3);
-
+    const paths = sweepPaths();
     const mismatches: string[] = [];
-    for (const pattern of patterns) {
-      // Known router limitation, not a regex bug: the tree drops the constraint
-      // of a repeated param (`:id(\d+)+` is stored as `**:id`).
-      if (/\)[+*]$/.test(pattern)) continue;
+    for (const pattern of sweepPatterns()) {
       const router = createRouter();
       addRoute(router, "", pattern, true);
       const regex = routeToRegExp(pattern);
@@ -140,6 +103,17 @@ describe("routeToRegExp", () => {
       const names = [...routeToRegExp(route).source.matchAll(/\(\?<([\w]+)>/g)].map((m) => m[1]);
       const duplicates = names.filter((name, i) => names.indexOf(name) !== i);
       expect(duplicates, `expected duplicate named groups for "${route}"`).not.toEqual([]);
+    }
+  });
+
+  // RE2-family engines (Go, Rust `regex`, RE2) have no look-around. Only the
+  // shapes tracked in LOOKBEHIND_ROUTES may still need the look-behind suffix.
+  it("emits no look-behind outside LOOKBEHIND_ROUTES", () => {
+    for (const route of Object.keys(routes)) {
+      const source = routeToRegExp(route).source;
+      expect(/\(\?<[=!]/.test(source), `look-behind in "${route}": ${source}`).toBe(
+        LOOKBEHIND_ROUTES.has(route),
+      );
     }
   });
 });

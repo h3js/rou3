@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
 import { routeToRegExp } from "../src/index.ts";
-import { regexpCases, PCRE2_DUPLICATE_NAME_ROUTES } from "./_regexp-cases.ts";
+import {
+  regexpCases,
+  LOOKBEHIND_ROUTES,
+  PCRE2_DUPLICATE_NAME_ROUTES,
+  sweepPaths,
+  sweepPatterns,
+} from "./_regexp-cases.ts";
 
 // Validate that routeToRegExp() output is understood by real PCRE-compatible
 // engines. We probe a matrix of external CLI tools and run whichever are
@@ -147,4 +153,77 @@ describe("routeToRegExp PCRE compatibility", () => {
       }
     });
   }
+});
+
+// RE2-family engines (Go `regexp`, Rust `regex`, RE2) support `(?<name>...)`
+// but no look-around and no duplicate group names. ripgrep's default engine is
+// the Rust `regex` crate, so `rg` without `-P` stands in for the family.
+// `--no-config` keeps a user config from switching on PCRE2.
+const re2: Omit<PcreTool, "name" | "strictDuplicateNames"> = grepLike("rg", (s) => [
+  "--no-config",
+  "-q",
+  "-e",
+  s,
+]);
+
+const hasRe2 =
+  re2.compile("^(?<a>x)$") === "ok" &&
+  re2.match("^(?<a>x)$", "x") &&
+  !re2.match("^(?<a>x)$", "y") &&
+  // Proves this is the RE2-family engine, not PCRE2.
+  re2.compile("(?<=a)b") === "error";
+
+describe("routeToRegExp RE2 compatibility (rg, Rust regex)", () => {
+  if (!hasRe2) {
+    it.skip("ripgrep not found", () => {});
+    return;
+  }
+
+  for (const [route, { match, noMatch = [] }] of Object.entries(regexpCases)) {
+    const source = routeToRegExp(route).source;
+    if (LOOKBEHIND_ROUTES.has(route) || PCRE2_DUPLICATE_NAME_ROUTES.has(route)) {
+      it(`rejects "${route}"`, () => {
+        expect(re2.compile(source)).toBe("error");
+      });
+      continue;
+    }
+    it(`compiles and matches "${route}"`, () => {
+      expect(re2.compile(source), `should compile ${source}`).toBe("ok");
+      for (const [input] of match) {
+        expect(re2.match(source, input), `should match ${JSON.stringify(input)}`).toBe(true);
+      }
+      for (const input of noMatch) {
+        expect(re2.match(source, input), `should not match ${JSON.stringify(input)}`).toBe(false);
+      }
+    });
+  }
+
+  // Every look-behind-free sweep regex matches the same paths in RE2 as in JS
+  // (which the JS sweep ties to `findRoute`). One `rg` run per pattern, with
+  // the paths as input lines.
+  it("agrees with JS on the sweep corpus", () => {
+    const paths = sweepPaths();
+    const mismatches: string[] = [];
+    let checked = 0;
+    for (const pattern of sweepPatterns()) {
+      const regex = routeToRegExp(pattern);
+      if (/\(\?<[=!]/.test(regex.source)) continue;
+      const names = [...regex.source.matchAll(/\(\?<(\w+)>/g)].map((m) => m[1]);
+      if (new Set(names).size !== names.length) continue;
+      checked++;
+      const r = spawnSync("rg", ["--no-config", "-e", regex.source], {
+        input: paths.join("\n") + "\n",
+        encoding: "utf8",
+      });
+      expect(r.status, `rg failed on ${regex.source}: ${r.stderr}`).not.toBe(2);
+      const matched = new Set(r.stdout.split("\n"));
+      for (const path of paths) {
+        if (regex.test(path) !== matched.has(path)) {
+          mismatches.push(`${pattern} ${path}`);
+        }
+      }
+    }
+    expect(mismatches).toEqual([]);
+    expect(checked).toBeGreaterThan(200);
+  });
 });

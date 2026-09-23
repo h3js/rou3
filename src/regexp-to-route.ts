@@ -32,7 +32,7 @@ const ROUTE_SPECIAL = new Set([
  * {@link routeToRegExp} back into a rou3 route pattern.
  *
  * @example
- * regExpToRoute(/^\/users\/(?<id>\d+)(?:(?<=\/)\/|(?<!\/)\/?)$/); // "/users/:id(\\d+)"
+ * regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
  * regExpToRoute(/^\/path\/(?<param>[^/]+)\/?$/); // "/path/:param"
  * regExpToRoute(/^\/path(?:\/(?<_>.*))?\/?$/); // "/path/**"
  */
@@ -50,6 +50,13 @@ export function regExpToRoute(regexp: RegExp | string): string {
   // plain optional slash older versions and hand-written regexes use).
   if (src.startsWith("^")) src = src.slice(1);
   if (src.endsWith("$")) src = src.slice(0, -1);
+  // Look-behind-free endings (see `withTrailingSlash`) back to their plain
+  // forms: `:x`, `**:x`/`:x+`, lazy catch-alls and lazy optional groups.
+  src = src
+    .replace(/\(\?:\(\?<(\w+)>\[\^\/\]\+\)\\\/\?\|\\\/\)$/, "(?<$1>[^/]*)\\/?")
+    .replace(/\(\?:\\\/\|\(\?<(\w+)>\.\+\?\)\\\/\?\)$/, "(?<$1>.*)\\/?")
+    .replace(/\.\*\?\)(\)\??)?\\\/\?$/, ".*)$1\\/?")
+    .replace(/\)\?\?\\\/\?$/, ")?\\/?");
   if (src.endsWith(TRAILING_SLASH)) src = src.slice(0, -TRAILING_SLASH.length);
   else if (src.endsWith(LEGACY_TRAILING_SLASHES)) {
     src = src.slice(0, -LEGACY_TRAILING_SLASHES.length);
@@ -174,8 +181,9 @@ function reverseSegment(seg: string): string {
   return out;
 }
 
-// Trailing-slash suffix emitted by `routeToRegExp` (as `RegExp#source` spells
-// it), and the two-slash form it emitted before #209.
+// Look-behind trailing-slash suffix `routeToRegExp` still emits for a few
+// route endings (as `RegExp#source` spells it), and the two-slash form it
+// emitted before #209.
 const TRAILING_SLASH = "(?:(?<=\\/)\\/|(?<!\\/)\\/?)";
 const LEGACY_TRAILING_SLASHES = "(?:\\/\\/|(?<!\\/)\\/?)";
 

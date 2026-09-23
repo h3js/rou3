@@ -7,12 +7,7 @@ import {
 } from "./_escape.ts";
 import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcards.ts";
 import { expandModifiers, splitRoute } from "./operations/_utils.ts";
-
-// Lookup ignores at most one trailing slash (#209), so `/a/b` and `/a/b/` reach
-// `/a/b` but `/a/b//` does not. A second slash leaves a real empty last
-// segment: the body then ends in `/` and exactly one more must follow (`/a//`
-// reaches `/a/:x` with `x: ""`, `/a/` does not). The look-behinds encode that.
-const TRAILING_SLASH = "(?:(?<=/)/|(?<!/)/?)$";
+import { withTrailingSlash } from "./_trailing-slash.ts";
 
 /**
  * Convert a rou3 route pattern into an anchored {@link RegExp}.
@@ -29,13 +24,18 @@ const TRAILING_SLASH = "(?:(?<=/)/|(?<!/)/?)$";
  * empty segments for `:name` / `*` params, and an optional trailing `*` — so it
  * can stand in for the router as a guard or scope check.
  *
+ * Most routes also compile to RE2-compatible output (RE2, Go, Rust `regex`):
+ * the trailing-slash rule is encoded without look-behinds except for the few
+ * route endings that have no look-behind-free equivalent (see
+ * `withTrailingSlash`).
+ *
  * Note: multi-group or mid-route optionals that cannot be inlined still fall
  * back to alternation and may contain duplicate named groups (valid in JS/Perl,
  * but requiring `PCRE2_DUPNAMES` for strict PCRE2 engines).
  *
  * @example
- * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)(?:(?<=\/)\/|(?<!\/)\/?)$/
- * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?(?:(?<=\/)\/|(?<!\/)\/?)$/
+ * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)\/?$/
+ * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
  */
 export function routeToRegExp(route: string = "/"): RegExp {
   if (route.charCodeAt(0) !== 47 /* '/' */) {
@@ -139,15 +139,16 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
     }
     const k = prefix.length;
     const inlineSegs = fullSegs.slice(0, baseLen - 1);
-    inlineSegs.push(`${last.slice(0, k)}(?:${last.slice(k)})?`);
-    return new RegExp(`^${joinSegments(inlineSegs, fullOwnSep)}${TRAILING_SLASH}`);
+    // The group may add nothing (`/a/**/b{.json}?`: `**` is terminal).
+    inlineSegs.push(k === last.length ? last : `${last.slice(0, k)}(?:${last.slice(k)})?`);
+    return new RegExp(`^${withTrailingSlash(joinSegments(inlineSegs, fullOwnSep))}`);
   }
 
   // `body` adds one or more whole segments (e.g. `/foo` -> `/foo/bar`); make
   // the appended segments optional.
   const head = joinSegments(fullSegs.slice(0, baseLen), fullOwnSep);
   const tail = fullSegs.slice(baseLen).join("/");
-  return new RegExp(`^${head}(?:/${tail})?${TRAILING_SLASH}`);
+  return new RegExp(`^${withTrailingSlash(`${head}(?:/${tail})?`)}`);
 }
 
 /**
@@ -180,7 +181,7 @@ function _routeToRegExp(route: string): RegExp {
   const [segments, ownSeparator] = routeToRegExpSegments(route);
   // Root: lookup reaches `/` from `/` only (`//` is an empty segment).
   return new RegExp(
-    segments.length > 0 ? `^${joinSegments(segments, ownSeparator)}${TRAILING_SLASH}` : "^/$",
+    segments.length > 0 ? `^${withTrailingSlash(joinSegments(segments, ownSeparator))}` : "^/$",
   );
 }
 
