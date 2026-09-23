@@ -82,7 +82,7 @@ function _remove(
       delete methods[method];
       if (Object.keys(methods).length === 0) {
         node.methods = undefined;
-        if (isStatic) delete ctx.static[key || "/"];
+        if (isStatic) delete ctx.static[key];
       }
     }
     return;

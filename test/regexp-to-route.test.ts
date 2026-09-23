@@ -51,6 +51,13 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(/^\/base\/?(?<path>.+)\/?$/)).toBe("/base/**:path");
   });
 
+  it("accepts the two-trailing-slash suffix emitted by older versions (#209)", () => {
+    expect(regExpToRoute(/^\/path\/(?<id>[^/]*)(?:\/\/|(?<!\/)\/?)$/)).toBe("/path/:id");
+    expect(regExpToRoute(/^\/\/?$/)).toBe("/");
+    expect(routeToRegExp("/").source).toBe("^\\/$");
+    expect(regExpToRoute(routeToRegExp("/"))).toBe("/");
+  });
+
   it("decodes escaped capture-group names back to the original param name", () => {
     // Param names that aren't valid capture-group names (`-`, leading digit) are
     // emitted escaped; reversing must restore the original name, not leak the

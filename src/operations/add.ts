@@ -135,9 +135,10 @@ function _add<T>(
     route: route ?? key,
   });
 
-  // Static
+  // Static (keyed by the lookup form after its one trailing-slash strip, so
+  // root "/" is "" and a stripped "//" -> "/" can't reach it, #209)
   if (!hasParams) {
-    ctx.static[key] = node;
+    ctx.static[segments.length > 0 ? key : ""] = node;
   }
 }
 

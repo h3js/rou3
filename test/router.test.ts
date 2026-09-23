@@ -1075,6 +1075,18 @@ describe("Router remove", function () {
     expect(findRoute(router, "GET", "/a/c")).toMatchObject({ data: { path: "/a/c" } });
   });
 
+  it('drops the root ctx.static entry (keyed "") on removal (#209)', function () {
+    const router = createRouter(["/", "/a"]);
+    expect(router.static[""]).toBeDefined();
+    expect(router.static["/"]).toBeUndefined();
+
+    removeRoute(router, "GET", "/");
+
+    expect(router.static[""]).toBeUndefined();
+    expect(findRoute(router, "GET", "/")).toBeUndefined();
+    expect(findRoute(router, "GET", "/a")).toMatchObject({ data: { path: "/a" } });
+  });
+
   it("keeps ctx.static while another method remains on the same path", function () {
     const router = createRouter<{ path: string }>({});
     addRoute(router, "GET", "/a/b", { path: "get" });

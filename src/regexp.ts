@@ -8,12 +8,11 @@ import {
 import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcards.ts";
 import { expandModifiers, splitRoute } from "./operations/_utils.ts";
 
-// Lookup ignores up to two trailing slashes (`findRoute` strips one, then
-// `splitPath` pops one trailing empty segment), so `/a/b`, `/a/b/` and `/a/b//`
-// all reach `/a/b`. A third slash leaves a real empty last segment: the body
-// then ends in `/` and exactly two more must follow (`/a///` reaches `/a/:x`
-// with `x: ""`, `/a//` does not). The look-behind encodes that last rule.
-const TRAILING_SLASHES = "(?://|(?<!/)/?)$";
+// Lookup ignores at most one trailing slash (#209), so `/a/b` and `/a/b/` reach
+// `/a/b` but `/a/b//` does not. A second slash leaves a real empty last
+// segment: the body then ends in `/` and exactly one more must follow (`/a//`
+// reaches `/a/:x` with `x: ""`, `/a/` does not). The look-behinds encode that.
+const TRAILING_SLASH = "(?:(?<=/)/|(?<!/)/?)$";
 
 /**
  * Convert a rou3 route pattern into an anchored {@link RegExp}.
@@ -26,7 +25,7 @@ const TRAILING_SLASHES = "(?://|(?<!/)/?)$";
  * duplicate named group — which PCRE2 rejects unless `PCRE2_DUPNAMES` is set.
  *
  * The regex matches exactly the paths `findRoute()` matches for a router holding
- * only `route` — including the router's tolerances: up to two trailing slashes,
+ * only `route` — including the router's tolerances: one optional trailing slash,
  * empty segments for `:name` / `*` params, and an optional trailing `*` — so it
  * can stand in for the router as a guard or scope check.
  *
@@ -35,8 +34,8 @@ const TRAILING_SLASHES = "(?://|(?<!/)/?)$";
  * but requiring `PCRE2_DUPNAMES` for strict PCRE2 engines).
  *
  * @example
- * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)(?:\/\/|(?<!\/)\/?)$/
- * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?(?:\/\/|(?<!\/)\/?)$/
+ * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)(?:(?<=\/)\/|(?<!\/)\/?)$/
+ * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?(?:(?<=\/)\/|(?<!\/)\/?)$/
  */
 export function routeToRegExp(route: string = "/"): RegExp {
   if (route.charCodeAt(0) !== 47 /* '/' */) {
@@ -141,14 +140,14 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
     const k = prefix.length;
     const inlineSegs = fullSegs.slice(0, baseLen - 1);
     inlineSegs.push(`${last.slice(0, k)}(?:${last.slice(k)})?`);
-    return new RegExp(`^${joinSegments(inlineSegs, fullOwnSep)}${TRAILING_SLASHES}`);
+    return new RegExp(`^${joinSegments(inlineSegs, fullOwnSep)}${TRAILING_SLASH}`);
   }
 
   // `body` adds one or more whole segments (e.g. `/foo` -> `/foo/bar`); make
   // the appended segments optional.
   const head = joinSegments(fullSegs.slice(0, baseLen), fullOwnSep);
   const tail = fullSegs.slice(baseLen).join("/");
-  return new RegExp(`^${head}(?:/${tail})?${TRAILING_SLASHES}`);
+  return new RegExp(`^${head}(?:/${tail})?${TRAILING_SLASH}`);
 }
 
 /**
@@ -179,9 +178,9 @@ function paramModifier(segment: string): string | undefined {
 
 function _routeToRegExp(route: string): RegExp {
   const [segments, ownSeparator] = routeToRegExpSegments(route);
-  // Root: lookup reaches `/` from `/` and `//` only.
+  // Root: lookup reaches `/` from `/` only (`//` is an empty segment).
   return new RegExp(
-    segments.length > 0 ? `^${joinSegments(segments, ownSeparator)}${TRAILING_SLASHES}` : "^//?$",
+    segments.length > 0 ? `^${joinSegments(segments, ownSeparator)}${TRAILING_SLASH}` : "^/$",
   );
 }
 
@@ -233,8 +232,8 @@ function routeToRegExpSegments(route: string): [segments: string[], ownSeparator
       // The separator before a catch-all must stay anchored to the prefix: a
       // bare optional `/?` would let `/api/**` match `/apifoo`. `**` matches
       // zero or more segments (`/api` too), `**:name` one or more. A segment may
-      // be empty, so one-or-more is the separator plus `.*` (`/api///` reaches
-      // `/api/**:p` with `p: ""`; `/api//` is `/api` after trailing stripping).
+      // be empty, so one-or-more is the separator plus `.*` (`/api//` reaches
+      // `/api/**:p` with `p: ""`; `/api/` is `/api` after trailing stripping).
       if (segment !== "**") {
         reSegments.push(`(?<${toGroupName(segment.slice(3))}>.*)`);
       } else if (reSegments.length > 0) {
