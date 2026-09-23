@@ -26,12 +26,29 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(/^\/path\/(?<param>[^/]+)\/?$/)).toBe("/path/:param");
     expect(regExpToRoute(/^\/path\/(?<_0>[^/]*)\/foo\/?$/)).toBe("/path/*/foo");
     expect(regExpToRoute(/^\/path\/(?<_0>[^/]*)\.png\/?$/)).toBe("/path/*.png");
-    expect(regExpToRoute(/^\/path\/?(?<_>.*)\/?$/)).toBe("/path/**");
-    expect(regExpToRoute(/^\/base\/?(?<path>.+)\/?$/)).toBe("/base/**:path");
+    expect(regExpToRoute(/^\/path(?:\/(?<_>.*))?\/?$/)).toBe("/path/**");
+    expect(regExpToRoute(/^\/?(?<_>.*)\/?$/)).toBe("/**");
     expect(regExpToRoute(/^\/path\/(?<id>\d+)\/?$/)).toBe("/path/:id(\\d+)");
     expect(regExpToRoute(/^\/path(?:\/(?<id>[^/]+))?\/?$/)).toBe("/path/:id?");
     expect(regExpToRoute(/^\/path(?:\/(?<rest>.*))?\/?$/)).toBe("/path/:rest*");
     expect(regExpToRoute(/^\/path\/(?<rest>.+)\/?$/)).toBe("/path/:rest+");
+  });
+
+  it("maps catch-all output back to an equivalent route", () => {
+    // `**:name` and `:name+` compile to the same regex (both one-or-more
+    // segments), so the named catch-all comes back as `:name+`.
+    expect(routeToRegExp("/base/**:path").source).toBe(routeToRegExp("/base/:path+").source);
+    expect(regExpToRoute(routeToRegExp("/base/**:path"))).toBe("/base/:path+");
+    // `(?<_>.*)` is `**` only when it ends the route; `**` is terminal.
+    expect(regExpToRoute(routeToRegExp("/a/:_*"))).toBe("/a/**");
+    expect(regExpToRoute(/^\/a(?:\/(?<_>.*))?\/b\/?$/)).toBe("/a/:_*/b");
+  });
+
+  it("accepts catch-all regexes emitted by older versions", () => {
+    // Before the prefix/separator anchoring fix, catch-alls were emitted with a
+    // bare optional separator (`\/?`). Keep parsing that form.
+    expect(regExpToRoute(/^\/path\/?(?<_>.*)\/?$/)).toBe("/path/**");
+    expect(regExpToRoute(/^\/base\/?(?<path>.+)\/?$/)).toBe("/base/**:path");
   });
 
   it("decodes escaped capture-group names back to the original param name", () => {
@@ -39,7 +56,7 @@ describe("regExpToRoute", () => {
     // emitted escaped; reversing must restore the original name, not leak the
     // internal form as `:__rou3_esc_test_hid`.
     expect(regExpToRoute(/^\/api\/(?<__rou3_esc_test_hid>[^/]+)\/?$/)).toBe("/api/:test-id");
-    expect(regExpToRoute(/^\/api\/?(?<__rou3_esc_test_hid>.+)\/?$/)).toBe("/api/**:test-id");
+    expect(regExpToRoute(/^\/api\/(?<__rou3_esc_test_hid>.+)\/?$/)).toBe("/api/:test-id+");
     expect(regExpToRoute(/^\/api(?:\/(?<__rou3_esc_test_hid>[^/]+))?\/?$/)).toBe("/api/:test-id?");
     expect(regExpToRoute(/^\/api\/(?<__rou3_esc_0>[^/]+)\/?$/)).toBe("/api/:0");
     expect(regExpToRoute(/^\/mix\/(?<__rou3_esc_a_hb>[^/]+)\.(?<a_b>[^/]+)\/?$/)).toBe(

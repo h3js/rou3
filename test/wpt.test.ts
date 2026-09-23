@@ -196,12 +196,9 @@ const KNOWN_DIFFS = new Set([
 // These patterns use syntax that routeToRegExp handles but the radix tree cannot represent
 // Known diffs that only apply to routeToRegExp (router handles these correctly)
 const REGEXP_ONLY_KNOWN_DIFFS = new Set([
-  // `**` as literal — routeToRegExp treats `**` as catch-all;
-  // router also treats `**` as catch-all but doesn't match `/foobar`
-  "/foo/** → /foobar [no match]",
-
   // Non-`/`-prefixed input — router prepends `/` for lookup
   "/foo/bar → foo/bar [match]",
+  ":name+ → foobar [match]",
 ]);
 
 // Patterns that cannot be tested via the router (no leading `/`, unsupported syntax, etc.)

@@ -34,7 +34,7 @@ const ROUTE_SPECIAL = new Set([
  * @example
  * regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
  * regExpToRoute(/^\/path\/(?<param>[^/]+)\/?$/); // "/path/:param"
- * regExpToRoute(/^\/base\/?(?<path>.+)\/?$/); // "/base/**:path"
+ * regExpToRoute(/^\/path(?:\/(?<_>.*))?\/?$/); // "/path/**"
  */
 export function regExpToRoute(regexp: RegExp | string): string {
   // Routes carry no flags, so a match-affecting flag (`i`/`m`/`s`) would be
@@ -66,12 +66,14 @@ export function regExpToRoute(regexp: RegExp | string): string {
       if (src[end] !== "?") {
         throw new Error(`rou3: unsupported non-optional group in "${src}"`);
       }
-      applyOptional(segments, src.slice(i + 3, end - 1));
+      applyOptional(segments, src.slice(i + 3, end - 1), end + 1 === n);
       i = end + 1;
       continue;
     }
 
-    // Catch-all unit: `/?(?<name>.*)` or `/?(?<name>.+)` at the end.
+    // Catch-all unit: `/?(?<name>.*)` or `/?(?<name>.+)` at the end. Emitted by
+    // `routeToRegExp` only for a root `/**`; older versions used it after any
+    // prefix, so it is still accepted as input.
     if (src.startsWith("\\/?", i)) {
       const g = matchNamedGroup(src, i + 3);
       if (g && g.end === n && (g.body === ".*" || g.body === ".+")) {
@@ -161,11 +163,18 @@ function reverseSegment(seg: string): string {
 const BARE_META = new Set([".", "^", "$", "*", "+", "?", "|", "[", "]", "{", "}", ")"]);
 
 /** Reverse a `(?:...)?` optional unit into route syntax, appending to `segments`. */
-function applyOptional(segments: string[], inner: string): void {
+function applyOptional(segments: string[], inner: string, last: boolean): void {
   if (inner.startsWith("\\/")) {
     const rest = inner.slice(2);
     const g = matchNamedGroup(rest, 0);
     if (g && g.end === rest.length) {
+      // A trailing `(?:/(?<_>.*))?` is the `**` catch-all. (`:_*` emits the same
+      // regex and matches the same paths; `**` is the canonical spelling. Only
+      // at the end: `**` is terminal, so a mid-route `:_*` must stay as is.)
+      if (last && g.name === "_" && g.body === ".*") {
+        segments.push("**");
+        return;
+      }
       // A single whole-segment param -> `:name?` / `:name*` / `:name(pat)?|*`.
       segments.push(optionalParam(g.name, g.body));
       return;

@@ -42,6 +42,11 @@ describe("routeToRegExp", () => {
         }
       }
 
+      for (const path of expected.noMatch || []) {
+        expect(findRoute(router, "", path), path).toBeUndefined();
+        expect(path.match(regex), path).toBeNull();
+      }
+
       expect(regex.source).toBe(expected.regex.source);
     });
   }
