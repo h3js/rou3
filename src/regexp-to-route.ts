@@ -1,7 +1,7 @@
 // Inverse of `routeToRegExp()`: parse an anchored, PCRE-compatible RegExp back
 // into a rou3 route pattern. Targets the dialect emitted by `routeToRegExp()`
 // (named groups `(?<name>...)`, `[^/]+`/`[^/]*` segment matchers, `.*`/`.+`
-// catch-alls, `(?:/...)?` optional groups). Hand-written regexes that follow the
+// catch-alls, `(?:/...)?` optional groups, the trailing-slash suffix). Hand-written regexes that follow the
 // same conventions convert too; constructs outside the dialect throw.
 
 import { fromGroupName } from "./_group-names.ts";
@@ -32,7 +32,7 @@ const ROUTE_SPECIAL = new Set([
  * {@link routeToRegExp} back into a rou3 route pattern.
  *
  * @example
- * regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
+ * regExpToRoute(/^\/users\/(?<id>\d+)(?:\/\/|(?<!\/)\/?)$/); // "/users/:id(\\d+)"
  * regExpToRoute(/^\/path\/(?<param>[^/]+)\/?$/); // "/path/:param"
  * regExpToRoute(/^\/path(?:\/(?<_>.*))?\/?$/); // "/path/**"
  */
@@ -46,10 +46,12 @@ export function regExpToRoute(regexp: RegExp | string): string {
 
   let src = typeof regexp === "string" ? regexp : regexp.source;
 
-  // Strip anchors and the trailing optional-slash `routeToRegExp` appends.
+  // Strip anchors and the trailing-slash suffix `routeToRegExp` appends (or the
+  // plain optional slash older versions and hand-written regexes use).
   if (src.startsWith("^")) src = src.slice(1);
   if (src.endsWith("$")) src = src.slice(0, -1);
-  if (src.endsWith("\\/?")) src = src.slice(0, -3);
+  if (src.endsWith(TRAILING_SLASHES)) src = src.slice(0, -TRAILING_SLASHES.length);
+  else if (src.endsWith("\\/?")) src = src.slice(0, -3);
 
   if (src === "" || src === "\\/") {
     return "/";
@@ -78,6 +80,16 @@ export function regExpToRoute(regexp: RegExp | string): string {
       const g = matchNamedGroup(src, i + 3);
       if (g && g.end === n && (g.body === ".*" || g.body === ".+")) {
         segments.push(g.name === "_" ? "**" : `**:${g.name}`);
+        break;
+      }
+    }
+
+    // One-or-more catch-all at the end: `/(?<name>.*)` (`**:name` / `:name+`).
+    // An unnamed `(?<_N>.*)` is a `(.*)` constraint, not a param name.
+    if (src.startsWith("\\/", i)) {
+      const g = matchNamedGroup(src, i + 2);
+      if (g && g.end === n && g.body === ".*" && !/^_\d+$/.test(g.name)) {
+        segments.push(`:${g.name}+`);
         break;
       }
     }
@@ -160,6 +172,9 @@ function reverseSegment(seg: string): string {
   return out;
 }
 
+// Trailing-slash suffix emitted by `routeToRegExp` (as `RegExp#source` spells it).
+const TRAILING_SLASHES = "(?:\\/\\/|(?<!\\/)\\/?)";
+
 const BARE_META = new Set([".", "^", "$", "*", "+", "?", "|", "[", "]", "{", "}", ")"]);
 
 /** Reverse a `(?:...)?` optional unit into route syntax, appending to `segments`. */
@@ -197,13 +212,13 @@ function mergeGroup(segments: string[], body: string): void {
 /** Classify a param group inside a segment (`:name`, `*`, `(pat)`, ...). */
 function paramToken(name: string, body: string): string {
   const unnamed = /^_\d+$/.test(name);
-  // `*` (unnamed `[^/]*`) and `:name` (named `[^/]+`) are the only single-segment
-  // matchers with dedicated syntax. Every other body becomes an inline `(pat)`
+  // `*` (unnamed `[^/]*`) and `:name` (named `[^/]*`, or `[^/]+` as older
+  // versions emitted) are the only single-segment matchers with dedicated syntax. Every other body becomes an inline `(pat)`
   // constraint, which `constraint()` rejects if it can't survive path splitting.
   if (unnamed && body === "[^/]*") {
     return "*";
   }
-  if (!unnamed && body === "[^/]+") {
+  if (!unnamed && (body === "[^/]*" || body === "[^/]+")) {
     return `:${name}`;
   }
   return unnamed ? constraint(body) : `:${name}${constraint(body)}`;
@@ -211,7 +226,11 @@ function paramToken(name: string, body: string): string {
 
 /** Classify a param inside an optional group (`:name?`, `:name*`, ...). */
 function optionalParam(name: string, body: string): string {
-  if (body === "[^/]+") {
+  // `(?:/(?<_N>[^/]*))?` is a trailing `*` (optional in the tree).
+  if (/^_\d+$/.test(name) && body === "[^/]*") {
+    return "*";
+  }
+  if (body === "[^/]*" || body === "[^/]+") {
     return `:${name}?`;
   }
   if (body === ".*") {
@@ -273,7 +292,11 @@ function matchNamedGroup(src: string, start: number): NamedGroup | undefined {
     return undefined;
   }
   const end = readGroup(src, start);
-  return { name: fromGroupName(src.slice(start + 3, gt)), body: src.slice(gt + 1, end - 1), end };
+  return {
+    name: fromGroupName(src.slice(start + 3, gt)),
+    body: src.slice(gt + 1, end - 1),
+    end,
+  };
 }
 
 /** Index just past the `)` matching the `(` at `start`, class/escape aware. */

@@ -6,7 +6,14 @@ import {
   resolveEscapePlaceholders,
 } from "./_escape.ts";
 import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcards.ts";
-import { splitRoute } from "./operations/_utils.ts";
+import { expandModifiers, splitRoute } from "./operations/_utils.ts";
+
+// Lookup ignores up to two trailing slashes (`findRoute` strips one, then
+// `splitPath` pops one trailing empty segment), so `/a/b`, `/a/b/` and `/a/b//`
+// all reach `/a/b`. A third slash leaves a real empty last segment: the body
+// then ends in `/` and exactly two more must follow (`/a///` reaches `/a/:x`
+// with `x: ""`, `/a//` does not). The look-behind encodes that last rule.
+const TRAILING_SLASHES = "(?://|(?<!/)/?)$";
 
 /**
  * Convert a rou3 route pattern into an anchored {@link RegExp}.
@@ -18,13 +25,18 @@ import { splitRoute } from "./operations/_utils.ts";
  * `(?:...)?` rather than an alternation, so a param is never emitted as a
  * duplicate named group — which PCRE2 rejects unless `PCRE2_DUPNAMES` is set.
  *
+ * The regex matches exactly the paths `findRoute()` matches for a router holding
+ * only `route` — including the router's tolerances: up to two trailing slashes,
+ * empty segments for `:name` / `*` params, and an optional trailing `*` — so it
+ * can stand in for the router as a guard or scope check.
+ *
  * Note: multi-group or mid-route optionals that cannot be inlined still fall
  * back to alternation and may contain duplicate named groups (valid in JS/Perl,
  * but requiring `PCRE2_DUPNAMES` for strict PCRE2 engines).
  *
  * @example
- * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)\/?$/
- * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
+ * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)(?:\/\/|(?<!\/)\/?)$/
+ * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?(?:\/\/|(?<!\/)\/?)$/
  */
 export function routeToRegExp(route: string = "/"): RegExp {
   if (route.charCodeAt(0) !== 47 /* '/' */) {
@@ -40,11 +52,22 @@ export function routeToRegExp(route: string = "/"): RegExp {
     return inlineOptional;
   }
 
-  const groupExpanded = expandGroupDelimiters(route);
+  // Modifiers the inline emitter cannot mirror expand exactly like `addRoute`
+  // (groups first, then modifiers).
+  const groupExpanded =
+    expandGroupDelimiters(route) ||
+    (needsModifierExpansion(route) ? expandModifiers(splitRoute(route)) : undefined);
   if (groupExpanded) {
-    const sources = groupExpanded.map((expandedRoute) =>
-      routeToRegExp(expandedRoute).source.slice(1, -1),
-    );
+    // Expansions can compile to the same regex (`/a/:x+/b{c}?` is `/a/**:x`
+    // either way); keep one copy of each.
+    const sources = [
+      ...new Set(
+        groupExpanded.map((expandedRoute) => routeToRegExp(expandedRoute).source.slice(1, -1)),
+      ),
+    ];
+    if (sources.length === 1) {
+      return new RegExp(`^${sources[0]}$`);
+    }
     // Note: alternation branches may still contain duplicate named capture
     // groups (e.g. `(?<id>a)|(?<id>b)`) for multi-group / mid-route optionals
     // that can't be inlined. This is valid in modern JS engines (Node 22+,
@@ -74,15 +97,17 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
     body === "" ||
     // Only a single group is handled inline; bail if `pre`/`body` nest another.
     scanFirstGroup(pre) ||
-    scanFirstGroup(body)
+    scanFirstGroup(body) ||
+    needsModifierExpansion(pre) ||
+    needsModifierExpansion(pre + body)
   ) {
     return;
   }
 
-  const baseSegs = routeToRegExpSegments(pre);
-  const fullSegs = routeToRegExpSegments(pre + body);
+  const [baseSegs, baseOwnSep] = routeToRegExpSegments(pre);
+  const [fullSegs, fullOwnSep] = routeToRegExpSegments(pre + body);
   const baseLen = baseSegs.length;
-  if (baseLen === 0 || fullSegs.length < baseLen) {
+  if (baseLen === 0 || fullSegs.length < baseLen || baseOwnSep !== fullOwnSep) {
     return;
   }
 
@@ -116,25 +141,72 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
     const k = prefix.length;
     const inlineSegs = fullSegs.slice(0, baseLen - 1);
     inlineSegs.push(`${last.slice(0, k)}(?:${last.slice(k)})?`);
-    return new RegExp(`^/${inlineSegs.join("/")}/?$`);
+    return new RegExp(`^${joinSegments(inlineSegs, fullOwnSep)}${TRAILING_SLASHES}`);
   }
 
   // `body` adds one or more whole segments (e.g. `/foo` -> `/foo/bar`); make
   // the appended segments optional.
-  const head = fullSegs.slice(0, baseLen).join("/");
+  const head = joinSegments(fullSegs.slice(0, baseLen), fullOwnSep);
   const tail = fullSegs.slice(baseLen).join("/");
-  return new RegExp(`^/${head}(?:/${tail})?/?$`);
+  return new RegExp(`^${head}(?:/${tail})?${TRAILING_SLASHES}`);
+}
+
+/**
+ * Whether `route` has a modifier whose tree expansion the inline emitter can't
+ * mirror: a `+`/`*` before the last segment turns into a terminal `**:name`
+ * (`/a/:x+/b` is `/a/**:x`), and an empty segment followed only by optional
+ * ones becomes trailing (and is dropped) once they are absent (`/a//:x?`
+ * also registers `/a`).
+ */
+function needsModifierExpansion(route: string): boolean {
+  const segments = splitRoute(route);
+  for (let i = 0; i < segments.length - 1; i++) {
+    const mod = paramModifier(segments[i]);
+    if (mod === "+" || mod === "*") {
+      return true;
+    }
+    if (segments[i] === "" && segments.slice(i + 1).every((s) => paramModifier(s))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** The `?`/`+`/`*` modifier of a param segment (`:x?`, `pre-:x(\\d+)+`). */
+function paramModifier(segment: string): string | undefined {
+  return /:[\w-]+(?:\([^)]*\))?([?+*])$/.exec(segment)?.[1];
 }
 
 function _routeToRegExp(route: string): RegExp {
-  return new RegExp(`^/${routeToRegExpSegments(route).join("/")}/?$`);
+  const [segments, ownSeparator] = routeToRegExpSegments(route);
+  // Root: lookup reaches `/` from `/` and `//` only.
+  return new RegExp(
+    segments.length > 0 ? `^${joinSegments(segments, ownSeparator)}${TRAILING_SLASHES}` : "^//?$",
+  );
 }
 
-function routeToRegExpSegments(route: string): string[] {
-  const reSegments = [];
-  let idCtr = 0;
+/**
+ * Join segment regexes with `/`. With `ownSeparator`, the first one is an
+ * optional first route segment that carries its own separator (`(?:/…)?`), so
+ * no leading `/` is added — a bare `^\/?` there would let the leading slash
+ * double as a trailing one.
+ */
+function joinSegments(segments: string[], ownSeparator: boolean): string {
+  return (ownSeparator ? "" : "/") + segments.join("/");
+}
 
-  for (const segment of splitRoute(route)) {
+/**
+ * Segment regexes for `route`, plus whether the first one is an optional
+ * first route segment carrying its own separator (see `joinSegments`).
+ */
+function routeToRegExpSegments(route: string): [segments: string[], ownSeparator: boolean] {
+  const reSegments: string[] = [];
+  let idCtr = 0;
+  let ownSeparator = false;
+
+  const segments = splitRoute(route);
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
     // An empty *middle* segment (`/a//b`) is a real static segment in the tree,
     // so it must stay in the regex; `splitRoute` has already dropped the leading
     // and trailing empties (`/a//` = `/a/` = `/a`).
@@ -144,13 +216,27 @@ function routeToRegExpSegments(route: string): string[] {
     }
 
     if (segment === "*") {
-      reSegments.push(`(?<${toRegExpUnnamedKey(idCtr++)}>[^/]*)`);
+      const star = `(?<${toRegExpUnnamedKey(idCtr++)}>[^/]*)`;
+      // A trailing `*` is optional in the tree (`/a` reaches `/a/*`), also
+      // when only optional segments follow it (`/a/*/:x?` expands to `/a/*`).
+      if (
+        !segments.slice(i + 1).every((s) => paramModifier(s) === "?" || paramModifier(s) === "*")
+      ) {
+        reSegments.push(star);
+      } else if (reSegments.length > 0) {
+        reSegments.push(`${reSegments.pop()}(?:/${star})?`);
+      } else {
+        ownSeparator = true;
+        reSegments.push(`(?:/${star})?`);
+      }
     } else if (segment.startsWith("**")) {
       // The separator before a catch-all must stay anchored to the prefix: a
       // bare optional `/?` would let `/api/**` match `/apifoo`. `**` matches
-      // zero or more segments (`/api` too), `**:name` one or more.
+      // zero or more segments (`/api` too), `**:name` one or more. A segment may
+      // be empty, so one-or-more is the separator plus `.*` (`/api///` reaches
+      // `/api/**:p` with `p: ""`; `/api//` is `/api` after trailing stripping).
       if (segment !== "**") {
-        reSegments.push(`(?<${toGroupName(segment.slice(3))}>.+)`);
+        reSegments.push(`(?<${toGroupName(segment.slice(3))}>.*)`);
       } else if (reSegments.length > 0) {
         reSegments.push(`${reSegments.pop()}(?:/(?<_>.*))?`);
       } else {
@@ -171,7 +257,8 @@ function routeToRegExpSegments(route: string): string[] {
           const inner = escapeBareDots(
             base.replace(
               /:([\w-]+)(?:\(([^)]*)\))?/g,
-              (_, id, pattern) => `(?<${toGroupName(id)}>${pattern || "[^/]+"})`,
+              (_, id, pattern) =>
+                `(?<${toGroupName(id)}>${pattern || (/^:[\w-]+$/.test(base) ? "[^/]*" : "[^/]+")})`,
             ),
           );
           if (reSegments.length > 0) {
@@ -179,7 +266,8 @@ function routeToRegExpSegments(route: string): string[] {
             const prevQ: string = reSegments.pop()!;
             reSegments.push(`${prevQ}(?:/${inner})?`);
           } else {
-            reSegments.push(`?${inner}?`);
+            ownSeparator = true;
+            reSegments.push(`(?:/${inner})?`);
           }
           continue;
         }
@@ -197,7 +285,7 @@ function routeToRegExpSegments(route: string): string[] {
             );
           } else {
             reSegments.push(
-              mod === "+" ? `${prevMod}/(?<${name}>.+)` : `${prevMod}(?:/(?<${name}>.*))?`,
+              mod === "+" ? `${prevMod}/(?<${name}>.*)` : `${prevMod}(?:/(?<${name}>.*))?`,
             );
           }
         } else {
@@ -205,9 +293,8 @@ function routeToRegExpSegments(route: string): string[] {
             const repeated = `${pattern}(?:/${pattern})*`;
             reSegments.push(mod === "+" ? `?(?<${name}>${repeated})` : `?(?<${name}>${repeated})?`);
           } else {
-            // `+` needs at least one segment, so its separator is required (an
-            // optional one would let `/` match with the param captured as `/`).
-            reSegments.push(mod === "+" ? `(?<${name}>.+)` : `?(?<${name}>.*)`);
+            // `+` needs at least one segment, so its separator is required.
+            reSegments.push(mod === "+" ? `(?<${name}>.*)` : `?(?<${name}>.*)`);
           }
         }
 
@@ -218,13 +305,18 @@ function routeToRegExpSegments(route: string): string[] {
       let dynamicSegment = replaceEscapesOutsideGroups(segment);
       [dynamicSegment, idCtr] = replaceSegmentWildcards(dynamicSegment, idCtr, toRegExpUnnamedKey);
 
+      // A whole-segment `:name` is an unchecked param node in the tree, which
+      // also takes an empty segment (`/a//b` reaches `/a/:x/b`); inside a mixed
+      // segment (`get-:file`) the tree compiles it to `[^/]+`.
+      const whole = /^:[\w-]+$/.test(segment);
       reSegments.push(
         resolveEscapePlaceholders(
           escapeBareDots(
             dynamicSegment
               .replace(
                 /:([\w-]+)(?:\(([^)]*)\))?/g,
-                (_, id, pattern) => `(?<${toGroupName(id)}>${pattern || "[^/]+"})`,
+                (_, id, pattern) =>
+                  `(?<${toGroupName(id)}>${pattern || (whole ? "[^/]*" : "[^/]+")})`,
               )
               .replace(/(^|[^\\])\((?![?<])/g, (_, p) => `${p}(?<${toRegExpUnnamedKey(idCtr++)}>`),
           ),
@@ -235,7 +327,7 @@ function routeToRegExpSegments(route: string): string[] {
     }
   }
 
-  return reSegments;
+  return [reSegments, ownSeparator];
 }
 
 function toRegExpUnnamedKey(index: number): string {

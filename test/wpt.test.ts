@@ -123,6 +123,18 @@ const KNOWN_DIFFS = new Set([
   // `*` catch-all vs single-segment — URLPattern `*` = `(.*)`, rou3 `*` = `([^/]*)`
   "/foo/* → /foo/bar/baz [match]",
 
+  // Trailing slash — rou3 ignores up to two trailing slashes, so `/foo/` is
+  // `/foo` (no empty last segment), and a trailing `*` is optional. URLPattern
+  // matches `/foo/` with an empty capture and rejects `/foo` for `/foo/*`.
+  // routeToRegExp reproduces the router here (#200).
+  "/foo/(.*) → /foo/ [match]",
+  "/foo/* → /foo/ [match]",
+  "/foo/* → /foo [no match]",
+  "/foo/:bar(.*) → /foo/ [match]",
+  "/foo/(.*)+ → /foo/ [match]",
+  "/foo/*+ → /foo/ [match]",
+  "/foo/(.*)* → /foo/ [match]",
+
   // `(.*)` / `*` with modifiers — rou3 doesn't support these as URLPattern does
   "/foo/(.*)? → /foo [match]",
   "/foo/(.*)? → /foo/ [match]",
@@ -238,15 +250,6 @@ const ROUTER_SKIP_PATTERNS = new Set([
 // Additional known diffs specific to router-based matching.
 // These are tests where the radix tree router behaves differently from routeToRegExp.
 const ROUTER_KNOWN_DIFFS = new Set([
-  // `(.*)` / `*` with empty match — router doesn't match empty segments
-  "/foo/(.*) → /foo/ [match]",
-  "/foo/* → /foo/ [match]",
-  "/foo/* → /foo [no match]",
-  "/foo/:bar(.*) → /foo/ [match]",
-  "/foo/(.*)+ → /foo/ [match]",
-  "/foo/*+ → /foo/ [match]",
-  "/foo/(.*)* → /foo/ [match]",
-
   // `(.*)` cross-segment — routeToRegExp matches `bar/baz` (regex `.` spans `/`),
   // but the segment-scoped radix tree stops at one segment.
   "/foo/(.*) → /foo/bar/baz [match]",

@@ -85,6 +85,10 @@ describe("regExpToRoute", () => {
     }
   });
 
+  it("keeps a trailing unnamed `(.*)` a constraint", () => {
+    expect(regExpToRoute(routeToRegExp("/a/(.*)"))).toBe("/a/(.*)");
+  });
+
   it("throws on the alternation fallback it cannot reverse", () => {
     const alt = routeToRegExp("/media/*{.webp}?");
     expect(() => regExpToRoute(alt)).toThrow();
