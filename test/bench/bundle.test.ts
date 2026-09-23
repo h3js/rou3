@@ -56,8 +56,14 @@ describe("benchmark", () => {
     // ctx.static key and the compiled static dispatch each matching a different
     // set of paths. Lookup paths still use splitPath (one popped empty segment,
     // i.e. `/a//` reaches `/a` but `/a///` does not) — unchanged.
-    expect(bytes).toBeLessThanOrEqual(6640); // <6.64kb
-    expect(gzipSize).toBeLessThanOrEqual(2690); // <2.69kb
+    // +~77B raw / +~41B gzip: addRoute stamps a registration identity on each
+    // MethodData (the rewritten segment join for plain patterns, the
+    // pre-expansion text for optional/group ones) so removeRoute can splice
+    // one same-node sibling without touching the others (#201, #202).
+    // +~90B raw / +~30B gzip: expandedRouteId() normalizes that pre-expansion
+    // text (trailing empties, escaped statics) so `/a/:x?/` removes `/a/:x?`.
+    expect(bytes).toBeLessThanOrEqual(6820); // <6.82kb
+    expect(gzipSize).toBeLessThanOrEqual(2760); // <2.76kb
   });
 });
 

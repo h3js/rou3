@@ -151,7 +151,7 @@ describe("route matching", () => {
 
   it("remove works", () => {
     removeRoute(router, "GET", "/test");
-    removeRoute(router, "GET", "/test/*");
+    removeRoute(router, "GET", "/test/:id");
     removeRoute(router, "GET", "/test/foo/*");
     removeRoute(router, "GET", "/test/foo/**");
     removeRoute(router, "GET", "/**");
