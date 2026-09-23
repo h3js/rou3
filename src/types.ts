@@ -37,28 +37,53 @@ export type MatchedRoute<T = unknown> = {
 type ExtractWildcards<
   TPath extends string,
   Count extends readonly unknown[] = [],
-> = TPath extends `${string}**:${infer Rest}` // Named catch-all wildcard (**:name)
-  ? Rest extends `${infer Param}/${infer Tail}`
-    ? Param | ExtractWildcards<Tail, Count>
-    : Rest
-  : TPath extends `${string}*${infer Rest}` // Wildcard patterns
-    ? Rest extends `*` // Double wildcard (**) -> "_"
-      ? `_`
-      : `${Count["length"]}` | ExtractWildcards<Rest, [...Count, unknown]> // Single wildcard (*) -> "0", "1", etc.
-    : TPath extends `${string}/${infer Rest}` // Continue parsing path segments
-      ? ExtractWildcards<Rest, Count>
+> = TPath extends `${infer Prefix}**:${infer Name}` // Named catch-all wildcard (**:name), terminal
+  ? Name | ExtractWildcards<Prefix, Count>
+  : TPath extends `${infer Prefix}**${string}` // Double wildcard (**) -> "_", terminal
+    ? "_" | ExtractWildcards<Prefix, Count>
+    : TPath extends `${string}*${infer Rest}` // Single wildcard (*) -> "0", "1", etc.
+      ? `${Count["length"]}` | ExtractWildcards<Rest, [...Count, unknown]>
       : never; // No more wildcards found
 
-type ExtractNamedParams<TPath extends string> = TPath extends `${infer _Start}:${infer Rest}` // Found named parameter (:name)
-  ? Rest extends `${infer Param}/${infer Tail}` // Parameter followed by path
-    ? Param | ExtractNamedParams<`/${Tail}`>
-    : Rest extends `${infer Param}*${infer Tail}` // Parameter followed by wildcard
-      ? Param | ExtractNamedParams<`/${Tail}`>
-      : Rest // Final parameter
-  : TPath extends `/${infer Rest}` // Continue parsing path
-    ? ExtractNamedParams<Rest>
-    : never; // No parameters found
+// A trailing bare `*` segment matches zero segments too, so its capture may be undefined
+type ExtractTrailingWildcard<TPath extends string> = TPath extends `${infer Prefix}/*${"" | "/"}`
+  ? Exclude<ExtractWildcards<TPath>, ExtractWildcards<Prefix>>
+  : never;
+
+// Raw `:name(constraint)?` tokens (everything after `:` up to the next `/`)
+type ExtractParamTokens<TPath extends string> = TPath extends `${string}:${infer Rest}`
+  ? Rest extends `${infer Token}/${infer Tail}`
+    ? Token | ExtractParamTokens<`/${Tail}`>
+    : Rest
+  : never;
+
+type ParamName<Token extends string> = Token extends `${infer Name}(${string}` // Regex constraint
+  ? Name
+  : Token extends `${infer Name}${"?" | "*" | "+"}` // Modifier
+    ? Name
+    : Token;
+
+type OptionalParam<Token extends string> = Token extends `${string}${"?" | "*"}` ? true : false;
+
+// Remove `:name...` tokens so a modifier `*` is never counted as a wildcard capture
+type StripParams<TPath extends string> = TPath extends `${infer Prefix}**:${infer Name}`
+  ? `${StripParams<Prefix>}**:${Name}`
+  : TPath extends `${infer Prefix}:${infer Rest}`
+    ? Rest extends `${string}/${infer Tail}`
+      ? `${Prefix}/${StripParams<Tail>}`
+      : Prefix
+    : TPath;
 
 export type InferRouteParams<TPath extends string> = {
-  [K in ExtractNamedParams<TPath> | ExtractWildcards<TPath>]: string;
-};
+  [Token in ExtractParamTokens<TPath> as ParamName<Token>]: OptionalParam<Token> extends true
+    ? string | undefined
+    : string;
+} & {
+  [Key in ExtractWildcards<StripParams<TPath>>]: Key extends ExtractTrailingWildcard<
+    StripParams<TPath>
+  >
+    ? string | undefined
+    : string;
+} extends infer Params
+  ? { [K in keyof Params]: Params[K] }
+  : never;

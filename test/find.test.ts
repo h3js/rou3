@@ -652,6 +652,7 @@ describe("wildcard tail extraction (compiled parity)", () => {
   addRoute(router, "GET", "/files/**:path", { path: "FILES" });
   addRoute(router, "GET", "/opt/**", { path: "OPT" });
   addRoute(router, "GET", "/pre/:x/**:rest", { path: "PRE" });
+  addRoute(router, "GET", "/segment/*/", { path: "SEGMENT" });
   const compiledLookup = compileRouter(router);
 
   const lookups = [
@@ -690,6 +691,10 @@ describe("wildcard tail extraction (compiled parity)", () => {
         data: { path: "PRE" },
         params: { x: "v", rest: "a/b" },
       });
+      // trailing bare `*` matches zero segments: the key is present, the value undefined
+      const segment = match("GET", "/segment");
+      expect(segment).toMatchObject({ data: { path: "SEGMENT" } });
+      expect(segment?.params).toHaveProperty("0", undefined);
     });
   }
 });
