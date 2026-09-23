@@ -5,6 +5,7 @@ import {
   replaceEscapesOutsideGroups,
   resolveEscapePlaceholders,
 } from "./_escape.ts";
+import { routePatternError } from "./_pattern-error.ts";
 import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcards.ts";
 import { splitRoute } from "./operations/_utils.ts";
 
@@ -22,11 +23,22 @@ import { splitRoute } from "./operations/_utils.ts";
  * back to alternation and may contain duplicate named groups (valid in JS/Perl,
  * but requiring `PCRE2_DUPNAMES` for strict PCRE2 engines).
  *
+ * Throws the same `SyntaxError` as `addRoute` for a pattern whose dynamic
+ * segments do not compile (unbalanced `(`, a `/` inside a constraint, ...).
+ *
  * @example
  * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)\/?$/
  * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
  */
 export function routeToRegExp(route: string = "/"): RegExp {
+  try {
+    return _routeToRegExpAny(route);
+  } catch (err) {
+    throw routePatternError(route, err);
+  }
+}
+
+function _routeToRegExpAny(route: string): RegExp {
   if (route.charCodeAt(0) !== 47 /* '/' */) {
     route = `/${route}`;
   }
@@ -43,7 +55,7 @@ export function routeToRegExp(route: string = "/"): RegExp {
   const groupExpanded = expandGroupDelimiters(route);
   if (groupExpanded) {
     const sources = groupExpanded.map((expandedRoute) =>
-      routeToRegExp(expandedRoute).source.slice(1, -1),
+      _routeToRegExpAny(expandedRoute).source.slice(1, -1),
     );
     // Note: alternation branches may still contain duplicate named capture
     // groups (e.g. `(?<id>a)|(?<id>b)`) for multi-group / mid-route optionals

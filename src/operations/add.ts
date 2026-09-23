@@ -2,11 +2,15 @@ import { expandGroupDelimiters } from "../_group-delimiters.ts";
 import { toGroupName, toUnnamedGroupKey } from "../_group-names.ts";
 import { replaceSegmentWildcards } from "../_segment-wildcards.ts";
 import { NullProtoObj } from "../object.ts";
+import { routePatternError } from "../_pattern-error.ts";
 import type { RouterContext, ParamsIndexMap } from "../types.ts";
 import { encodeEscapes, expandModifiers, segmentKey, splitRoute } from "./_utils.ts";
 
 /**
  * Add a route to the router context.
+ *
+ * Throws a `SyntaxError` naming `path` when a dynamic segment does not compile
+ * to a `RegExp` (unbalanced `(`, a `/` inside a constraint, ...).
  */
 export function addRoute<T>(
   ctx: RouterContext<T>,
@@ -14,7 +18,17 @@ export function addRoute<T>(
   path: string,
   data?: T,
 ): void {
-  method = method.toUpperCase();
+  try {
+    _addRoute(ctx, method.toUpperCase(), path, data);
+  } catch (err) {
+    // Only `new RegExp` throws a SyntaxError here. Wrap it once, at the outer
+    // entry: the recursive expansions below rewrite `path`, so this is the only
+    // frame that still holds the caller's original route.
+    throw routePatternError(path, err);
+  }
+}
+
+function _addRoute<T>(ctx: RouterContext<T>, method: string, path: string, data?: T): void {
   if (path.charCodeAt(0) !== 47 /* '/' */) {
     path = `/${path}`;
   }
@@ -22,7 +36,7 @@ export function addRoute<T>(
   const groupExpanded = expandGroupDelimiters(path);
   if (groupExpanded) {
     for (const expandedPath of groupExpanded) {
-      addRoute(ctx, method, expandedPath, data);
+      _addRoute(ctx, method, expandedPath, data);
     }
     return;
   }
@@ -35,7 +49,7 @@ export function addRoute<T>(
   const expanded = expandModifiers(segments);
   if (expanded) {
     for (const p of expanded) {
-      addRoute(ctx, method, p, data);
+      _addRoute(ctx, method, p, data);
     }
     return;
   }
@@ -120,7 +134,13 @@ function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
     const c = segment.charCodeAt(j);
     if (c === 40) _d++;
     else if (c === 41 && _d > 0) _d--;
-    else if (c === 92 && _d === 0 && j + 1 < segment.length) {
+    else if (c === 0xff_fd) {
+      // `\:` `\(` `\)` `\{` `\}` were encoded by `encodeEscapes()` before the
+      // path was split (so they never act as route syntax); re-emit the literal
+      // behind the regex placeholder so the resolve step below escapes it.
+      _s += "\uFFFE" + ":(){}"["ABCDE".indexOf(segment[++j])];
+      continue;
+    } else if (c === 92 && _d === 0 && j + 1 < segment.length) {
       const n = segment[j + 1];
       if (n !== ":" && n !== "(" && n !== "*" && n !== "\\") {
         _s += "\uFFFE" + n;
@@ -138,9 +158,14 @@ function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
   }
   [_s, _i] = replaceSegmentWildcards(_s, _i);
 
+  // A placeholder-escaped `:` / `(` is a literal, not a param or group opener,
+  // and a placeholder-escaped `)` inside a constraint body must not close it.
   const regex = _s
-    .replace(/:([\w-]+)(?:\(([^)]*)\))?/g, (_, id, p) => `(?<${toGroupName(id)}>${p || "[^/]+"})`)
-    .replace(/\((?![?<])/g, () => `(?<${toUnnamedGroupKey(_i++)}>`)
+    .replace(
+      /(?<!\uFFFE):([\w-]+)(?:\(((?:[^)\uFFFE]|\uFFFE.)*)\))?/g,
+      (_, id, p) => `(?<${toGroupName(id)}>${p || "[^/]+"})`,
+    )
+    .replace(/(?<!\uFFFE)\((?![?<])/g, () => `(?<${toUnnamedGroupKey(_i++)}>`)
     .replace(/\uFFFE(.)/g, (_, c) => (/[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c));
 
   return [new RegExp(`^${regex}$`), _i];

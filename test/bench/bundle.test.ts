@@ -56,8 +56,17 @@ describe("benchmark", () => {
     // ctx.static key and the compiled static dispatch each matching a different
     // set of paths. Lookup paths still use splitPath (one popped empty segment,
     // i.e. `/a//` reaches `/a` but `/a///` does not) — unchanged.
-    expect(bytes).toBeLessThanOrEqual(6640); // <6.64kb
-    expect(gzipSize).toBeLessThanOrEqual(2690); // <2.69kb
+    // +~690B raw / +~370B gzip: route-pattern errors (#199). A dynamic segment
+    // that does not compile used to leak the engine's RegExp SyntaxError for a
+    // rewritten fragment (`/^(?<__rou3_unnamed_0>2024$/: Unterminated group`);
+    // `_pattern-error.ts` now scans the caller's original route (escape- and
+    // class-aware, engine-independent) and throws one SyntaxError naming it —
+    // unbalanced `(`, unmatched `)`, `/` inside a constraint, unterminated `[`
+    // — with the native error as `cause`; shared with routeToRegExp. Also
+    // decodes `\(` `\)` `\:` `\{` `\}` placeholders inside dynamic segments
+    // (they compiled to a literal U+FFFD and could never match).
+    expect(bytes).toBeLessThanOrEqual(7350); // <7.35kb
+    expect(gzipSize).toBeLessThanOrEqual(3060); // <3.06kb
   });
 });
 

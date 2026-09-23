@@ -14,6 +14,7 @@ src/
   context.ts          # createRouter() factory
   object.ts           # NullProtoObj (null-prototype object constructor)
   _escape.ts          # URLPattern backslash escape handling (placeholder approach)
+  _pattern-error.ts   # routePatternError() - engine-independent route-pattern SyntaxError (addRoute + routeToRegExp)
   _group-delimiters.ts# Non-capturing group ({...}) expansion helper
   _group-names.ts     # Capture-group name codec (param name <-> group name escaping)
   _segment-wildcards.ts# Wildcard segment capture handling
@@ -38,6 +39,7 @@ test/
   route-node-keys.test.ts # routeNodeKeys() (fixtures + node-sharing property sweep + shadowing sweep)
   group-names.test.ts # Capture-group name codec (round-trip + injectivity)
   regexp.test.ts      # RegExp conversion tests
+  pattern-errors.test.ts # Route-pattern error contract (all entry points) + escaped syntax inside dynamic segments
   regexp.pcre.test.ts # Cross-engine PCRE checks (runs routeToRegExp output through installed grep -P/rg -P/pcre2grep/perl/php)
   _regexp-cases.ts    # Shared route->regex fixtures (used by regexp.test.ts + regexp.pcre.test.ts)
   types.test-d.ts     # TypeScript type-level tests
@@ -141,6 +143,16 @@ Two separate escape systems handle `\x` in route patterns:
 2. **Regex escape handling** (`_escape.ts`): `replaceEscapesOutsideGroups()` replaces `\x` outside `(...)` groups with `\uFFFE` placeholder, preserving regex syntax inside groups (e.g., `\d` in `(\d+)`). `resolveEscapePlaceholders()` then converts placeholders to regex-safe literals. Used by `routeToRegExp()` and `getParamRegexp()` in `add.ts`.
 
 Key invariant: `\uFFFD` (U+FFFD) is used for router-level escaping, `\uFFFE` (U+FFFE) for regex-level escaping — they must not collide.
+
+`getParamRegexp()` decodes the `\uFFFD` placeholders it meets in a **dynamic** segment (`/files/:name\(2024`, `/id/:id(\(\d+\))`) into `\uFFFE` + literal so the final resolve step regex-escapes them; the param/group replaces are guarded with `(?<!\uFFFE)` and the constraint-body class admits `\uFFFE.` pairs so an escaped `:`/`(`/`)` is never read as syntax. Before this only `segmentKey()` decoded (static keys) and an escaped paren in a dynamic segment compiled to a literal U+FFFD — registered fine, never matched, while `routeToRegExp` matched. Pinned in `test/pattern-errors.test.ts` "escaped route syntax inside dynamic segments" (interpreter, compiled and `routeToRegExp` agree).
+
+### Route-pattern errors
+
+A dynamic segment that does not compile to a `RegExp` throws one `SyntaxError` from every entry point (`addRoute`, `routeToRegExp`, and everything built on `addRoute`: `routeNodeKeys`, `compareRoutes`, `findOverlappingRoutes`, ...): `Invalid route pattern "<original route>": <detail>.` with the native error as `cause`. `src/_pattern-error.ts` (`routePatternError`) is the single wrap point; `addRoute` and `routeToRegExp` are thin public wrappers around `_addRoute` / `_routeToRegExpAny` because both recurse on rewritten paths (group/modifier expansion), so only the outermost frame still holds the caller's route. Non-`SyntaxError`s (group-delimiter errors) pass through untouched.
+
+- **Diagnosis is engine-independent and route-level.** It never string-matches the engine's prose (V8 says `Unterminated group`, JavaScriptCore `missing )`, SpiderMonkey `unterminated parenthetical` — a sniff shipped green on Node and failed under Bun) and never reports the rewritten segment (`(2024` for `/api/v1/.../(2024`, placeholder bytes for `\:x(2024`, `x(?:y)+` for `x{y}+`). Instead the *original* route is scanned once, skipping `\x` pairs and `[...]` classes: `/` at paren depth > 0 → `a '(...)' constraint cannot contain '/'` (`/:path(.+/.+)` is split in two by `splitRoute()` before any segment compiles — no per-segment check can distinguish it from an unbalanced `(`; the old message positively misdiagnosed it and its escape advice then registered a bogus two-segment static route); depth > 0 at end → `unbalanced '(' group`; a `)` at depth 0 → `unmatched ')'`; an open class → `unterminated '[' character class` (reported first: it swallows everything after it); otherwise the native message. The paren cases append the escape hint in **JS-string form** (`\( ("\\(" in a JS string)`) — `"\("` in a JS literal is just `(`, so the pattern-text form reproduced the same throw.
+- The scanner runs **only after** `new RegExp` failed, so it never rejects a pattern the engine accepts (`:id([(]+)` has an unbalanced-looking `(` and compiles fine) — it only picks the wording.
+- Known residual: registration is not atomic. `node.param` is created before the segment is validated, and a modifier/group expansion registers its earlier variants before a later one throws (`/a/:x*/(2024` leaves `/a/**:x` live). Same on `main`.
 
 Perf: `addRoute`'s pre-processing helpers each bail out early when the input lacks their trigger char — `encodeEscapes` (`\`), `decodeEscaped` (`\uFFFD`), `expandGroupDelimiters` (`{`), `expandModifiers` (trailing `?`/`+`/`*` charCode check). Plain routes skip all the regex/scanner machinery (~2x faster add); keep the guards when editing these helpers.
 
