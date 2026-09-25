@@ -10,6 +10,18 @@
 // look-behind free and only the rest fall back to `LOOKBEHIND_SUFFIX`.
 const LOOKBEHIND_SUFFIX = "(?:(?<=/)/|(?<!/)/?)$";
 
+// Catch-all bodies for the look-behind-free endings, in place of `.*`: they
+// match the same strings, minus one trailing slash left for the `/?$` after
+// them (`a/b/` captures `a/b`, `a//` captures `a/`). `(?:.*[^/])?` runs
+// greedily to the last non-slash char and only the run of trailing slashes is
+// taken lazily, so a lazy step per char (`.*?`, several times slower on long
+// paths) is paid per trailing slash only. `ANY_TAIL` may be empty, `SOME_TAIL`
+// may not (a `//` tail gives `/`). Unlike `.`, `[^/]` also matches a line
+// terminator, so one is accepted as the last non-slash char (the router takes
+// line terminators anywhere; `.*` rejects them elsewhere).
+const ANY_TAIL = "(?:.*[^/])?/*?";
+const SOME_TAIL = "(?:.*[^/]|/)/*?";
+
 /**
  * Append the trailing-slash rule to a route regex `body`, rewriting its ending
  * when that removes the need for look-behinds:
@@ -25,6 +37,9 @@ const LOOKBEHIND_SUFFIX = "(?:(?<=/)/|(?<!/)/?)$";
  *   non-empty branch with an optional slash and an empty branch with exactly
  *   one. That branch leaves the group unset where the router reports `""`.
  *
+ * A trailing catch-all `.*` becomes `ANY_TAIL` / `SOME_TAIL` in these endings,
+ * so it never captures the slash `/?$` strips.
+ *
  * Anything else keeps the look-behind suffix. That includes a required
  * empty-capable segment followed by optional ones (`/a/:x/:y?`): the path must
  * not stop right after its separator, and without look-around saying so needs
@@ -37,7 +52,7 @@ export function withTrailingSlash(body: string): string {
   // Root catch-all (`/**`, `/:x*`): every path matches.
   const root = /^\/\?\(\?<(\w+)>\.\*\)$/.exec(body);
   if (root) {
-    return `/?(?<${root[1]}>.*?)/?$`;
+    return `/?(?<${root[1]}>${ANY_TAIL})/?$`;
   }
 
   const tokens = tokenize(body);
@@ -64,7 +79,7 @@ export function withTrailingSlash(body: string): string {
   // keep the slash lookup strips (`/a/:x(.+)` matching `/a//` with `x: "/"`),
   // and none of the endings below rules that out. The exception is a trailing
   // catch-all `.*`: any of its matches minus a trailing slash is still one, and
-  // its endings below capture it lazily.
+  // its endings below leave that slash out of the capture.
   if (parts.some((part, i) => canEndInSlash(part) && !(i === last && CATCH_ALL.test(part)))) {
     return body + LOOKBEHIND_SUFFIX;
   }
@@ -83,7 +98,7 @@ export function withTrailingSlash(body: string): string {
     }
     const head = tokens.slice(0, sep + 1).join("");
     return param[2] === ".*"
-      ? `${head}(?:/|(?<${param[1]}>.+?)/?)$`
+      ? `${head}(?:/|(?<${param[1]}>${SOME_TAIL})/?)$`
       : `${head}(?:(?<${param[1]}>[^/]+)/?|/)$`;
   }
 
@@ -93,7 +108,7 @@ export function withTrailingSlash(body: string): string {
   // values into later groups: `/*/:y?` capturing `y` instead of `0`).
   // `.*` must not swallow the stripped slash. The router reports `**` as `""`
   // on `/a/` (group taken), every other optional as unset (group skipped).
-  const inner = parts[last].replace(/^(\(\?<\w+>\.\*)\)$/, "$1?)");
+  const inner = CATCH_ALL.test(parts[last]) ? parts[last].replace(".*", ANY_TAIL) : parts[last];
   const lazy = inner.startsWith("(?<_>") ? "" : "?";
   return `${tokens.slice(0, -1).join("")}(?:/${inner})?${lazy}/?$`;
 }

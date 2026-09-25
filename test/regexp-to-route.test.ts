@@ -85,7 +85,7 @@ describe("regExpToRoute", () => {
     // `(?<_>.*)` is `**` only when it ends the route; `**` is terminal.
     expect(regExpToRoute(routeToRegExp("/a/:_*"))).toBe("/a/**");
     expect(regExpToRoute(/^\/a(?:\/(?<_>.*))?\/b\/?$/)).toBe("/a/:_*/b");
-    // The lazy `:name*` ending must not reverse to a single-segment `(.*?)?`.
+    // The `:name*` ending must not reverse to a single-segment constraint.
     expect(regExpToRoute(routeToRegExp("/path/:rest*"))).toBe("/path/:rest*");
     expect(regExpToRoute(routeToRegExp("/a/c{/:w+}?"))).toBe("/a/c/:w*");
   });
@@ -140,6 +140,20 @@ describe("regExpToRoute", () => {
 
   it("keeps a trailing unnamed `(.*)` a constraint", () => {
     expect(regExpToRoute(routeToRegExp("/a/(.*)"))).toBe("/a/(.*)");
+  });
+
+  // Only the exact catch-all endings `routeToRegExp` emits are normalized: a
+  // lazy quantifier the user wrote inside a constraint must survive.
+  it("keeps lazy quantifiers inside constraints", () => {
+    for (const route of ["/a/:x(b.*?)", "/a/pre-:x(.*?)", "/a/:x(a.*?)?"]) {
+      expect(regExpToRoute(routeToRegExp(route)), route).toBe(route);
+    }
+    // The same constraints behind the plain `\/?` ending (older versions,
+    // hand-written regexes).
+    expect(regExpToRoute(/^\/a\/(?<x>b.*?)\/?$/)).toBe("/a/:x(b.*?)");
+    expect(regExpToRoute(/^\/a\/pre-(?<x>.*?)\/?$/)).toBe("/a/pre-:x(.*?)");
+    expect(regExpToRoute(/^\/a(?:\/(?<x>a.*?))?\/?$/)).toBe("/a/:x(a.*?)?");
+    expect(regExpToRoute(/^\/a(?:\/(?<x>[a-z]+))??\/?$/)).toBe("/a/:x([a-z]+)?");
   });
 
   it("throws on the alternation fallback it cannot reverse", () => {

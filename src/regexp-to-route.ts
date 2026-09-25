@@ -51,12 +51,13 @@ export function regExpToRoute(regexp: RegExp | string): string {
   if (src.startsWith("^")) src = src.slice(1);
   if (src.endsWith("$")) src = src.slice(0, -1);
   // Look-behind-free endings (see `withTrailingSlash`) back to their plain
-  // forms: `:x`, `**:x`/`:x+`, lazy catch-alls and lazy optional groups.
+  // forms. Only these exact shapes are rewritten; anything else, a lazy
+  // quantifier inside a constraint included, is parsed as written.
   src = src
-    .replace(/\(\?:\(\?<(\w+)>\[\^\/\]\+\)\\\/\?\|\\\/\)$/, "(?<$1>[^/]*)\\/?")
-    .replace(/\(\?:\\\/\|\(\?<(\w+)>\.\+\?\)\\\/\?\)$/, "(?<$1>.*)\\/?")
-    .replace(/\)\?\?\\\/\?$/, ")?\\/?")
-    .replace(/\.\*\?\)(\)\??)?\\\/\?$/, ".*)$1\\/?");
+    .replace(REQUIRED_PARAM, "(?<$1>[^/]*)\\/?")
+    .replace(REQUIRED_CATCH_ALL, "(?<$1>.*)\\/?")
+    .replace(TRAILING_CATCH_ALL, "(?<$1>.*)$2\\/?")
+    .replace(/\)\?\?\\\/\?$/, ")?\\/?");
   if (src.endsWith(TRAILING_SLASH)) src = src.slice(0, -TRAILING_SLASH.length);
   else if (src.endsWith(LEGACY_TRAILING_SLASHES)) {
     src = src.slice(0, -LEGACY_TRAILING_SLASHES.length);
@@ -116,6 +117,15 @@ export function regExpToRoute(regexp: RegExp | string): string {
 
   return "/" + segments.join("/");
 }
+
+// The look-behind-free endings `withTrailingSlash` emits, as `RegExp#source`
+// spells them (`x` stands for any group name):
+// - a required `:x`: `(?:(?<x>[^/]+)\/?|\/)`
+// - a required catch-all (`**:x`, `:x+`): `(?:\/|(?<x>(?:.*[^/]|\/)\/*?)\/?)`
+// - a trailing catch-all, possibly inside optional groups: `(?<x>(?:.*[^/])?\/*?)`
+const REQUIRED_PARAM = /\(\?:\(\?<(\w+)>\[\^\/\]\+\)\\\/\?\|\\\/\)$/;
+const REQUIRED_CATCH_ALL = /\(\?:\\\/\|\(\?<(\w+)>\(\?:\.\*\[\^\/\]\|\\\/\)\\\/\*\?\)\\\/\?\)$/;
+const TRAILING_CATCH_ALL = /\(\?<(\w+)>\(\?:\.\*\[\^\/\]\)\?\\\/\*\?\)((?:\)\?\??)*)\\\/\?$/;
 
 /** Reverse a single segment (no top-level separators) into route syntax. */
 function reverseSegment(seg: string): string {
