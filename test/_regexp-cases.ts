@@ -434,14 +434,16 @@ export const regexpCases: Record<string, RegExpCase> = {
   },
 };
 
-// Routes whose regex still ends in the look-behind trailing-slash suffix
+// Fixtures whose regex still ends in the look-behind trailing-slash suffix
 // `(?:(?<=\/)\/|(?<!\/)\/?)`, which RE2-family engines (Go, Rust `regex`,
-// RE2) reject. Every other route gets a look-behind-free ending (see
-// src/_trailing-slash.ts). The suffix remains where the path must not stop
-// right after a separator but the capture that decides it has to stay a
-// single named group: a required empty-capable param followed by optional
-// segments, a constraint that can match empty, an empty segment before a
-// trailing wildcard (`/a//*`), or several empty-capable optionals in a row.
+// RE2) reject. Every other fixture gets a look-behind-free ending (see
+// src/_trailing-slash.ts); the sweep corpus has more look-behind routes,
+// pinned in SWEEP_LOOKBEHIND_PATTERNS. The suffix remains where the path must
+// not stop right after a separator but the capture that decides it has to
+// stay a single named group: a required empty-capable param followed by
+// optional segments, a constraint that can match empty, an empty segment
+// before a trailing wildcard (`/a//*`), several empty-capable optionals in a
+// row, or an optional group spanning segments whose last one can be empty.
 // It also stays when a match can end in `/` (a constraint like `[^.]+`), so
 // that the stripped trailing slash never lands in the capture.
 export const LOOKBEHIND_ROUTES: ReadonlySet<string> = new Set([
@@ -467,6 +469,84 @@ export const PCRE2_DUPLICATE_NAME_ROUTES: ReadonlySet<string> = new Set([
   "/media/*{.webp}?",
   "/docs/{v2}?/:page?",
 ]);
+
+// Sweep patterns (see `sweepPatterns()`) whose regex keeps the look-behind
+// suffix. RE2-family engines reject them, so the RE2 sweep skips exactly these
+// (test/regexp.pcre.test.ts); pinned in test/regexp.test.ts so a change that
+// moves more routes onto the suffix fails instead of silently shrinking it.
+export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
+  // A required empty-capable segment followed by optional ones.
+  "/:x/*",
+  "/:x/**",
+  "/:x/:y?",
+  "/*/*",
+  "/*/**",
+  "/*/:y?",
+  "/a/:x/*",
+  "/a/:x/**",
+  "/a/:x/:y?",
+  "/a/*/*",
+  "/a/*/**",
+  "/a/*/:y?",
+  "/path/:id/:tab?",
+  // Several empty-capable optionals in a row.
+  "/:x?/*",
+  "/:x?/**",
+  "/:x?/:y?",
+  "/a/:x?/*",
+  "/a/:x?/**",
+  "/a/:x?/:y?",
+  // An empty segment before a trailing wildcard (`{b}?` leaves one when absent).
+  "//*",
+  "//**",
+  "/a//*",
+  "/a//**",
+  "/{b}?/*",
+  "/{b}?/**",
+  "/a/{b}?/*",
+  "/a/{b}?/**",
+  // A constraint that can match empty.
+  "/path/:id(\\d*)",
+  // An optional group spanning segments whose last one can be empty.
+  "/a{/b/:x}?",
+  "/path{/sub/:id}?",
+]);
+
+// Sweep patterns whose regex reuses a capture group name across alternation
+// branches (see PCRE2_DUPLICATE_NAME_ROUTES). Pinned like the set above.
+export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
+  // A mid-route optional group expands into one full route per branch.
+  "/{b}?/*",
+  "/{b}?/**",
+  "/{b}?/*.png",
+  "/{b}?/:y",
+  "/{b}?/:y?",
+  "/{b}?/x-:y",
+  "/a/{b}?/*",
+  "/a/{b}?/**",
+  "/a/{b}?/*.png",
+  "/a/{b}?/:y",
+  "/a/{b}?/:y?",
+  "/a/{b}?/x-:y",
+  "/{en}?/:page?",
+  "/docs/{v2}?/:page?",
+  // A mid-route `:x*` expands, and so does the trailing group after it.
+  "/:x*/b{.json}?",
+  "/a/:x*/b{.json}?",
+  // A mid-segment optional after a greedy capture.
+  "/media/*{.webp}?",
+]);
+
+/** Whether a regex source uses a look-behind (RE2-family engines have none). */
+export function hasLookbehind(source: string): boolean {
+  return /\(\?<[=!]/.test(source);
+}
+
+/** Capture group names used more than once in a regex source. */
+export function duplicateGroupNames(source: string): string[] {
+  const names = [...source.matchAll(/\(\?<(\w+)>/g)].map((m) => m[1]);
+  return names.filter((name, i) => names.indexOf(name) !== i);
+}
 
 /**
  * Pattern corpus for the router-vs-regex sweeps: every combination of the

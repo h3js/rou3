@@ -6,6 +6,10 @@ import {
   regexpCases as routes,
   LOOKBEHIND_ROUTES,
   PCRE2_DUPLICATE_NAME_ROUTES,
+  SWEEP_DUPLICATE_NAME_PATTERNS,
+  SWEEP_LOOKBEHIND_PATTERNS,
+  duplicateGroupNames,
+  hasLookbehind,
   sweepPaths,
   sweepPatterns,
 } from "./_regexp-cases.ts";
@@ -164,8 +168,7 @@ describe("routeToRegExp", () => {
       if (PCRE2_DUPLICATE_NAME_ROUTES.has(route)) {
         continue;
       }
-      const names = [...routeToRegExp(route).source.matchAll(/\(\?<([\w]+)>/g)].map((m) => m[1]);
-      const duplicates = names.filter((name, i) => names.indexOf(name) !== i);
+      const duplicates = duplicateGroupNames(routeToRegExp(route).source);
       expect(duplicates, `duplicate named groups for "${route}"`).toEqual([]);
     }
   });
@@ -174,8 +177,7 @@ describe("routeToRegExp", () => {
   // duplicate named groups (guards against the set going silently stale).
   it("known fallback routes emit duplicate named capture groups", () => {
     for (const route of PCRE2_DUPLICATE_NAME_ROUTES) {
-      const names = [...routeToRegExp(route).source.matchAll(/\(\?<([\w]+)>/g)].map((m) => m[1]);
-      const duplicates = names.filter((name, i) => names.indexOf(name) !== i);
+      const duplicates = duplicateGroupNames(routeToRegExp(route).source);
       expect(duplicates, `expected duplicate named groups for "${route}"`).not.toEqual([]);
     }
   });
@@ -185,10 +187,26 @@ describe("routeToRegExp", () => {
   it("emits no look-behind outside LOOKBEHIND_ROUTES", () => {
     for (const route of Object.keys(routes)) {
       const source = routeToRegExp(route).source;
-      expect(/\(\?<[=!]/.test(source), `look-behind in "${route}": ${source}`).toBe(
+      expect(hasLookbehind(source), `look-behind in "${route}": ${source}`).toBe(
         LOOKBEHIND_ROUTES.has(route),
       );
     }
+  });
+
+  // The same, over the whole sweep corpus. The RE2 sweep in
+  // test/regexp.pcre.test.ts skips exactly these patterns; pinning them here
+  // (no ripgrep needed) makes a change that moves routes onto the look-behind
+  // suffix, or into a duplicate-name alternation, fail loudly.
+  it("pins the sweep patterns RE2 engines reject", () => {
+    const lookbehind: string[] = [];
+    const duplicates: string[] = [];
+    for (const pattern of sweepPatterns()) {
+      const source = routeToRegExp(pattern).source;
+      if (hasLookbehind(source)) lookbehind.push(pattern);
+      if (duplicateGroupNames(source).length > 0) duplicates.push(pattern);
+    }
+    expect(lookbehind.sort()).toEqual([...SWEEP_LOOKBEHIND_PATTERNS].sort());
+    expect(duplicates.sort()).toEqual([...SWEEP_DUPLICATE_NAME_PATTERNS].sort());
   });
 });
 

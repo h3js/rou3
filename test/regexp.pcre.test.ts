@@ -5,6 +5,8 @@ import {
   regexpCases,
   LOOKBEHIND_ROUTES,
   PCRE2_DUPLICATE_NAME_ROUTES,
+  SWEEP_DUPLICATE_NAME_PATTERNS,
+  SWEEP_LOOKBEHIND_PATTERNS,
   sweepPaths,
   sweepPatterns,
 } from "./_regexp-cases.ts";
@@ -205,19 +207,21 @@ describe("routeToRegExp RE2 compatibility (rg, Rust regex)", () => {
     });
   }
 
-  // Every look-behind-free sweep regex matches the same paths in RE2 as in JS
-  // (which the JS sweep ties to `findRoute`). One `rg` run per pattern, with
-  // the paths as input lines.
+  // Every sweep regex outside the pinned look-behind / duplicate-name sets
+  // (asserted exact in test/regexp.test.ts) compiles in RE2 and matches the
+  // same paths as in JS (which the JS sweep ties to `findRoute`); the pinned
+  // ones really are rejected. One `rg` run per pattern, with the paths as
+  // input lines.
   it("agrees with JS on the sweep corpus", () => {
     const paths = sweepPaths();
     const mismatches: string[] = [];
-    let checked = 0;
+    const compiled: string[] = [];
     for (const pattern of sweepPatterns()) {
       const regex = routeToRegExp(pattern);
-      if (/\(\?<[=!]/.test(regex.source)) continue;
-      const names = [...regex.source.matchAll(/\(\?<(\w+)>/g)].map((m) => m[1]);
-      if (new Set(names).size !== names.length) continue;
-      checked++;
+      if (SWEEP_LOOKBEHIND_PATTERNS.has(pattern) || SWEEP_DUPLICATE_NAME_PATTERNS.has(pattern)) {
+        if (re2.compile(regex.source) !== "error") compiled.push(pattern);
+        continue;
+      }
       const r = spawnSync("rg", ["--no-config", "-e", regex.source], {
         input: paths.join("\n") + "\n",
         encoding: "utf8",
@@ -231,6 +235,6 @@ describe("routeToRegExp RE2 compatibility (rg, Rust regex)", () => {
       }
     }
     expect(mismatches).toEqual([]);
-    expect(checked).toBeGreaterThan(200);
+    expect(compiled, "pinned as RE2-incompatible but compiles").toEqual([]);
   });
 });
