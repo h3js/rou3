@@ -282,33 +282,71 @@ export const regexpCases: Record<string, RegExpCase> = {
     match: [["/api/abc", { "0": "abc" }]],
   },
   // Mid-segment optional after a greedy open-ended capture (`*` -> `[^/]*`).
-  // Inlining as `(?<_0>[^/]*)(?:\.webp)?` would let the greedy capture swallow
-  // `.webp` (capturing `photo.webp` instead of `photo`), so this must fall back
-  // to alternation — which anchors the literal outside the capture and keeps
-  // `_0` = `photo`. The fallback reuses the `_0` named group across branches
-  // (see PCRE2_DUPLICATE_NAME_ROUTES).
+  // Appending `(?:\.webp)?` would let the greedy capture swallow `.webp`
+  // (capturing `photo.webp` instead of `photo`), so the capture stops before
+  // the tail whenever the tail can end the segment (lookahead), and takes the
+  // whole segment otherwise — the same captures as alternating the two
+  // expansions, without a duplicate `_0` group.
   "/media/*{.webp}?": {
     regex:
-      /^(?:\/media\/(?<_0>[^/]*)\.webp(?:(?<=\/)\/|(?<!\/)\/?)|\/media(?:\/(?<_0>[^/]*))?(?:(?<=\/)\/|(?<!\/)\/?))$/,
+      /^\/media(?:\/(?<_0>[^/]*(?=\.webp(?![^/]))|[^/]*)(?:\.webp)?)?(?:(?<=\/)\/|(?<!\/)\/?)$/,
     match: [
       ["/media/photo.webp", { "0": "photo" }],
       ["/media/photo", { "0": "photo" }],
+      ["/media/a.webp.webp", { "0": "a.webp" }],
+      ["/media"],
     ],
+  },
+  // A mid-segment optional after an unconstrained param works the same way
+  // (#213: this threw on Node 22, which lacks duplicate named groups).
+  "/files/:name{.:ext}?": {
+    regex:
+      /^\/files\/(?<name>[^/]+(?=\.(?:[^/]+)(?![^/]))|[^/]*)(?:\.(?<ext>[^/]+))?(?:(?<=\/)\/|(?<!\/)\/?)$/,
+    match: [
+      ["/files/readme", { name: "readme" }],
+      ["/files/readme.md", { name: "readme", ext: "md" }],
+      ["/files/a.b.c", { name: "a.b", ext: "c" }],
+      ["/files/.env", { name: ".env" }],
+    ],
+    noMatch: ["/files/a/b"],
+  },
+  // Optional groups followed by more of the route are inlined too (#213).
+  "/users{/:id}?/posts/:post": {
+    regex: /^\/users(?:\/(?<id>[^/]*))?\/posts\/(?<post>[^/]*)(?:(?<=\/)\/|(?<!\/)\/?)$/,
+    match: [
+      ["/users/posts/1", { post: "1" }],
+      ["/users/7/posts/1", { id: "7", post: "1" }],
+    ],
+    noMatch: ["/users/7/8/posts/1", "/users/7"],
+  },
+  "/a/:x(\\d+){-:y}?/b": {
+    regex: /^\/a\/(?<x>\d+)(?:-(?<y>[^/]+))?\/b(?:(?<=\/)\/|(?<!\/)\/?)$/,
+    match: [
+      ["/a/1/b", { x: "1" }],
+      ["/a/1-z/b", { x: "1", y: "z" }],
+    ],
+    noMatch: ["/a/x/b", "/a/1-/b"],
   },
 };
 
 // Routes whose generated regex reuses the same named capture group across
 // alternation branches (e.g. `(?<id>…)|(?<id>…)`). Such output is legal in JS
-// (per the TC39 duplicate-named-groups proposal) and in Perl, but PCRE2-family
-// engines reject it unless PCRE2_DUPNAMES is set.
+// engines with duplicate named groups (V8 12.5+, i.e. not Node 22) and in
+// Perl, but PCRE2-family engines reject it unless PCRE2_DUPNAMES is set.
 //
-// A trailing single optional group is normally compiled inline as `(?:...)?`
-// (see inlineOptionalGroup in src/regexp.ts), which avoids duplicate names. But
-// a mid-segment optional after a greedy open-ended capture cannot be inlined
-// safely (the capture would swallow the optional literal), so it falls back to
-// alternation and reuses the capture name across branches. These routes exercise
-// that fallback and are asserted to be rejected by strict PCRE2 engines.
-export const PCRE2_DUPLICATE_NAME_ROUTES: ReadonlySet<string> = new Set([
+// A single optional group is normally compiled inline as `(?:...)?` (see
+// inlineOptionalGroup in src/regexp.ts), which avoids duplicate names. Routes
+// with several expansions it can't inline (here an empty segment that turns
+// trailing once the optionals after it are absent) fall back to alternation and
+// reuse the capture name across branches. These routes exercise that fallback
+// and are asserted to be rejected by strict PCRE2 engines.
+export const PCRE2_DUPLICATE_NAME_ROUTES: ReadonlySet<string> = new Set(["/docs/{v2}?/:page?"]);
+
+// Routes whose regex `regExpToRoute` cannot map back: the alternation fallback
+// above, and mid-segment optionals after an open-ended capture, which need a
+// lookahead to keep the capture from swallowing the optional tail.
+export const IRREVERSIBLE_ROUTES: ReadonlySet<string> = new Set([
+  ...PCRE2_DUPLICATE_NAME_ROUTES,
   "/media/*{.webp}?",
-  "/docs/{v2}?/:page?",
+  "/files/:name{.:ext}?",
 ]);

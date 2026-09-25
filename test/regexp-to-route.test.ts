@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { regExpToRoute, routeToRegExp } from "../src/index.ts";
-import { regexpCases, PCRE2_DUPLICATE_NAME_ROUTES } from "./_regexp-cases.ts";
+import { regexpCases, IRREVERSIBLE_ROUTES } from "./_regexp-cases.ts";
 
 describe("regExpToRoute", () => {
   // Every fixture route -> regex -> route must round-trip (its regex, converted
-  // back, produces a route whose regex is identical). Alternation-fallback
-  // routes (PCRE2_DUPLICATE_NAME_ROUTES) are not reversible and excluded.
+  // back, produces a route whose regex is identical). Routes whose regex has no
+  // route syntax (IRREVERSIBLE_ROUTES) are excluded.
   for (const [route, { regex }] of Object.entries(regexpCases)) {
-    if (PCRE2_DUPLICATE_NAME_ROUTES.has(route)) {
+    if (IRREVERSIBLE_ROUTES.has(route)) {
       continue;
     }
     it(`round-trips "${route}"`, () => {
@@ -96,9 +96,9 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(routeToRegExp("/a/(.*)"))).toBe("/a/(.*)");
   });
 
-  it("throws on the alternation fallback it cannot reverse", () => {
-    const alt = routeToRegExp("/media/*{.webp}?");
-    expect(() => regExpToRoute(alt)).toThrow();
+  it("throws on output it cannot reverse", () => {
+    expect(() => regExpToRoute(routeToRegExp("/docs/{v2}?/:page?"))).toThrow();
+    expect(() => regExpToRoute(routeToRegExp("/media/*{.webp}?"))).toThrow();
   });
 
   it("throws on inline constraints that cannot be expressed as a route", () => {
