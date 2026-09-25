@@ -327,7 +327,7 @@ The regex matches the paths `findRoute()` matches for a router holding only that
 
 - A constraint that can match `/` (`:x(.+)`, `:x([^.]+)`) can span segments in the regex (`/a/:x(.+)` matches `/a/b/c`), while the router splits the path first.
 - The router drops the constraint of a repeated param (`:id(\d+)+`), the regex keeps it.
-- The empty path `""`.
+- The empty path `""`: the router treats it as `/`, the regex matches it only for root routes whose first segment is optional (`/**`, `/:x*`, `/:x?`, `/*`), not for `/` itself.
 - In PCRE and Perl, `$` also matches before a final `\n`, so there the regex also matches `<path>\n`.
 
 The named groups hold the params. In two cases the regex leaves a group **unset** where the router reports `""`: a required segment that is empty (`/a//` on `/a/:x`, `/a//b` on `/a/:x/:y?`) and a `**` that matches no segment (`/a` on `/a/**`). The first is the cost of avoiding look-behind: capturing `""` there would need look-around, backreferences or the same named group twice. Separately, when optional segments meet a `*` or a constrained optional, the regex can give a segment to a different param than the router (`/a/:x?/*` on `/a/b` sets `x`, the router sets `*`).
