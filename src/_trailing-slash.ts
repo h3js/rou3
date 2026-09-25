@@ -47,12 +47,15 @@ const SOME_TAIL = "(?:.*[^/]|/)/*?";
  * which RE2 rejects as well. It also includes any part whose match can end in
  * `/` other than the trailing catch-all (a constraint like `.+`, `[^.]+` or
  * `\S+`): the rewritten endings would let it take the stripped slash.
+ *
+ * @param starStar Whether the route ends in a bare `**`. Its `_` group can't
+ *   be told apart from a param named `_` (`:_*`) by the body alone.
  */
-export function withTrailingSlash(body: string): string {
-  // Root catch-all (`/**`, `/:x*`): every path matches.
+export function withTrailingSlash(body: string, starStar = false): string {
+  // Root catch-all (`/**`, `/:x*`): every path matches. `:x*` is unset on `/`.
   const root = /^\/\?\(\?<(\w+)>\.\*\)$/.exec(body);
   if (root) {
-    return `/?(?<${root[1]}>${ANY_TAIL})/?$`;
+    return starStar ? `/?(?<${root[1]}>${ANY_TAIL})/?$` : `(?:/?(?<${root[1]}>${ANY_TAIL}))??/?$`;
   }
 
   const tokens = tokenize(body);
@@ -109,7 +112,7 @@ export function withTrailingSlash(body: string): string {
   // `.*` must not swallow the stripped slash. The router reports `**` as `""`
   // on `/a/` (group taken), every other optional as unset (group skipped).
   const inner = CATCH_ALL.test(parts[last]) ? parts[last].replace(".*", ANY_TAIL) : parts[last];
-  const lazy = inner.startsWith("(?<_>") ? "" : "?";
+  const lazy = starStar && parts[last] === "(?<_>.*)" ? "" : "?";
   return `${tokens.slice(0, -1).join("")}(?:/${inner})?${lazy}/?$`;
 }
 

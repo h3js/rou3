@@ -200,6 +200,36 @@ describe("routeToRegExp", () => {
     }
   });
 
+  // `**` is emitted as the `_` group, and a param may be named `_` too. The
+  // ending must follow the route's kind, not the group name: the router leaves
+  // `:_?` / `:_*` unset on `/a/` (and `/`), where `**` reports `""`. A root
+  // `:x*` is unset on `/` for any name.
+  it("does not mistake a param named `_` for `**`", () => {
+    const cases: [route: string, path: string, params: Record<string, string>][] = [
+      ["/a/:_?", "/a/", {}],
+      ["/a/:_?", "/a//", { _: "" }],
+      ["/a/:_*", "/a/", {}],
+      ["/a/:_*", "/a//", { _: "" }],
+      ["/a/:_*", "/a/b/", { _: "b" }],
+      ["/a/**", "/a/", { _: "" }],
+      ["/:_?", "/", {}],
+      ["/:_*", "/", {}],
+      ["/:_*", "//", { _: "" }],
+      ["/:x*", "/", {}],
+      ["/:x*", "//", { x: "" }],
+      ["/:x*", "/a/b/", { x: "a/b" }],
+      ["/**", "/", { _: "" }],
+    ];
+    for (const [route, path, params] of cases) {
+      const router = createRouter();
+      addRoute(router, "", route, true);
+      expect(findRoute(router, "", path)?.params || {}, `router: ${route} ${path}`).toEqual(params);
+      const match = path.match(routeToRegExp(route));
+      expect(match, `${route} ${path}`).not.toBeNull();
+      expect(normalizeGroups(match?.groups), `${route} ${path}`).toEqual(params);
+    }
+  });
+
   // Trailing single optional groups are compiled inline (`(?:...)?`) rather than
   // expanded into an alternation of full routes, so a param before the group is
   // never emitted twice. Duplicate named groups are valid JS but rejected by
@@ -355,7 +385,7 @@ const OPTIONAL_BEFORE_WILDCARD: CaptureDiff = {
 
 // Pre-existing: alternation branches run in expansion order, so the `**:x`
 // branch wins where the router picks a more specific expansion (`/:x*/:y` on
-// `/a` gives `y`; root `/:x*` on `/` matches `/` with no params).
+// `/a` gives `y`).
 const REPEAT_EXPANSION: CaptureDiff = {
   reason: "a `:x*` route: the regex captures `x` where the router matches another expansion",
   test: (pattern, _keys, groups, params) => {
@@ -399,7 +429,6 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     (pattern) => [pattern, OPTIONAL_BEFORE_WILDCARD] as const,
   ),
   ...[
-    "/:x*",
     "/:x*/a",
     "/a/:x*/a",
     "/:x*/:y",

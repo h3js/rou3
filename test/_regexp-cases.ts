@@ -437,6 +437,18 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/path/", "/path//", "/path/a.zip//"],
   },
+  // A root `:x*` (unlike `/**`) leaves `x` unset on `/`: the router takes the
+  // route without it there.
+  "/:path*": {
+    regex: /^(?:\/?(?<path>(?:.*[^/])?\/*?))??\/?$/,
+    match: [
+      ["/", { path: undefined }],
+      ["//", { path: "" }],
+      ["/a", { path: "a" }],
+      ["/a/b/", { path: "a/b" }],
+      ["/a/b//", { path: "a/b/" }],
+    ],
+  },
 };
 
 // Fixtures whose regex still ends in the look-behind trailing-slash suffix

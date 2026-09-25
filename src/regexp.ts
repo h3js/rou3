@@ -108,7 +108,7 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
   }
 
   const [baseSegs, baseOwnSep] = routeToRegExpSegments(pre);
-  const [fullSegs, fullOwnSep] = routeToRegExpSegments(pre + body);
+  const [fullSegs, fullOwnSep, starStar] = routeToRegExpSegments(pre + body);
   const baseLen = baseSegs.length;
   if (baseLen === 0 || fullSegs.length < baseLen || baseOwnSep !== fullOwnSep) {
     return;
@@ -145,14 +145,14 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
     const inlineSegs = fullSegs.slice(0, baseLen - 1);
     // The group may add nothing (`/a/**/b{.json}?`: `**` is terminal).
     inlineSegs.push(k === last.length ? last : `${last.slice(0, k)}(?:${last.slice(k)})?`);
-    return new RegExp(`^${withTrailingSlash(joinSegments(inlineSegs, fullOwnSep))}`);
+    return new RegExp(`^${withTrailingSlash(joinSegments(inlineSegs, fullOwnSep), starStar)}`);
   }
 
   // `body` adds one or more whole segments (e.g. `/foo` -> `/foo/bar`); make
   // the appended segments optional.
   const head = joinSegments(fullSegs.slice(0, baseLen), fullOwnSep);
   const tail = fullSegs.slice(baseLen).join("/");
-  return new RegExp(`^${withTrailingSlash(`${head}(?:/${tail})?`)}`);
+  return new RegExp(`^${withTrailingSlash(`${head}(?:/${tail})?`, starStar)}`);
 }
 
 /**
@@ -182,10 +182,12 @@ function paramModifier(segment: string): string | undefined {
 }
 
 function _routeToRegExp(route: string): RegExp {
-  const [segments, ownSeparator] = routeToRegExpSegments(route);
+  const [segments, ownSeparator, starStar] = routeToRegExpSegments(route);
   // Root: lookup reaches `/` from `/` only (`//` is an empty segment).
   return new RegExp(
-    segments.length > 0 ? `^${withTrailingSlash(joinSegments(segments, ownSeparator))}` : "^/$",
+    segments.length > 0
+      ? `^${withTrailingSlash(joinSegments(segments, ownSeparator), starStar)}`
+      : "^/$",
   );
 }
 
@@ -201,12 +203,17 @@ function joinSegments(segments: string[], ownSeparator: boolean): string {
 
 /**
  * Segment regexes for `route`, plus whether the first one is an optional
- * first route segment carrying its own separator (see `joinSegments`).
+ * first route segment carrying its own separator (see `joinSegments`), and
+ * whether the route ends in a bare `**` (its `_` group reads the same as a
+ * param named `_`, see `withTrailingSlash`).
  */
-function routeToRegExpSegments(route: string): [segments: string[], ownSeparator: boolean] {
+function routeToRegExpSegments(
+  route: string,
+): [segments: string[], ownSeparator: boolean, starStar: boolean] {
   const reSegments: string[] = [];
   let idCtr = 0;
   let ownSeparator = false;
+  let starStar = false;
 
   // Every param name emitted for this expansion. A name declared twice would
   // be a duplicate named group, which engines disagree on: V8 (Node 24)
@@ -258,7 +265,8 @@ function routeToRegExpSegments(route: string): [segments: string[], ownSeparator
       // `/api/**:p` with `p: ""`; `/api/` is `/api` after trailing stripping).
       // A bare `**` is the `_` param (`params._` in the router).
       const name = groupName(segment === "**" ? "_" : segment.slice(3));
-      if (segment !== "**") {
+      starStar = segment === "**";
+      if (!starStar) {
         reSegments.push(`(?<${name}>.*)`);
       } else if (reSegments.length > 0) {
         reSegments.push(`${reSegments.pop()}(?:/(?<_>.*))?`);
@@ -351,7 +359,7 @@ function routeToRegExpSegments(route: string): [segments: string[], ownSeparator
     }
   }
 
-  return [reSegments, ownSeparator];
+  return [reSegments, ownSeparator, starStar];
 }
 
 function toRegExpUnnamedKey(index: number): string {

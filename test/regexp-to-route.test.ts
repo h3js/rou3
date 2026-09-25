@@ -83,8 +83,17 @@ describe("regExpToRoute", () => {
     expect(routeToRegExp("/base/**:path").source).toBe(routeToRegExp("/base/:path+").source);
     expect(regExpToRoute(routeToRegExp("/base/**:path"))).toBe("/base/:path+");
     // `(?<_>.*)` is `**` only when it ends the route; `**` is terminal.
-    expect(regExpToRoute(routeToRegExp("/a/:_*"))).toBe("/a/**");
+    expect(regExpToRoute(routeToRegExp("/a/**"))).toBe("/a/**");
     expect(regExpToRoute(/^\/a(?:\/(?<_>.*))?\/b\/?$/)).toBe("/a/:_*/b");
+    // A param named `_` is not `**`: the router leaves `:_*` unset on `/a/`
+    // where `**` reports `""`, so the two compile to different regexes (the
+    // lazy `)??` group) and each reverses to itself.
+    expect(routeToRegExp("/a/:_*").source).not.toBe(routeToRegExp("/a/**").source);
+    expect(regExpToRoute(routeToRegExp("/a/:_*"))).toBe("/a/:_*");
+    // Same at the root, where `:x*` also has to leave `x` unset on `/`.
+    expect(regExpToRoute(routeToRegExp("/**"))).toBe("/**");
+    expect(regExpToRoute(routeToRegExp("/:x*"))).toBe("/:x*");
+    expect(regExpToRoute(routeToRegExp("/:_*"))).toBe("/:_*");
     // The `:name*` ending must not reverse to a single-segment constraint.
     expect(regExpToRoute(routeToRegExp("/path/:rest*"))).toBe("/path/:rest*");
     expect(regExpToRoute(routeToRegExp("/a/c{/:w+}?"))).toBe("/a/c/:w*");
@@ -214,9 +223,6 @@ describe("regExpToRoute", () => {
 
 // Routes whose reversal is not equivalent, with the route they come back as.
 const KNOWN_NON_EQUIVALENT: Record<string, readonly [back: string, reason: string]> = {
-  // Pre-existing: the root catch-all form parses back as `**:x`, which needs a
-  // segment (its regex differs from the original's, too).
-  "/:x*": ["/**:x", "root `/:x*` comes back as `/**:x`, which does not match `/`"],
   // Not modeled by routeToRegExp (see AGENTS.md): the tree splits on `/`
   // before testing a constraint, the regex doesn't, so both compile to the
   // same catch-all regex.
