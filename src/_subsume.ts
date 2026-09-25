@@ -12,6 +12,20 @@ import type { RouteShape } from "./_overlap.ts";
  * undecidable in general).
  */
 export function shapeSubsumes(a: RouteShape, b: RouteShape): boolean {
+  if (a.suffix || b.suffix) {
+    // Every length of `b` must be one of `a`'s, and at each (up to the one
+    // that stands for all longer ones) `a` must cover `b` position by position.
+    const lo = minLength(b);
+    const hi = maxLength(b);
+    if (lo < minLength(a) || hi > maxLength(a)) return false;
+    const last = Math.min(hi, Math.max(lo, stableLength(a, b)));
+    for (let n = lo; n <= last; n++) {
+      for (let i = 0; i < n; i++) {
+        if (!_segmentSubsumes(matcherAt(a, n, i), matcherAt(b, n, i))) return false;
+      }
+    }
+    return true;
+  }
   const fa = a.fixed.length;
   const fb = b.fixed.length;
   // `b`'s total-length range must sit inside `a`'s.
@@ -46,6 +60,7 @@ export function mergeShapes(shapes: RouteShape[]): RouteShape[] {
       // Ranges must be equal fixed-wise and union into one contiguous range.
       if (
         _sameFixed(a.fixed, b.fixed) &&
+        _sameFixed(a.suffix || [], b.suffix || []) &&
         a.tailMin <= b.tailMax + 1 &&
         b.tailMin <= a.tailMax + 1
       ) {
@@ -57,6 +72,35 @@ export function mergeShapes(shapes: RouteShape[]): RouteShape[] {
     }
   }
   return shapes;
+}
+
+/** Shortest path (in segments) a shape matches. */
+export function minLength(shape: RouteShape): number {
+  return shape.fixed.length + (shape.suffix?.length || 0) + shape.tailMin;
+}
+
+/** Longest path (in segments) a shape matches (`Infinity` with a `**`). */
+export function maxLength(shape: RouteShape): number {
+  return shape.fixed.length + (shape.suffix?.length || 0) + shape.tailMax;
+}
+
+/** The matcher of `shape` at segment `i` of a path with `n` segments. */
+export function matcherAt(shape: RouteShape, n: number, i: number): RouteShape["fixed"][number] {
+  if (i < shape.fixed.length) return shape.fixed[i];
+  const suffix = shape.suffix;
+  return suffix && i >= n - suffix.length ? suffix[i - n + suffix.length] : undefined;
+}
+
+/**
+ * A path length from which on the matchers of `a` and `b` stop moving
+ * relative to each other (their fixed prefixes aligned to the start, suffixes
+ * to the end, any-value in between), so it stands for every longer length.
+ */
+export function stableLength(a: RouteShape, b: RouteShape): number {
+  return (
+    Math.max(a.fixed.length, b.fixed.length) +
+    Math.max(a.suffix?.length || 0, b.suffix?.length || 0)
+  );
 }
 
 function _sameFixed(a: RouteShape["fixed"], b: RouteShape["fixed"]): boolean {

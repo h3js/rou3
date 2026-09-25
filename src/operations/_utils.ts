@@ -19,8 +19,8 @@ export function encodeEscapes(path: string): string {
  * segments identically, otherwise removal walks to a different — usually
  * nonexistent — node and silently does nothing.
  *
- * A wildcard is **terminal**: `addRoute` stops at `**`, so any segments after
- * it are not part of the tree path.
+ * Segments after a `**` go into the wildcard node's `suffix` trie instead of
+ * its children (see `_add`).
  */
 export function segmentKey(segment: string): string | 1 | 2 {
   if (segment.startsWith("**")) return 2;
@@ -82,10 +82,23 @@ export function splitPath(path: string): string[] {
   return s;
 }
 
-/** Like `splitPath`, for route patterns: `/a//` and `/a/` canonicalize to `/a`. */
+/**
+ * Like `splitPath`, for route patterns: `/a//` and `/a/` canonicalize to `/a`,
+ * and a `**` followed by more of its segment is `**` plus a `*` segment
+ * (`/**.md` is `/**\/*.md`: any path ending in a `.md` segment). A `{` or `}`
+ * right after the `**` is group syntax, not part of the segment (before group
+ * expansion: `/a/**{.md}?` is `/a/**` or `/a/**.md`, never `/a/**\/*`).
+ */
 export function splitRoute(path: string): string[] {
   const s = splitPath(path);
   while (s[s.length - 1] === "") s.pop();
+  if (path.includes("**")) {
+    for (let i = 0; i < s.length; i++) {
+      if (/^\*\*[^:{}]/.test(s[i])) {
+        s.splice(i, 1, "**", s[i].slice(1));
+      }
+    }
+  }
   return s;
 }
 
@@ -111,10 +124,16 @@ export function expandedRouteId(path: string): string {
 export function getMatchParams(
   segments: string[],
   paramsMap: ParamsIndexMap,
+  suffix?: [number, number],
 ): MatchedRoute["params"] {
   const params = new NullProtoObj();
+  // Segments after a `**` are counted from the end of the path
+  const end = suffix ? segments.length - suffix[1] : segments.length;
   for (const [index, name] of paramsMap) {
-    const segment = index < 0 ? segments.slice(-(index + 1)).join("/") : segments[index];
+    const segment =
+      index < 0
+        ? segments.slice(-(index + 1), end).join("/")
+        : segments[suffix && index > suffix[0] ? index - suffix[0] - 1 + end : index];
     if (typeof name === "string") {
       params[name] = segment;
     } else {

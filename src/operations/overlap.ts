@@ -1,4 +1,4 @@
-import { mayMatchAt, routeToShapes, shapeOf, shapesOverlap } from "../_overlap.ts";
+import { mayMatchAt, routeToShapes, shapeOf, shapesOverlap, visitSuffixTrie } from "../_overlap.ts";
 import { shapeSubsumes } from "../_subsume.ts";
 import type { Edge, RouteShape } from "../_overlap.ts";
 import type { MatchedRoute, Node, RouterContext } from "../types.ts";
@@ -96,7 +96,9 @@ export function compareRoutes(patternA: string, patternB: string): RouteComparis
  * concrete path.
  *
  * Results are ordered least- to most-specific (same traversal order as
- * `findAllRoutes`) and method handling mirrors it (`method`, falling back to the
+ * `findAllRoutes`; a route with segments after `**` comes right after the bare
+ * `**` it follows, as a scope has no last segment to rank from) and method
+ * handling mirrors `findAllRoutes` (`method`, falling back to the
  * method-agnostic `""` bucket). Overlap semantics are identical to
  * {@link routesOverlap}.
  *
@@ -166,22 +168,39 @@ function _collectOverlaps<T>(
     }
   }
   if (node.methods) {
-    const data = node.methods[method] || node.methods[""];
-    if (data) {
-      for (const entry of data) {
-        const d = entry.data;
-        // Collapse only genuine reference-duplicates: a route with optional/group
-        // syntax (`:x?`, `{/c}?`) expands into several tree entries that share the
-        // same `data` reference. Primitive/absent data (`addRoute` stores `null`
-        // when none is given) is never deduped, so distinct routes that happen to
-        // carry an equal primitive value are all reported instead of dropped.
-        const isRef = d !== null && (typeof d === "object" || typeof d === "function");
-        if (isRef && seen.has(d)) continue;
-        const shape = shapeOf(edges, entry);
-        if (query.some((q) => shapesOverlap(q, shape))) {
-          if (isRef) seen.add(d);
-          matches.push({ data: d });
-        }
+    _collectEntries(node, method, query, edges, seen, matches);
+  }
+  // Routes with segments after this `**` (its suffix trie), after the bare one
+  if (node.suffix) {
+    visitSuffixTrie(node.suffix, [], (trieNode, after) => {
+      _collectEntries(trieNode, method, query, edges.concat(after), seen, matches);
+    });
+  }
+}
+
+function _collectEntries<T>(
+  node: Node<T>,
+  method: string,
+  query: RouteShape[],
+  edges: Edge[],
+  seen: Set<unknown>,
+  matches: MatchedRoute<T>[],
+): void {
+  const data = node.methods![method] || node.methods![""];
+  if (data) {
+    for (const entry of data) {
+      const d = entry.data;
+      // Collapse only genuine reference-duplicates: a route with optional/group
+      // syntax (`:x?`, `{/c}?`) expands into several tree entries that share the
+      // same `data` reference. Primitive/absent data (`addRoute` stores `null`
+      // when none is given) is never deduped, so distinct routes that happen to
+      // carry an equal primitive value are all reported instead of dropped.
+      const isRef = d !== null && (typeof d === "object" || typeof d === "function");
+      if (isRef && seen.has(d)) continue;
+      const shape = shapeOf(edges, entry);
+      if (query.some((q) => shapesOverlap(q, shape))) {
+        if (isRef) seen.add(d);
+        matches.push({ data: d });
       }
     }
   }

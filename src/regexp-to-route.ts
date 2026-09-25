@@ -177,11 +177,18 @@ function trailingGroup(src: string): [start: number, inner: string, lazy: boolea
 }
 
 /**
- * Whether a whole group `body` is a catch-all: `[\s\S]*`, or `.*` as older
- * versions emitted it (`dot`), where it reads the same as a `(.*)` constraint.
+ * Whether a whole group `body` is a catch-all: `[\s\S]*` (lazy `[\s\S]*?`
+ * where optional segments right after it take the end of the path), or `.*`
+ * as older versions emitted it (`dot`), where it reads the same as a `(.*)`
+ * constraint.
  */
 function isCatchAll(body: string, dot: boolean): boolean {
-  return body === "[\\s\\S]*" || (dot && body === ".*");
+  return body === "[\\s\\S]*" || body === "[\\s\\S]*?" || (dot && body === ".*");
+}
+
+/** Whether `src` continues with another segment or optional group at `i`. */
+function continues(src: string, i: number): boolean {
+  return src.startsWith("\\/", i) || src.startsWith("(?:", i);
 }
 
 /**
@@ -220,15 +227,27 @@ function parseSegments(src: string, atEnd: boolean, dot: boolean, inGroup = fals
         segments.push(g.body === ".+" ? `**:${g.name}` : g.name === "_" ? "**" : `:${g.name}*`);
         break;
       }
+      // A root `**` with segments after it (`/**\/_payload.json`).
+      if (g && g.name === "_" && isCatchAll(g.body, dot) && src.startsWith("\\/", g.end)) {
+        segments.push("**");
+        i = g.end;
+        continue;
+      }
     }
 
     // One-or-more catch-all at the end: `/(?<name>[\s\S]*)` (`**:name` /
     // `:name+`). An unnamed `(?<_N>…)` is a constraint, not a param name.
     if (src.startsWith("\\/", i)) {
       const g = matchNamedGroup(src, i + 2);
-      if (g && g.end === n && isCatchAll(g.body, dot) && !/^_\d+$/.test(g.name)) {
+      if (
+        g &&
+        (g.end === n || continues(src, g.end)) &&
+        isCatchAll(g.body, dot) &&
+        !/^_\d+$/.test(g.name)
+      ) {
         segments.push(`:${g.name}+`);
-        break;
+        i = g.end;
+        continue;
       }
     }
 
@@ -332,13 +351,23 @@ function applyOptional(
 ): void {
   if (inner.startsWith("\\/")) {
     const rest = inner.slice(2);
+    // `**` / `:x*` and a lone optional last segment in one group (see
+    // `pushCatchAll` in regexp.ts): `(?:/(?:(?<x>[\s\S]*)/)?(?<y>[^/]*))?`.
+    const nested = NESTED_CATCH_ALL.exec(rest);
+    if (nested) {
+      const [, catchAll, last] = nested.map((name) => name && fromGroupName(name));
+      const unnamed = /^_\d+$/.test(last);
+      segments.push(catchAll === "_" && !unnamed ? "**" : `:${catchAll}*`);
+      segments.push(unnamed ? "*" : `:${last}?`);
+      return;
+    }
     const g = matchNamedGroup(rest, 0);
     if (g && g.end === rest.length) {
-      // A trailing greedy `(?:/(?<_>[\s\S]*))?` is the `**` catch-all. The
-      // lazy form is a param named `_` (`:_*`), which the router leaves unset
-      // on `/a/` where `**` reports `""`. (Only at the end: `**` is terminal,
-      // so a mid-route `:_*` must stay as is.)
-      if (last && !lazy && g.name === "_" && isCatchAll(g.body, dot)) {
+      // A greedy `(?:/(?<_>[\s\S]*))?` is the `**` catch-all, and so is a lazy
+      // group with a lazy body (optional segments after it take the end of the
+      // path). A lazy group with a greedy body is a param named `_` (`:_*`),
+      // which the router leaves unset on `/a/` where `**` reports `""`.
+      if (g.name === "_" && isCatchAll(g.body, dot) && (!lazy || g.body.endsWith("?"))) {
         segments.push("**");
         return;
       }
@@ -430,6 +459,10 @@ function optionalParam(name: string, body: string, dot: boolean): string {
   }
   return `:${name}${constraint(body)}?`;
 }
+
+// `(?:(?<x>[\s\S]*)\/)?(?<y>[^/]*)`: a catch-all and a lone optional last
+// segment in one optional group.
+const NESTED_CATCH_ALL = /^\(\?:\(\?<(\w+)>\[\\s\\S\]\*\)\\\/\)\?\(\?<(\w+)>\[\^\/\]\*\)$/;
 
 /** Detect `PAT(?:/PAT)*` (the `+`/`*` repeat form) and return `PAT`. */
 function matchRepeat(body: string): string | undefined {

@@ -92,12 +92,37 @@ interface CompilerContext {
   dataMap?: Map<any, number>;
   regexpMap?: Map<string, number>;
   regexTemps?: number;
+  // The router has routes with segments after `**`: matches are collected
+  // with a rank descriptor each (`k`) and ranked from the end of the path
+  rank?: boolean;
+  rankMap?: Map<string, number>;
+  // Compiling the collector of a single-match router with `rank`: same-node
+  // ties keep the order that puts the tree order's pick last
+  collector?: boolean;
 }
 
 function compileRouteMatch(ctx: CompilerContext): string {
+  const matchAll = ctx.opts?.matchAll;
+  ctx.rank = hasSuffixTrie(ctx.router.root);
   let code = compileStaticMatch(ctx);
 
-  const match = compileNode(ctx, ctx.router.root, [], 1, 1);
+  let match = compileNode(ctx, ctx.router.root, [], 1, 1);
+  if (ctx.rank && !matchAll) {
+    // Mirrors findRoute: when a route with segments after `**` may match
+    // (a cheap check of the suffix tries), collect every match and rank them
+    // from the end of the path. Without a suffix route among them the last
+    // match is the tree order's pick, so the check may over-approximate.
+    const opts = ctx.opts;
+    ctx.opts = { ...opts, matchAll: true };
+    ctx.collector = true;
+    const all = compileNode(ctx, ctx.router.root, [], 1, 1);
+    ctx.opts = opts;
+    ctx.collector = false;
+    const probe = compileSuffixProbe(ctx, ctx.router.root, 1);
+    if (probe !== "false") {
+      match = `if(${probe}){let r=[],k=[];${all}r=${rankRef(ctx)}(r.reverse(),k.reverse(),l-1);return r[r.length-1]}${match}`;
+    }
+  }
   // Empty root node emit an empty bound check
   if (match) {
     // Mirror splitPath(): empty segments are kept, so "/a//" (stripped once
@@ -125,7 +150,11 @@ function compileRouteMatch(ctx: CompilerContext): string {
   // One trailing slash is stripped (#209); root "/" collapses to "" (0
   // segments) so required root wildcards/params (`/**:name`, `/:x`) don't
   // match "/" — matching findRoute/findAllRoutes.
-  return `${ctx.opts?.matchAll ? `let r=[];` : ""}${normalizeHelper}${normalizePathHelper}if(p.charCodeAt(p.length-1)===47)p=p.slice(0,-1);${code}${ctx.opts?.matchAll ? "return r.reverse();" : ""}`;
+  const collect = ctx.rank ? `let r=[],k=[];` : `let r=[];`;
+  const done = ctx.rank
+    ? `return ${rankRef(ctx)}(r.reverse(),k.reverse(),l-1);`
+    : "return r.reverse();";
+  return `${matchAll ? collect : ""}${normalizeHelper}${normalizePathHelper}if(p.charCodeAt(p.length-1)===47)p=p.slice(0,-1);${code}${matchAll ? done : ""}`;
 }
 
 // Below this many static paths an `else if` chain of `p === "..."` compares
@@ -203,9 +232,13 @@ function compileStaticMatch(ctx: CompilerContext): string {
   }
   const ref = pushDataSlot(ctx, jitMap ? (jitMap as any) : `{__proto__:null,${mapCode}}`);
   const lookup = `let _n=${ref}[p];`;
-  return matchAll
-    ? `${lookup}if(_n!==void 0){let _a=_n[m];if(_a===void 0)_a=_n[""];if(_a!==void 0)for(let _i=_a.length-1;_i>=0;_i--)r.push({data:_a[_i]});}`
-    : `${lookup}if(_n!==void 0){let _d=_n[m];if(_d===void 0)_d=_n[""];if(_d!==void 0)return {data:_d};}`;
+  if (!matchAll) {
+    return `${lookup}if(_n!==void 0){let _d=_n[m];if(_d===void 0)_d=_n[""];if(_d!==void 0)return {data:_d};}`;
+  }
+  const push = ctx.rank
+    ? `{r.push({data:_a[_i]});k.push(${rankDescriptor(ctx)})}`
+    : `r.push({data:_a[_i]});`;
+  return `${lookup}if(_n!==void 0){let _a=_n[m];if(_a===void 0)_a=_n[""];if(_a!==void 0)for(let _i=_a.length-1;_i>=0;_i--)${push}}`;
 }
 
 function compileMethodMatch(
@@ -213,6 +246,8 @@ function compileMethodMatch(
   methods: Record<string, MethodData<any>[] | undefined>,
   params: string[],
   currentIdx: number, // Set to -1 for non-param node
+  // Suffix trie node: `l>…` when the `**` still has a segment (for `**:name`)
+  suffixGuard?: string,
 ): string {
   let code = "";
   let fallback = "";
@@ -225,8 +260,10 @@ function compileMethodMatch(
       // keep equal-weight siblings in insertion order (issue #187).
       // Single-match returns on the first hit, so ties stay in insertion
       // order (mirrors findRoute).
-      const compiled = matchers.map((m) => compileFinalMatch(ctx, m, currentIdx, params));
-      if (ctx.opts?.matchAll) {
+      const compiled = matchers.map((m) =>
+        compileFinalMatch(ctx, m, currentIdx, params, suffixGuard),
+      );
+      if (ctx.opts?.matchAll && !ctx.collector) {
         compiled.reverse();
       }
       const body = compiled
@@ -251,10 +288,16 @@ function compileFinalMatch(
   data: MethodData<any>,
   currentIdx: number,
   params: string[],
+  suffixGuard?: string,
 ): { code: string; weight: number } {
   let ret = `{data:${serializeData(ctx, data.data)}`;
 
   const conditions: string[] = [];
+  // A `**:name` before the suffix must take a segment (weighs one point, as
+  // in `collectSuffix`)
+  if (suffixGuard && data.paramsMap!.some(([index, , optional]) => index < 0 && !optional)) {
+    conditions.push(suffixGuard);
+  }
   // Presence guards (segment-count checks) are not specificity constraints, so
   // they must not raise `weight` — otherwise an optional `**` tail ties with a
   // required `**:name` and the weight-sorted emit order flips (#186).
@@ -321,9 +364,12 @@ function compileFinalMatch(
     ret += `,params:{${paramsCode}}`;
   }
 
+  const push = ctx.rank
+    ? `{r.push(${ret}});k.push(${rankDescriptor(ctx, data)})}`
+    : `r.push(${ret}});`;
   const code =
     (conditions.length > 0 ? `if(${conditions.join("&&")})` : "") +
-    (ctx.opts?.matchAll ? `r.push(${ret}});` : `return ${ret}};`);
+    (ctx.opts?.matchAll ? push : `return ${ret}};`);
 
   return { code, weight: conditions.length - guardConditions };
 }
@@ -418,8 +464,10 @@ function compileNode(
 
   if (node.wildcard) {
     const { wildcard } = node;
-    if (wildcard.static || wildcard.param || wildcard.wildcard) {
-      throw new Error("Compiler mode does not support patterns after wildcard");
+    // Routes with segments after `**` are only collected (matchAll, or the
+    // ranked single-match path, see compileRouteMatch)
+    if (wildcard.suffix && ctx.opts?.matchAll) {
+      code += compileSuffix(ctx, wildcard.suffix, params, currentIdx, staticPrefixLen, 0, [], 0);
     }
 
     if (wildcard.methods) {
@@ -434,6 +482,185 @@ function compileNode(
   }
 
   return code;
+}
+
+/**
+ * A wildcard's `suffix` trie (the segments after `**`, last segment first),
+ * matched from the end of the path: at depth `j` the next segment is
+ * `s[l-j-1]`, and it must come after the `**` start `c` (`l>c+j`). Emits
+ * static children, then the param child, then the node's own routes, so the
+ * final (reversed) order is `collectSuffix`'s. With an all-static suffix and
+ * prefix the `**` tail is a constant-offset `p.slice`.
+ */
+function compileSuffix(
+  ctx: CompilerContext,
+  node: Node<any>,
+  params: string[],
+  c: number,
+  staticPrefixLen: number,
+  j: number,
+  suffixParams: string[],
+  suffixLen: number,
+): string {
+  let code = "";
+  const guard = `l>${c + j}`;
+  if (node.static) {
+    let chain = "";
+    for (const key in node.static) {
+      const match = compileSuffix(
+        ctx,
+        node.static[key],
+        params,
+        c,
+        staticPrefixLen,
+        j + 1,
+        suffixParams,
+        suffixLen < 0 ? -1 : suffixLen + key.length + 1,
+      );
+      if (match) {
+        chain += `${chain ? "else " : ""}if(s[l-${j + 1}]===${JSON.stringify(key)}){${match}}`;
+      }
+    }
+    if (chain) {
+      code += `if(${guard}){${chain}}`;
+    }
+  }
+  if (node.param) {
+    const match = compileSuffix(
+      ctx,
+      node.param,
+      params,
+      c,
+      staticPrefixLen,
+      j + 1,
+      [`s[l-${j + 1}]`, ...suffixParams],
+      -1,
+    );
+    if (match) {
+      code += `if(${guard}){${match}}`;
+    }
+  }
+  if (node.methods) {
+    const tail =
+      staticPrefixLen < 0 || suffixLen < 0
+        ? `s.slice(${c},l-${j}).join('/')`
+        : `p.slice(${staticPrefixLen},p.length-${suffixLen})`;
+    code += compileMethodMatch(ctx, node.methods, params.concat(tail, suffixParams), -1, guard);
+  }
+  return code;
+}
+
+/**
+ * A cheap check that some route with segments after `**` may match: the
+ * static/param structure of the tree down to each suffix trie, and of the
+ * trie down to a node with routes for the method, whose regex params after
+ * the `**` pass (no `**:name` or prefix regex checks).
+ */
+function compileSuffixProbe(ctx: CompilerContext, node: Node<any>, c: number): string {
+  const terms: string[] = [];
+  if (node.wildcard?.suffix) {
+    terms.push(compileTrieProbe(ctx, node.wildcard.suffix, c, 0));
+  }
+  for (const key in node.static) {
+    if (node.static[key].hasSuffix) {
+      const probe = compileSuffixProbe(ctx, node.static[key], c + 1);
+      terms.push(`l>${c}&&s[${c}]===${JSON.stringify(key)}&&(${probe})`);
+    }
+  }
+  if (node.param?.hasSuffix) {
+    terms.push(`l>${c}&&(${compileSuffixProbe(ctx, node.param, c + 1)})`);
+  }
+  return terms.filter((term) => !term.endsWith("(false)")).join("||") || "false";
+}
+
+function compileTrieProbe(ctx: CompilerContext, node: Node<any>, c: number, j: number): string {
+  const terms: string[] = [];
+  for (const key in node.methods) {
+    const entries = node.methods[key];
+    if (!entries?.length) continue;
+    // A route passes where its regex params after the `**` do: suffix
+    // position `q` (route index `w + 1 + q`) is `s[l-j+q]` at depth `j`.
+    const routes = entries.map((m) => {
+      const w = m.suffix![0];
+      const tests: string[] = [];
+      for (let i = w + 1; i < m.paramsRegexp.length; i++) {
+        if (m.paramsRegexp[i]) {
+          tests.push(`${serializeRegExp(ctx, m.paramsRegexp[i])}.test(s[l-${j + w + 1 - i}])`);
+        }
+      }
+      return tests.join("&&");
+    });
+    const any = routes.includes("") ? "" : routes.join("||");
+    terms.push(key ? `m===${JSON.stringify(key)}${any ? `&&(${any})` : ""}` : any || "true");
+  }
+  const children: string[] = [];
+  for (const key in node.static) {
+    const probe = compileTrieProbe(ctx, node.static[key], c, j + 1);
+    if (probe !== "false") {
+      children.push(`s[l-${j + 1}]===${JSON.stringify(key)}&&(${probe})`);
+    }
+  }
+  if (node.param) {
+    const probe = compileTrieProbe(ctx, node.param, c, j + 1);
+    if (probe !== "false") {
+      children.push(probe);
+    }
+  }
+  if (children.length > 0) {
+    terms.push(`l>${c + j}&&(${children.join("||")})`);
+  }
+  return terms.join("||") || "false";
+}
+
+function hasSuffixTrie(node: Node<any>): boolean {
+  if (!node.hasSuffix) {
+    return false;
+  }
+  if (node.wildcard?.suffix) {
+    return true;
+  }
+  for (const key in node.static) {
+    if (hasSuffixTrie(node.static[key])) {
+      return true;
+    }
+  }
+  return !!node.param && hasSuffixTrie(node.param);
+}
+
+// Ranks collected matches from the end of the path (mirrors `rankFromEnd` in
+// operations/_suffix.ts), only when a route with segments after `**` is among
+// them. `k` holds one `[** index or -1, suffix length, ...(param index,
+// kind)]` descriptor per match; a kind is 3 literal, 2 regex, 0 param or `**`.
+// Positions both `**` cover (`o` up to `h`) compare equal and are skipped.
+const RANK = `(r,k,n)=>{if(!k.some((d)=>d[1]>0))return r;const K=(d,p)=>{const e=n-d[1];if(d[0]>=0&&p>=d[0]&&p<e)return 0;for(let i=2;i<d.length;i+=2)if((d[1]&&d[i]>d[0]?d[i]-d[0]-1+e:d[i])===p)return d[i+1];return 3};return r.map((_,i)=>i).sort((a,b)=>{const A=k[a],B=k[b],o=Math.max(A[0]<0?n:A[0],B[0]<0?n:B[0]),h=n-Math.max(A[1],B[1]);for(let p=n-1;p>=0;p--){if(p<h&&p>=o){p=o;continue}const x=K(A,p)-K(B,p);if(x!==0)return x}return 0}).map((i)=>r[i])}`;
+
+function rankRef(ctx: CompilerContext): string {
+  const rankMap = (ctx.rankMap ??= new Map());
+  let index = rankMap.get(RANK);
+  if (index === undefined) {
+    index = ctx.data.push(ctx.compileToString ? RANK : new Function(`return ${RANK}`)()) - 1;
+    rankMap.set(RANK, index);
+  }
+  return dataRef(ctx, index);
+}
+
+function rankDescriptor(ctx: CompilerContext, data?: MethodData<any>): string {
+  const descriptor = [-1, data?.suffix ? data.suffix[1] : 0];
+  for (const [index, name] of data?.paramsMap || []) {
+    if (index < 0) {
+      descriptor[0] = -(index + 1);
+    } else {
+      descriptor.push(index, typeof name === "string" ? 0 : 2);
+    }
+  }
+  const key = JSON.stringify(descriptor);
+  const rankMap = (ctx.rankMap ??= new Map());
+  let slot = rankMap.get(key);
+  if (slot === undefined) {
+    slot = ctx.data.push(ctx.compileToString ? key : (descriptor as any)) - 1;
+    rankMap.set(key, slot);
+  }
+  return dataRef(ctx, slot);
 }
 
 /**

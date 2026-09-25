@@ -1,4 +1,5 @@
 import type { RouterContext, Node, MatchedRoute, MethodData } from "../types.ts";
+import { collectSuffix, rankFromEnd } from "./_suffix.ts";
 import { getMatchParams, normalizePath, splitPath } from "./_utils.ts";
 
 /**
@@ -18,6 +19,11 @@ export function findAllRoutes<T>(
   }
   const segments = splitPath(path);
   const matches = _findAll(ctx.root, method, segments, 0);
+  // Routes with segments after `**` match from the end of the path, and so
+  // does the order of the results once one of them matches
+  if (ctx.root.hasSuffix && matches.some((m) => m.suffix)) {
+    rankFromEnd(matches, segments);
+  }
 
   if (opts?.params === false) {
     return matches;
@@ -26,26 +32,33 @@ export function findAllRoutes<T>(
   return matches.map((m) => {
     return {
       data: m.data,
-      params: m.paramsMap ? getMatchParams(segments, m.paramsMap) : undefined,
+      params: m.paramsMap ? getMatchParams(segments, m.paramsMap, m.suffix) : undefined,
     };
   });
 }
 
-function _findAll<T>(
+/**
+ * Every route matching `segments`, least -> most specific in tree order.
+ * `reverse` flips same-node ties so that the last match is the one
+ * `findRoute` would pick (it takes the first-registered on ties).
+ */
+export function _findAll<T>(
   node: Node<T>,
   method: string,
   segments: string[],
   index: number,
   matches: MethodData<T>[] = [],
+  reverse?: boolean,
 ): MethodData<T>[] {
   const segment = segments[index];
 
   // 1. Wildcard
-  if (node.wildcard && node.wildcard.methods) {
-    const match = node.wildcard.methods[method] || node.wildcard.methods[""];
+  if (node.wildcard) {
+    const match =
+      node.wildcard.methods && (node.wildcard.methods[method] || node.wildcard.methods[""]);
     if (match) {
       if (index < segments.length) {
-        pushSorted(matches, match, true);
+        pushSorted(matches, match, true, reverse);
       } else {
         // Zero segments remain: only optional (`**`) wildcards match (mirrors findRoute)
         const optional: MethodData<T>[] = [];
@@ -55,8 +68,20 @@ function _findAll<T>(
             optional.push(m);
           }
         }
-        pushSorted(matches, optional, true);
+        pushSorted(matches, optional, true, reverse);
       }
+    }
+    // Routes with segments after the `**` (narrower than a bare one)
+    if (node.wildcard.suffix) {
+      collectSuffix(
+        node.wildcard.suffix,
+        method,
+        segments,
+        index,
+        segments.length - 1,
+        matches,
+        reverse,
+      );
     }
   }
 
@@ -66,7 +91,7 @@ function _findAll<T>(
       // Consume this segment as the param, then validate regex constraints on
       // the newly collected matches (mirrors `_lookupTree` in find.ts).
       const start = matches.length;
-      _findAll(node.param, method, segments, index + 1, matches);
+      _findAll(node.param, method, segments, index + 1, matches, reverse);
       if (node.param.hasRegexParam) {
         for (let r = matches.length - 1; r >= start; r--) {
           if (matches[r].paramsRegexp[index]?.test(segment) === false) matches.splice(r, 1);
@@ -85,7 +110,7 @@ function _findAll<T>(
             optional.push(m);
           }
         }
-        pushSorted(matches, optional, true);
+        pushSorted(matches, optional, true, reverse);
       }
     }
   }
@@ -96,7 +121,7 @@ function _findAll<T>(
   if (index < segments.length) {
     const staticChild = node.static?.[segment];
     if (staticChild) {
-      _findAll(staticChild, method, segments, index + 1, matches);
+      _findAll(staticChild, method, segments, index + 1, matches, reverse);
     }
   }
 
@@ -107,7 +132,7 @@ function _findAll<T>(
       // A param node (`key === "*"`) is a dynamic terminal, so a required last
       // param (`:id`) outweighs an optional one (`*`); static terminals don't
       // distinguish them (mirrors the compiler's `hasLastOptionalParam`).
-      pushSorted(matches, match, node.key === "*");
+      pushSorted(matches, match, node.key === "*", reverse);
     }
   }
 
@@ -128,9 +153,10 @@ function pushSorted<T>(
   matches: MethodData<T>[],
   match: MethodData<T>[],
   dynamicTerminal: boolean,
+  reverse?: boolean,
 ): void {
   if (match.length > 1) {
-    match = match
+    match = (reverse ? match.slice().reverse() : match)
       .map((m): [MethodData<T>, number] => {
         let w = 0;
         const { paramsRegexp: rx, paramsMap: pm } = m;
