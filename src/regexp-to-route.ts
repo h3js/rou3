@@ -55,8 +55,8 @@ export function regExpToRoute(regexp: RegExp | string): string {
   src = src
     .replace(/\(\?:\(\?<(\w+)>\[\^\/\]\+\)\\\/\?\|\\\/\)$/, "(?<$1>[^/]*)\\/?")
     .replace(/\(\?:\\\/\|\(\?<(\w+)>\.\+\?\)\\\/\?\)$/, "(?<$1>.*)\\/?")
-    .replace(/\.\*\?\)(\)\??)?\\\/\?$/, ".*)$1\\/?")
-    .replace(/\)\?\?\\\/\?$/, ")?\\/?");
+    .replace(/\)\?\?\\\/\?$/, ")?\\/?")
+    .replace(/\.\*\?\)(\)\??)?\\\/\?$/, ".*)$1\\/?");
   if (src.endsWith(TRAILING_SLASH)) src = src.slice(0, -TRAILING_SLASH.length);
   else if (src.endsWith(LEGACY_TRAILING_SLASHES)) {
     src = src.slice(0, -LEGACY_TRAILING_SLASHES.length);

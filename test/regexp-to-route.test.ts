@@ -42,6 +42,9 @@ describe("regExpToRoute", () => {
     // `(?<_>.*)` is `**` only when it ends the route; `**` is terminal.
     expect(regExpToRoute(routeToRegExp("/a/:_*"))).toBe("/a/**");
     expect(regExpToRoute(/^\/a(?:\/(?<_>.*))?\/b\/?$/)).toBe("/a/:_*/b");
+    // The lazy `:name*` ending must not reverse to a single-segment `(.*?)?`.
+    expect(regExpToRoute(routeToRegExp("/path/:rest*"))).toBe("/path/:rest*");
+    expect(regExpToRoute(routeToRegExp("/a/c{/:w+}?"))).toBe("/a/c/:w*");
   });
 
   it("accepts catch-all regexes emitted by older versions", () => {
