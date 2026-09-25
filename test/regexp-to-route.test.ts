@@ -303,6 +303,15 @@ const KNOWN_NON_EQUIVALENT: Record<string, readonly [back: string, reason: strin
     "/a{/:x/:y(\\d+)?}?",
     "the router gives a lone number to `y`, the regex to `x`",
   ],
+  // The same after a catch-all, where the router ranks its routes from the end.
+  "/a/**/:y?/:n(\\d+)?": [
+    "/a/**{/:y/:n(\\d+)?}?",
+    "the router gives a lone last number to `n`, the regex to `y`",
+  ],
+  "/a/**/:y?/:n(a|b)?": [
+    "/a/**{/:y/:n(a|b)?}?",
+    "the router gives a lone last `a` / `b` to `n`, the regex to `y`",
+  ],
 };
 
 /** Sweep paths, also under the route's leading static segments (`/path/…`). */

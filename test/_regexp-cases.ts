@@ -873,6 +873,17 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
   "/a/**:r/:y?",
   "/:x+/:y?",
   "/a/:x+/:y?",
+  // A segment that can be empty right before a lazy catch-all: a plain `/?$`
+  // would let the stripped slash end it.
+  "/a/:p/**/:n(\\d+)?",
+  "/*/**/:n(\\d+)?",
+  "/a//**/:n(\\d+)?",
+  "/:p/:r*/:y(\\d+)?",
+  // An inline group after a catch-all and an optional segment (or an empty
+  // one) that can be empty.
+  "/a/**/:y?{/b}?",
+  "/a/**/{/b}?",
+  "/a/:r*/:y?{/b}?",
 ]);
 
 // Sweep patterns whose regex reuses a capture group name across alternation
@@ -895,6 +906,14 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   "/docs/{v2}?/:page?",
   // A mid-segment optional after a greedy capture.
   "/media/*{.webp}?",
+  // A `:x*` before a `*` that is optional in the route without it.
+  "/a/:r*/b/*",
+  "/:r*/*.png/*",
+  "/a/:r*/:y?/*",
+  "/a/:r*/b/*/:y?",
+  // A group right after a bare `**`.
+  "/a/**{/b/:c?}?",
+  "/a/**{.png}?",
 ]);
 
 /** Whether a regex source uses a look-behind (RE2-family engines have none). */
@@ -987,6 +1006,30 @@ function allSweepPatterns(): string[] {
     "/**/:y{/c}?",
     "/a/**/:y{/c}?",
     "/**/b{/c}?",
+    // A trailing `*` after a `:x*` is optional where the route has no `:x*`
+    // (`/a/:r*/b/*` also registers `/a/b/*`, which matches `/a/b`).
+    "/a/:r*/b/*",
+    "/:r*/*.png/*",
+    "/a/:r*/:y?/*",
+    "/a/:r*/b/*/:y?",
+    // A segment that can be empty right before a lazy catch-all: the stripped
+    // trailing slash must not end it (`/a/` is not `/a//` for `/a/:p/**/…`).
+    "/a/:p/**/:n(\\d+)?",
+    "/*/**/:n(\\d+)?",
+    "/a//**/:n(\\d+)?",
+    "/:p/:r*/:y(\\d+)?",
+    // Several optionals after a catch-all: the router ranks the routes it
+    // registers per path, the regex's catch-all is lazy or greedy as a whole.
+    "/**/:y?/:z?",
+    "/a/**/:y?/:z?",
+    "/a/**/:n(\\d+)?/:y?",
+    "/a/**/:y?/:n(\\d+)?",
+    "/a/**/:y?/:n(a|b)?",
+    "/a/**/:y?{/b}?",
+    "/a/**/{/b}?",
+    "/a/**{/b/:c?}?",
+    "/a/**{.png}?",
+    "/a/:r*/:y?{/b}?",
     ...Object.keys(regexpCases),
   ]);
   // Optional segments nested in an inline group (`/a{/b/*}?`), including an

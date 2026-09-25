@@ -7,8 +7,8 @@ import {
 } from "./_escape.ts";
 import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcards.ts";
 import { expandModifiers, splitRoute } from "./operations/_utils.ts";
-import { isOptionalGroups } from "./_regexp-scan.ts";
-import { withTrailingSlash } from "./_trailing-slash.ts";
+import { canBeEmpty, isOptionalGroups } from "./_regexp-scan.ts";
+import { openOptionals, withTrailingSlash } from "./_trailing-slash.ts";
 
 // Catch-all body. The router splits paths on `/` only, so a catch-all takes
 // any char, line terminators included; `.` would not (JS excludes `\n`, `\r`,
@@ -49,9 +49,10 @@ const LAZY_ANY = "[\\s\\S]*?";
  *
  * Segments after a `**` (`/**\/_payload.json`, `/**.md`, and a `:name+` /
  * `:name*` before the last segment) follow it in the regex, so they match at
- * the end of the path as in the router. Where the route has optional segments
- * after the `**`, the `**` is lazy or greedy to pick the expansion the router
- * picks (see `lazyCatchAll`).
+ * the end of the path as in the router. Where the route has one optional
+ * segment after the `**`, the `**` is lazy or greedy to pick the route the
+ * router picks (see `lazyCatchAll`); with several, it matches the same paths
+ * but may capture like another of the routes the pattern registers.
  *
  * @throws a `rou3:` error, the one `addRoute` throws, when an expansion of
  * `route` has more than one `**` (`/**\/**`, `/a/:x+/b/:y+`).
@@ -120,14 +121,18 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
     // Only a single group is handled inline; bail if `pre`/`body` nest another.
     scanFirstGroup(pre) ||
     scanFirstGroup(body) ||
-    needsModifierExpansion(pre) ||
+    // A group right after a bare `**` (`/a/**{.json}?`, `/a/**{/b}?`) adds an
+    // optional segment after it, which the router ranks against the route
+    // without it: expand (see `lazyCatchAll`).
+    /(?:^|\/)\*\*$/.test(pre) ||
+    needsModifierExpansion(pre, body.charCodeAt(0) === 47 /* '/' */) ||
     needsModifierExpansion(pre + body)
   ) {
     return;
   }
 
-  // A `**` before the group picks the expansion the router picks with the
-  // group's segments as optional ones (see `lazyCatchAll`).
+  // A catch-all before the group is lazy or greedy with the group's segments
+  // counted as optional ones (see `lazyCatchAll`).
   const extra = body.charCodeAt(0) === 47 /* '/' */ ? splitRoute(body) : [];
   const [baseSegs, baseOwnSep] = routeToRegExpSegments(pre, extra);
   const [fullSegs, fullOwnSep, starStar] = routeToRegExpSegments(pre + body, extra);
@@ -188,16 +193,32 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
 /**
  * Whether `route` has a modifier whose tree expansion the inline emitter can't
  * mirror: an empty segment followed only by optional ones becomes trailing
- * (and is dropped) once they are absent (`/a//:x?` also registers `/a`).
+ * (and is dropped) once they are absent (`/a//:x?` also registers `/a`), and
+ * a `:x*` followed by a `*` that is optional in the route without the `:x*`
+ * (`/a/:x*\/b/*` also registers `/a/b/*`, which matches `/a/b`) but takes a
+ * segment after the `**:x`. A lone `*` right after the `:x*` compiles to one
+ * nested group, unless an inline `{/…}?` group follows (`group`).
  */
-function needsModifierExpansion(route: string): boolean {
+function needsModifierExpansion(route: string, group = false): boolean {
   const segments = splitRoute(route);
   for (let i = 0; i < segments.length - 1; i++) {
     if (segments[i] === "" && segments.slice(i + 1).every((s) => paramModifier(s))) {
       return true;
     }
+    if (
+      paramModifier(segments[i]) === "*" &&
+      (group || i < segments.length - 2) &&
+      segments.some((s, j) => j > i && s === "*" && optionalAfter(segments, j))
+    ) {
+      return true;
+    }
   }
   return false;
+}
+
+/** Whether only optional (`?` / `*`) segments follow `segments[i]`. */
+function optionalAfter(segments: string[], i: number): boolean {
+  return segments.slice(i + 1).every((s) => paramModifier(s) === "?" || paramModifier(s) === "*");
 }
 
 /**
@@ -206,13 +227,17 @@ function needsModifierExpansion(route: string): boolean {
  * the router registers the route with and without them and, where both
  * match, ranks them from the end of the path (a literal beats a regex param,
  * which beats a param or `**`; the longer one wins a tie). A greedy `**`
- * picks the route without them, a lazy one the route with them.
+ * picks the route without them, a lazy one the route with them. `undefined`
+ * when no optional segment follows (a single parse either way). With several,
+ * this compares the routes with all and with none of them, and the router
+ * may pick one in between (`/a/**\/:n(\d+)?/:y?` on `/a/x/1/1` takes the
+ * route with `n` only): the regex then captures like another of them.
  */
-function lazyCatchAll(after: string[], extra: string[]): boolean {
+function lazyCatchAll(after: string[], extra: string[]): boolean | undefined {
   const all = after.concat(extra);
   const kept = all.filter((segment, i) => i < after.length && paramModifier(segment) !== "?");
   if (kept.length === all.length) {
-    return false;
+    return;
   }
   for (let a = all.length - 1, b = kept.length - 1; a >= 0; a--, b--) {
     const kind = segmentKind(all[a]);
@@ -246,9 +271,29 @@ function _routeToRegExp(route: string): RegExp {
   const [segments, ownSeparator, starStar, openTail] = routeToRegExpSegments(route);
   const body = joinSegments(segments, ownSeparator);
   // Root: lookup reaches `/` from `/` only (`//` is an empty segment).
-  return new RegExp(
-    segments.length > 0 ? `^${openTail ? `${body}/?$` : withTrailingSlash(body, starStar)}` : "^/$",
-  );
+  return new RegExp(segments.length > 0 ? `^${ending(body, starStar, openTail)}` : "^/$");
+}
+
+/**
+ * `body` with the trailing-slash rule (see `withTrailingSlash`). After a lazy
+ * catch-all followed by optional segments only (`openTail`), a plain `/?$`
+ * is exact, and the optional segments after it that can be empty are made
+ * lazy (when `openTail` is the catch-all's group, they follow it) so that
+ * the stripped slash does not end one: `/a/**\/:y?/:z?` leaves `z` unset on
+ * `/a/b/`, as the router does.
+ */
+function ending(body: string, starStar: boolean, openTail: string | boolean): string {
+  if (!openTail) {
+    return withTrailingSlash(body, starStar);
+  }
+  if (typeof openTail === "string") {
+    const at = body.lastIndexOf(openTail) + openTail.length;
+    const optionals = openOptionals(body.slice(at));
+    if (optionals !== undefined) {
+      return `${body.slice(0, at)}${optionals}/?$`;
+    }
+  }
+  return `${body}/?$`;
 }
 
 /**
@@ -272,7 +317,7 @@ function joinSegments(segments: string[], ownSeparator: boolean): string {
 function routeToRegExpSegments(
   route: string,
   extra: string[] = [],
-): [segments: string[], ownSeparator: boolean, starStar: boolean, openTail: boolean] {
+): [segments: string[], ownSeparator: boolean, starStar: boolean, openTail: string | boolean] {
   const reSegments: string[] = [];
   let idCtr = 0;
   let ownSeparator = false;
@@ -283,8 +328,9 @@ function routeToRegExpSegments(
   // The route ends in a lazy `**` / `:x*` and optional segments only, for
   // which a plain `/?$` is exact: any match minus a trailing slash is one
   // (the catch-all takes the rest), and the lazy catch-all leaves that slash
-  // to the `/?`.
-  let openTail = false;
+  // to the `/?`. The catch-all's group where the optionals follow it at the
+  // end of the body (not nested in an earlier optional), see `ending`.
+  let openTail: string | boolean = false;
   const oneCatchAll = () => {
     if (catchAll) {
       throw new Error(`rou3: a route can have only one \`**\` (${route})`);
@@ -339,7 +385,7 @@ function routeToRegExpSegments(
   // separator stays with the prefix (`/a/**/b` must not match `/ab`), except
   // at the root, where the leading slash doubles as it so that `_` is `""`
   // on `/b` as in the router. With optional segments after it, the router
-  // registers several routes; `lazyCatchAll` picks the one it matches.
+  // registers several routes; `lazyCatchAll` picks between them.
   const pushCatchAll = (
     id: string,
     required: boolean,
@@ -369,17 +415,27 @@ function routeToRegExpSegments(
       return true;
     }
     const lazy = lazyCatchAll(tail, extra);
-    openTail =
-      lazy && !required && extra.length === 0 && tail.every((s) => paramModifier(s) === "?");
+    // A plain `/?$` is not exact where the segment before the catch-all can be
+    // empty: the stripped slash would end it (`/a/` matching `/a/:p/**/:y?`).
+    const open =
+      lazy &&
+      !required &&
+      extra.length === 0 &&
+      tail.every((s) => paramModifier(s) === "?") &&
+      !(reSegments.length > 0 && canBeEmpty(reSegments[reSegments.length - 1]));
     const name = groupName(id);
     const body = pattern ? `${pattern}(?:/${pattern})*${lazy ? "?" : ""}` : lazy ? LAZY_ANY : ANY;
     const group = `(?<${name}>${body})`;
+    if (open) {
+      openTail = nest === 0 ? `(?:/${group})??` : true;
+    }
     if (required) {
       reSegments.push(reSegments.length > 0 ? `${reSegments.pop()}/${group}` : group);
       nest = 0;
     } else if (repeat || lazy || reSegments.length > 0) {
-      // `:name*` is lazy: the router's route without it leaves `name` unset.
-      pushOptional(group, false, repeat || lazy);
+      // Without optional segments after it, `:name*` is lazy: the router's
+      // route without it leaves `name` unset. With them, it picks like `**`.
+      pushOptional(group, false, lazy ?? repeat);
     } else {
       reSegments.push(`?${group}`);
     }
@@ -402,10 +458,7 @@ function routeToRegExpSegments(
       // A trailing `*` is optional in the tree (`/a` reaches `/a/*`), also
       // when only optional segments follow it (`/a/*/:x?` expands to `/a/*`),
       // but not after a `**`, where it takes one segment.
-      if (
-        catchAll ||
-        !segments.slice(i + 1).every((s) => paramModifier(s) === "?" || paramModifier(s) === "*")
-      ) {
+      if (catchAll || !optionalAfter(segments, i)) {
         reSegments.push(star);
         nest = 0;
       } else {

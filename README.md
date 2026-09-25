@@ -350,7 +350,7 @@ The regex matches the paths `findRoute()` matches for a router holding only that
 - The empty path `""`: the router treats it as `/`, the regex matches it only for root routes whose first segment is optional (`/**`, `/:x*`, `/:x?`, `/*`), not for `/` itself.
 - In PCRE and Perl, `$` also matches before a final `\n`, so there the regex also matches `<path>\n`.
 
-The named groups hold the params. In two cases the regex leaves a group **unset** where the router reports `""`: a required segment that is empty (`/a//` on `/a/:x`, `/a//b` on `/a/:x/:y?`) and a `**` that matches no segment (`/a` on `/a/**`, `/a/b` on `/a/**/b`; at the root the regex captures `""` too: `/_payload.json` on `/**/_payload.json`). The first is the cost of avoiding look-behind: capturing `""` there would need look-around, backreferences or the same named group twice. Separately, when optional segments meet a `*` or a constrained optional, the regex can give a segment to a different param than the router (`/a/:x?/*` on `/a/b` sets `x`, the router sets `*`).
+The named groups hold the params. In two cases the regex leaves a group **unset** where the router reports `""`: a required segment that is empty (`/a//` on `/a/:x`, `/a//b` on `/a/:x/:y?`) and a `**` that matches no segment (`/a` on `/a/**`, `/a/b` on `/a/**/b`; at the root the regex captures `""` too: `/_payload.json` on `/**/_payload.json`). The first is the cost of avoiding look-behind: capturing `""` there would need look-around, backreferences or the same named group twice. Separately, when optional segments meet a `*` or a constrained optional, the regex can give a segment to a different param than the router (`/a/:x?/*` on `/a/b` sets `x`, the router sets `*`), and so can several optional segments after a `**` (see below).
 
 The trailing-slash rule (at most one trailing slash, and exactly one when the path's last segment is empty) is built into the end of the regex:
 
@@ -376,7 +376,9 @@ Most routes compile without look-behind, so the output also works in RE2-family 
 - a required last segment whose constraint can match empty (`/path/:id(\d*)`),
 - optional segments side by side where an earlier one can be empty and a later one can't nest in it (`/a/:x(\d*)?/:y?`, `/a/:x?{/b/c}?`),
 - optional segments side by side after a required segment that can be empty (`/a/:x/:y(\d+)?/:z?`),
-- a required catch-all right before an optional last segment (`/a/**:rest/:page?`, `/a/:rest+/:page?`).
+- a required catch-all right before an optional last segment (`/a/**:rest/:page?`, `/a/:rest+/:page?`),
+- a segment that can be empty right before a catch-all followed by optional segments only (`/a/:p/**/:n(\d+)?`),
+- an optional group after a catch-all and an optional segment that can be empty (`/a/**/:y?{/b}?`).
 
 Fixed-length look-behinds work in JavaScript, PCRE and Perl. RE2-family engines also reject the duplicate-name alternations in the note below (they have no `DUPNAMES` option) and constraints that use syntax they lack.
 
@@ -388,11 +390,11 @@ routeToRegExp("/blog/:id(\\d+){-:title}?");
 ```
 
 > [!NOTE]
-> Multi-group or mid-route optionals that cannot be inlined fall back to an alternation and may contain duplicate named groups. That output is valid in JavaScript (per the TC39 duplicate-named-groups proposal) and Perl, but requires `PCRE2_DUPNAMES` on strict PCRE2 engines.
+> Multi-group or mid-route optionals that cannot be inlined fall back to an alternation and may contain duplicate named groups, and so do a `:name*` before a `*` (`/a/:rest*/b/*`) and a group right after a bare `**` (`/a/**{.png}?`). That output is valid in JavaScript (per the TC39 duplicate-named-groups proposal) and Perl, but requires `PCRE2_DUPNAMES` on strict PCRE2 engines.
 
 A route that declares the same param name twice (`/files/:path/**:path`; a bare `**` is the `_` param) throws a `rou3:` error, since engines disagree on whether a duplicate named group compiles.
 
-A route with more than one `**` (a `:name+` / `:name*` before the last segment counts as one) throws the same `rou3:` error as `addRoute`. With optional segments right after a `**`, the regex takes the route the router picks: the `**` is lazy where the optional segments win the end of the path (`/a/**/:n(\d+)?` gives `/a/b/1` to `n`), greedy otherwise.
+A route with more than one `**` (a `:name+` / `:name*` before the last segment counts as one) throws the same `rou3:` error as `addRoute`. With one optional segment right after a `**`, the regex takes the route the router picks: the `**` is lazy where the optional segment wins the end of the path (`/a/**/:n(\d+)?` gives `/a/b/1` to `n`), greedy otherwise. With several, the router ranks the routes they register per path, while the regex's `**` can only be lazy or greedy as a whole: it matches the same paths but may take another of those routes (`/docs/**/:page?/:lang(en|fr)?` on `/docs/en` sets `page`, the router `lang`).
 
 `regExpToRoute(regexp)` is the inverse: it parses an anchored, PCRE-compatible `RegExp` (or its `source` string) back into a route pattern. Pass either a `RegExp` or a source string:
 

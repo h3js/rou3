@@ -113,6 +113,15 @@ export function withTrailingSlash(body: string, starStar = false): string {
 }
 
 /**
+ * Optional groups (`(?:/…)?`, side by side or nested) rebuilt for a plain
+ * `/?` after them as in `openEnding`, or `undefined` where that isn't exact.
+ * For the optional segments after a lazy catch-all (see `routeToRegExp`).
+ */
+export function openOptionals(fragment: string): string | undefined {
+  return openEnding(fragment, false);
+}
+
+/**
  * `level` rebuilt for a plain `/?` after it, or `undefined` when that isn't
  * exact (see `withTrailingSlash`). Nested groups are rebuilt from the
  * innermost out: one can only be taken with the ones around it, so making
