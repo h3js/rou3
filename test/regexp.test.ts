@@ -133,3 +133,49 @@ describe("routeToRegExp", () => {
     }
   });
 });
+
+// A route expansion that declares a param name twice would emit a duplicate
+// named group. Engines disagree on whether that compiles: V8 (Node 24) accepts
+// it when one copy sits inside an alternative (the `**:name` / `:name+` ending),
+// Bun, Deno, PCRE2 and RE2 reject it. `routeToRegExp` rejects it up front so
+// every runtime gets the same `rou3:` error.
+describe("routeToRegExp: duplicate param names", () => {
+  it.each([
+    ["/files/:path/**:path", "path"],
+    ["/a/:x/:x+", "x"],
+    ["/u/:id/:id", "id"],
+    ["/a/:id(\\d+)/:id", "id"],
+    ["/a/:x/:x?", "x"],
+    ["/a/:x/:x*", "x"],
+    ["/a/:x/:x(\\d+)?", "x"],
+    // Mixed segments (`-` is a name character, so `.` separates here).
+    ["/a/:x.:x", "x"],
+    ["/a/:x(\\d+).:x", "x"],
+    ["/a/:x/p.:x", "x"],
+    // A name inside an optional group plus the same name outside it: inline
+    // (whole-segment and mid-segment) and expanded-alternation paths.
+    ["/a/:x{/b/:x}?", "x"],
+    ["/a/:x(\\d+){-:x}?", "x"],
+    ["/a{/:x}?/:x", "x"],
+    // `**` is the `_` param (the router reports it as `params._`).
+    ["/a/:_/**", "_"],
+  ])("rejects %s", (route, name) => {
+    expect(() => routeToRegExp(route)).toThrowError(`rou3: duplicate param name "${name}"`);
+  });
+
+  // Duplicates are per expansion: the alternation fallback repeats a name once
+  // per branch, and generated unnamed captures (`_N`) never collide.
+  it.each([
+    ...PCRE2_DUPLICATE_NAME_ROUTES,
+    "/media/:name{.webp}?",
+    // Expands to `/a/**:x` | `/a/:x`: one `x` per branch.
+    "/a/:x*/:x",
+    "/a/*/*",
+    "/a/(\\d+)/(\\d+)",
+    "/a/*/b/*.png/(\\d+)",
+    // `:0` escapes to `__rou3_esc_0`, distinct from the unnamed `*` (`_0`).
+    "/w/:0/*",
+  ])("accepts %s", (route) => {
+    expect(() => routeToRegExp(route)).not.toThrow();
+  });
+});

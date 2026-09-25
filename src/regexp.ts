@@ -33,6 +33,10 @@ import { withTrailingSlash } from "./_trailing-slash.ts";
  * back to alternation and may contain duplicate named groups (valid in JS/Perl,
  * but requiring `PCRE2_DUPNAMES` for strict PCRE2 engines).
  *
+ * @throws a `rou3:` error when one expansion of `route` declares the same param
+ * name twice (`/files/:path/**:path`, `/a/:x{/b/:x}?`); the resulting duplicate
+ * named group would compile on some engines and not on others.
+ *
  * @example
  * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)\/?$/
  * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
@@ -204,6 +208,23 @@ function routeToRegExpSegments(route: string): [segments: string[], ownSeparator
   let idCtr = 0;
   let ownSeparator = false;
 
+  // Every param name emitted for this expansion. A name declared twice would
+  // be a duplicate named group, which engines disagree on: V8 (Node 24)
+  // accepts one when a copy sits inside an alternative (the `**:name` /
+  // `:name+` ending), while other runtimes, PCRE2 and RE2 reject it. Throw the
+  // same error everywhere instead. Generated unnamed captures (`_N`) are not
+  // params and never pass through here; the alternation fallback checks each
+  // expansion on its own, so it may still repeat a name across branches.
+  // Named groups inside a constraint body (`:x((?<y>a))`) are not tracked.
+  const names = new Set<string>();
+  const groupName = (name: string): string => {
+    if (names.has(name)) {
+      throw new Error(`rou3: duplicate param name "${name}" in "${route}"`);
+    }
+    names.add(name);
+    return toGroupName(name);
+  };
+
   const segments = splitRoute(route);
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
@@ -235,8 +256,10 @@ function routeToRegExpSegments(route: string): [segments: string[], ownSeparator
       // zero or more segments (`/api` too), `**:name` one or more. A segment may
       // be empty, so one-or-more is the separator plus `.*` (`/api//` reaches
       // `/api/**:p` with `p: ""`; `/api/` is `/api` after trailing stripping).
+      // A bare `**` is the `_` param (`params._` in the router).
+      const name = groupName(segment === "**" ? "_" : segment.slice(3));
       if (segment !== "**") {
-        reSegments.push(`(?<${toGroupName(segment.slice(3))}>.*)`);
+        reSegments.push(`(?<${name}>.*)`);
       } else if (reSegments.length > 0) {
         reSegments.push(`${reSegments.pop()}(?:/(?<_>.*))?`);
       } else {
@@ -251,14 +274,13 @@ function routeToRegExpSegments(route: string): [segments: string[], ownSeparator
       const modMatch = segment.match(/^(.*:[\w-]+(?:\([^)]*\))?)([?+*])$/);
       if (modMatch) {
         const [, base, mod] = modMatch;
-        const name = toGroupName(base.match(/:([\w-]+)/)?.[1] || `_${idCtr++}`);
 
         if (mod === "?") {
           const inner = escapeBareDots(
             base.replace(
               /:([\w-]+)(?:\(([^)]*)\))?/g,
               (_, id, pattern) =>
-                `(?<${toGroupName(id)}>${pattern || (/^:[\w-]+$/.test(base) ? "[^/]*" : "[^/]+")})`,
+                `(?<${groupName(id)}>${pattern || (/^:[\w-]+$/.test(base) ? "[^/]*" : "[^/]+")})`,
             ),
           );
           if (reSegments.length > 0) {
@@ -272,8 +294,10 @@ function routeToRegExpSegments(route: string): [segments: string[], ownSeparator
           continue;
         }
 
-        // + or * (preserve inline constraint when present)
-        const pattern = base.match(/:([\w-]+)(?:\(([^)]*)\))?/)?.[2];
+        // + or * (preserve inline constraint when present). `modMatch` ensures
+        // `base` holds a `:name`; only the first one is emitted.
+        const [, id, pattern] = base.match(/:([\w-]+)(?:\(([^)]*)\))?/)!;
+        const name = groupName(id);
         if (reSegments.length > 0) {
           const prevMod: string = reSegments.pop()!;
           if (pattern) {
@@ -316,7 +340,7 @@ function routeToRegExpSegments(route: string): [segments: string[], ownSeparator
               .replace(
                 /:([\w-]+)(?:\(([^)]*)\))?/g,
                 (_, id, pattern) =>
-                  `(?<${toGroupName(id)}>${pattern || (whole ? "[^/]*" : "[^/]+")})`,
+                  `(?<${groupName(id)}>${pattern || (whole ? "[^/]*" : "[^/]+")})`,
               )
               .replace(/(^|[^\\])\((?![?<])/g, (_, p) => `${p}(?<${toRegExpUnnamedKey(idCtr++)}>`),
           ),
