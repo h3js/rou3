@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { routeToRegExp, createRouter, addRoute, findRoute } from "../src/index.ts";
 import { fromGroupName } from "../src/_group-names.ts";
 import {
+  type Captures,
   regexpCases as routes,
   LOOKBEHIND_ROUTES,
   PCRE2_DUPLICATE_NAME_ROUTES,
@@ -9,18 +10,25 @@ import {
   sweepPatterns,
 } from "./_regexp-cases.ts";
 
-function normalizeGroups(groups?: Record<string, string>) {
-  if (!groups) {
-    return groups;
-  }
-
-  const normalized: Record<string, string> = {};
+/**
+ * Regex groups keyed like router params (escaped names decoded, `_N` -> `N`).
+ * Every group is kept, `undefined` when unset.
+ */
+function normalizeGroups(groups?: Record<string, string | undefined>): Captures {
+  const normalized: Record<string, string | undefined> = {};
   for (const key in groups) {
-    const normalizedKey = fromGroupName(key).replace(/^_(\d+)$/, "$1");
-    normalized[normalizedKey] = groups[key];
+    normalized[fromGroupName(key).replace(/^_(\d+)$/, "$1")] = groups[key];
   }
-
   return normalized;
+}
+
+/** Drop unset captures (`undefined`, which the router also uses, #198). */
+function definedCaptures(captures: Captures = {}): Record<string, string> {
+  const defined: Record<string, string> = {};
+  for (const key in captures) {
+    if (captures[key] !== undefined) defined[key] = captures[key];
+  }
+  return defined;
 }
 
 describe("routeToRegExp", () => {
@@ -31,21 +39,21 @@ describe("routeToRegExp", () => {
 
       const regex = routeToRegExp(route);
 
-      for (const [path, params] of expected.match) {
-        expect(findRoute(router, "", path)).toMatchObject(
-          params
-            ? {
-                data: { route },
-                params,
-              }
-            : { data: { route } },
-        );
+      for (const entry of expected.match) {
+        const [path, groups = {}, params = groups] = entry;
+        // A router override must say something the groups don't.
+        if (entry.length > 2) {
+          expect(definedCaptures(params), path).not.toEqual(definedCaptures(groups));
+        }
+
+        const found = findRoute(router, "", path);
+        expect(found, path).toMatchObject({ data: { route } });
+        expect(definedCaptures(found?.params), path).toEqual(definedCaptures(params));
 
         const match = path.match(regex);
         expect(match, path).not.toBeNull();
-        if (params) {
-          expect(normalizeGroups(match?.groups)).toMatchObject(params);
-        }
+        // Exact: an extra group, a missing one, or `""` vs unset all fail.
+        expect(normalizeGroups(match?.groups), path).toStrictEqual(groups);
       }
 
       for (const path of expected.noMatch || []) {

@@ -1,8 +1,17 @@
 // Shared fixtures for routeToRegExp tests (interpreter + cross-engine PCRE checks).
 
+/** Captures by param name (`_N` groups as `"N"`), `undefined` when unset. */
+export type Captures = Readonly<Record<string, string | undefined>>;
+
 export interface RegExpCase {
   regex: RegExp;
-  match: ReadonlyArray<readonly [string, Record<string, string>?]>;
+  /**
+   * `[path, groups, params]`. `groups` lists the regex's named groups exactly:
+   * every group, `undefined` when unset (default `{}`). `params` gives the
+   * `findRoute` params only where they differ from `groups` (the router
+   * reports `""` for some groups the regex leaves unset).
+   */
+  match: ReadonlyArray<readonly [path: string, groups?: Captures, params?: Captures]>;
   /** Paths neither the router nor the regex may match. */
   noMatch?: ReadonlyArray<string>;
 }
@@ -28,7 +37,7 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/path/value/", { param: "value" }],
       // An empty last segment takes the slash-only branch, which leaves
       // `param` unset where the router reports `""` (no look-behind, RE2-safe).
-      ["/path//"],
+      ["/path//", { param: undefined }, { param: "" }],
     ],
     noMatch: ["/path", "/path/", "/path///", "/path/value//"],
   },
@@ -36,8 +45,8 @@ export const regexpCases: Record<string, RegExpCase> = {
   "/path/*": {
     regex: /^\/path(?:\/(?<_0>[^/]*))??\/?$/,
     match: [
-      ["/path"],
-      ["/path/"],
+      ["/path", { "0": undefined }],
+      ["/path/", { "0": undefined }],
       // The lazy `(?:…)??` skips the group on `/path/` (like the router) and
       // takes it, empty, on `/path//`.
       ["/path//", { "0": "" }],
@@ -92,7 +101,7 @@ export const regexpCases: Record<string, RegExpCase> = {
     match: [
       // The whole catch-all group is skipped, so the regex leaves `_` unset
       // while the router reports `""`.
-      ["/path"],
+      ["/path", { _: undefined }, { _: "" }],
       // `.*?` leaves the stripped trailing slash out of the capture.
       ["/path/", { _: "" }],
       ["/path//", { _: "" }],
@@ -113,9 +122,11 @@ export const regexpCases: Record<string, RegExpCase> = {
     regex: /^\/base\/(?:\/|(?<path>.+?)\/?)$/,
     match: [
       ["/base/anything/more", { path: "anything/more" }],
-      // One or more segments, and a segment may be empty (`path` is unset in
-      // the regex, `""` in the router).
-      ["/base//"],
+      // One or more segments, and a segment may be empty. The router reports
+      // `path: ""`, but the look-behind-free `**:x` / `:x+` ending takes its
+      // slash-only branch here and leaves `path` unset (the accepted trade-off,
+      // see `withTrailingSlash` in src/_trailing-slash.ts).
+      ["/base//", { path: undefined }, { path: "" }],
       ["/base///", { path: "/" }],
       ["/base/a/", { path: "a" }],
       ["/base/a//", { path: "a/" }],
@@ -171,15 +182,18 @@ export const regexpCases: Record<string, RegExpCase> = {
     match: [
       ["/path/123", { id: "123" }],
       ["/path/123/", { id: "123" }],
-      ["/path"],
-      ["/path/"],
+      ["/path", { id: undefined }],
+      ["/path/", { id: undefined }],
       ["/path//", { id: "" }],
     ],
     noMatch: ["/path///", "/path/123//"],
   },
   "/path/:id(\\d+)?": {
     regex: /^\/path(?:\/(?<id>\d+))?\/?$/,
-    match: [["/path/123", { id: "123" }], ["/path"]],
+    match: [
+      ["/path/123", { id: "123" }],
+      ["/path", { id: undefined }],
+    ],
   },
   "/path/:rest+": {
     regex: /^\/path\/(?:\/|(?<rest>.+?)\/?)$/,
@@ -205,8 +219,8 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/path/a/b", { rest: "a/b" }],
       ["/path/a/b/", { rest: "a/b" }],
       ["/path/a//", { rest: "a/" }],
-      ["/path"],
-      ["/path/"],
+      ["/path", { rest: undefined }],
+      ["/path/", { rest: undefined }],
     ],
   },
   "/path/(\\d+)": {
@@ -232,7 +246,12 @@ export const regexpCases: Record<string, RegExpCase> = {
   "/docs/{v2}?/:page?": {
     regex:
       /^(?:\/docs\/v2(?:\/(?<page>[^/]*))??\/?|(?:\/docs\/\/(?:(?<page>[^/]+)\/?|\/)|\/docs\/?))$/,
-    match: [["/docs"], ["/docs/"], ["/docs/v2"], ["/docs/v2/intro", { page: "intro" }]],
+    match: [
+      ["/docs", { page: undefined }],
+      ["/docs/", { page: undefined }],
+      ["/docs/v2", { page: undefined }],
+      ["/docs/v2/intro", { page: "intro" }],
+    ],
     noMatch: ["/docs/intro"],
   },
   "/path/(png|jpg|gif)": {
@@ -248,7 +267,10 @@ export const regexpCases: Record<string, RegExpCase> = {
   },
   "/path/:id(\\d+)*": {
     regex: /^\/path(?:\/(?<id>\d+(?:\/\d+)*))?\/?$/,
-    match: [["/path/123", { id: "123" }], ["/path"]],
+    match: [
+      ["/path/123", { id: "123" }],
+      ["/path", { id: undefined }],
+    ],
   },
   "/book{s}?": {
     regex: /^\/book(?:s)?\/?$/,
@@ -267,7 +289,7 @@ export const regexpCases: Record<string, RegExpCase> = {
   "/blog/:id(\\d+){-:title}?": {
     regex: /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/,
     match: [
-      ["/blog/123", { id: "123" }],
+      ["/blog/123", { id: "123", title: undefined }],
       ["/blog/123-my-post", { id: "123", title: "my-post" }],
     ],
   },
@@ -285,7 +307,10 @@ export const regexpCases: Record<string, RegExpCase> = {
   },
   "/api/:test-id?": {
     regex: /^\/api(?:\/(?<__rou3_esc_test_hid>[^/]*))??\/?$/,
-    match: [["/api/abc", { "test-id": "abc" }], ["/api"]],
+    match: [
+      ["/api/abc", { "test-id": "abc" }],
+      ["/api", { "test-id": undefined }],
+    ],
   },
   "/api/**:test-id": {
     regex: /^\/api\/(?:\/|(?<__rou3_esc_test_hid>.+?)\/?)$/,
@@ -333,10 +358,10 @@ export const regexpCases: Record<string, RegExpCase> = {
   "/path/:id/:tab?": {
     regex: /^\/path\/(?<id>[^/]*)(?:\/(?<tab>[^/]*))?(?:(?<=\/)\/|(?<!\/)\/?)$/,
     match: [
-      ["/path/1", { id: "1" }],
-      ["/path/1/", { id: "1" }],
+      ["/path/1", { id: "1", tab: undefined }],
+      ["/path/1/", { id: "1", tab: undefined }],
       ["/path/1/t", { id: "1", tab: "t" }],
-      ["/path//", { id: "" }],
+      ["/path//", { id: "", tab: undefined }],
       ["/path//t", { id: "", tab: "t" }],
     ],
     noMatch: ["/path", "/path/", "/path/1/t//"],
@@ -345,7 +370,12 @@ export const regexpCases: Record<string, RegExpCase> = {
   // must not match (it strips to `/path/sub`, which is neither branch).
   "/path{/sub/:id}?": {
     regex: /^\/path(?:\/sub\/(?<id>[^/]*))?(?:(?<=\/)\/|(?<!\/)\/?)$/,
-    match: [["/path"], ["/path/"], ["/path/sub/1", { id: "1" }], ["/path/sub//", { id: "" }]],
+    match: [
+      ["/path", { id: undefined }],
+      ["/path/", { id: undefined }],
+      ["/path/sub/1", { id: "1" }],
+      ["/path/sub//", { id: "" }],
+    ],
     noMatch: ["/path/sub", "/path/sub/"],
   },
   // A constraint that can match empty has no non-empty form to branch on.
