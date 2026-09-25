@@ -141,6 +141,49 @@ describe("routeToRegExp", () => {
     expect(mismatches).toEqual([]);
   });
 
+  // Captures must agree too: consumers read params off the regex. The one
+  // accepted difference is the look-behind-free ending of a required
+  // whole-segment `:x` / `**:x` / `:x+` (see `withTrailingSlash`): on a path
+  // whose last segment is empty it leaves the group unset where the router
+  // reports `""`. Anything else must be listed in KNOWN_CAPTURE_DIFFS.
+  it("captures what findRoute captures", () => {
+    const paths = sweepPaths();
+    const unexpected: string[] = [];
+    const seen = new Set<string>();
+    let accepted = 0;
+    for (const pattern of sweepPatterns()) {
+      const router = createRouter();
+      addRoute(router, "", pattern, true);
+      const regex = routeToRegExp(pattern);
+      const known = KNOWN_CAPTURE_DIFFS.get(pattern);
+      for (const path of paths) {
+        const found = findRoute(router, "", path);
+        const match = path.match(regex);
+        if (!found || !match) continue;
+        const groups = definedCaptures(normalizeGroups(match.groups));
+        const params = definedCaptures(found.params);
+        const keys = [...new Set([...Object.keys(groups), ...Object.keys(params)])].filter(
+          (key) => groups[key] !== params[key],
+        );
+        if (keys.length === 0) continue;
+        if (keys.every((key) => isEmptyLastSegmentGap(router, path, key, groups, params))) {
+          accepted++;
+        } else if (known?.test(pattern, keys, groups, params)) {
+          seen.add(pattern);
+        } else {
+          unexpected.push(
+            `${pattern} ${path}: regex ${fmt(groups)}, router ${fmt(params)}` +
+              (known ? ` (listed only for: ${known.reason})` : ""),
+          );
+        }
+      }
+    }
+    expect(unexpected).toEqual([]);
+    // A listed pattern that no longer differs must be removed from the list.
+    expect([...KNOWN_CAPTURE_DIFFS.keys()].filter((pattern) => !seen.has(pattern))).toEqual([]);
+    expect(accepted).toBeGreaterThan(0);
+  });
+
   // The ending analysis tokenizes the emitted (JS) body: `[]` and `[^]` close
   // immediately there, unlike PCRE where a leading `]` is a literal.
   it("tokenizes JS character classes in constraints", () => {
@@ -255,3 +298,117 @@ describe("routeToRegExp: duplicate param names", () => {
     expect(() => routeToRegExp(route)).not.toThrow();
   });
 });
+
+function fmt(captures: Record<string, string>): string {
+  return JSON.stringify(captures);
+}
+
+/**
+ * The accepted trade-off of the look-behind-free required ending: on a path
+ * whose last segment is empty (`/a//` strips to `/a/`), the slash-only branch
+ * leaves the group that takes that segment unset where the router reports
+ * `""`. `key` is that group iff filling the segment in (`/a/z/`) makes the
+ * router capture it (`**` has its own, listed, zero-segment difference).
+ */
+function isEmptyLastSegmentGap(
+  router: ReturnType<typeof createRouter>,
+  path: string,
+  key: string,
+  groups: Record<string, string>,
+  params: Record<string, string>,
+): boolean {
+  if (key === "_" || key in groups || params[key] !== "" || !path.endsWith("//")) {
+    return false;
+  }
+  const filled = findRoute(router, "", `${path.slice(0, -1)}z/`)?.params?.[key];
+  return filled?.endsWith("z") === true;
+}
+
+interface CaptureDiff {
+  reason: string;
+  /** Whether a difference (`keys` differ, unset groups dropped) is this one. */
+  test(
+    pattern: string,
+    keys: string[],
+    groups: Record<string, string>,
+    params: Record<string, string>,
+  ): boolean;
+}
+
+// Pre-existing (same on main before the look-behind-free endings): the regex
+// skips its whole optional `(?:/(?<_>…))?` group.
+const ZERO_SEGMENT_CATCH_ALL: CaptureDiff = {
+  reason: '`**` matching zero segments: `_` is unset in the regex, `""` in the router',
+  test: (_pattern, keys, groups, params) =>
+    keys.length === 1 && keys[0] === "_" && !("_" in groups) && params._ === "",
+};
+
+// Pre-existing: the regex's first optional group is greedy, while the tree
+// matches the shorter `/*` expansion's param node first.
+const OPTIONAL_BEFORE_WILDCARD: CaptureDiff = {
+  reason: "an optional param before a trailing `*` takes the segment (`x` vs the router's `0`)",
+  test: (_pattern, _keys, groups, params) =>
+    Object.keys(groups).length === 1 &&
+    Object.keys(params).length === 1 &&
+    Object.values(groups)[0] === Object.values(params)[0],
+};
+
+// Pre-existing: alternation branches run in expansion order, so the `**:x`
+// branch wins where the router picks a more specific expansion (`/:x*/:y` on
+// `/a` gives `y`; root `/:x*` on `/` matches `/` with no params).
+const REPEAT_EXPANSION: CaptureDiff = {
+  reason: "a `:x*` route: the regex captures `x` where the router matches another expansion",
+  test: (pattern, _keys, groups, params) => {
+    const name = /:([\w-]+)\*/.exec(pattern)?.[1];
+    return !!name && fmt(groups) === fmt({ [name]: groups[name] }) && !(name in params);
+  },
+};
+
+/** Sweep patterns whose captures differ from the router beyond the accepted gap. */
+const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
+  ...[
+    "/a/**",
+    "/a/a/**",
+    "/a/**/a",
+    "/a/**/:y",
+    "/a/**/*",
+    "/a/**/:y?",
+    "/a/**/**",
+    "/a/**/*.png",
+    "/a/**/x-:y",
+    "/a/**/b{.json}?",
+    "//**",
+    "/a//**",
+    "/{b}?/**",
+    "/a/{b}?/**",
+    "/:x/**",
+    "/a/:x/**",
+    "/*/**",
+    "/a/*/**",
+    "/:x?/**",
+    "/a/:x?/**",
+    "/a/:x*/**",
+    "/:x(\\d+)/**",
+    "/a/:x(\\d+)/**",
+    "/:x(\\d+)?/**",
+    "/a/:x(\\d+)?/**",
+  ].map((pattern) => [pattern, ZERO_SEGMENT_CATCH_ALL] as const),
+  ...["/:x?/*", "/a/:x?/*", "/:x(\\d+)?/*", "/a/:x(\\d+)?/*"].map(
+    (pattern) => [pattern, OPTIONAL_BEFORE_WILDCARD] as const,
+  ),
+  ...[
+    "/:x*",
+    "/:x*/a",
+    "/a/:x*/a",
+    "/:x*/:y",
+    "/a/:x*/:y",
+    "/:x*/*",
+    "/a/:x*/*",
+    "/:x*/:y?",
+    "/a/:x*/:y?",
+    "/:x*/*.png",
+    "/a/:x*/*.png",
+    "/:x*/b{.json}?",
+    "/a/:x*/b{.json}?",
+  ].map((pattern) => [pattern, REPEAT_EXPANSION] as const),
+]);
