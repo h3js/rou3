@@ -15,7 +15,8 @@ const LOOKBEHIND_SUFFIX = "(?:(?<=/)/|(?<!/)/?)$";
  * when that removes the need for look-behinds:
  *
  * - The body can never end in `/` (static or non-empty last segment, or
- *   trailing optional groups that cannot be empty): a plain `/?$`.
+ *   trailing optional groups that cannot be empty, none of them able to match
+ *   a string ending in `/`): a plain `/?$`.
  * - Only the last optional group can be empty (`:x?`, trailing `*`, `:x*`,
  *   `**`): every match ending in `/` minus that `/` is still a match, so `/?$`
  *   is exact too; the group is made lazy so captures agree with the router
@@ -28,7 +29,9 @@ const LOOKBEHIND_SUFFIX = "(?:(?<=/)/|(?<!/)/?)$";
  * empty-capable segment followed by optional ones (`/a/:x/:y?`): the path must
  * not stop right after its separator, and without look-around saying so needs
  * the optional groups in two alternation branches, i.e. duplicate group names,
- * which RE2 rejects as well.
+ * which RE2 rejects as well. It also includes any part whose match can end in
+ * `/` other than the trailing catch-all (a constraint like `.+`, `[^.]+` or
+ * `\S+`): the rewritten endings would let it take the stripped slash.
  */
 export function withTrailingSlash(body: string): string {
   // Root catch-all (`/**`, `/:x*`): every path matches.
@@ -57,6 +60,14 @@ export function withTrailingSlash(body: string): string {
   const tail = tokenize(parts[last]);
   const multi = tail.lastIndexOf("/") + 1;
   parts[last] = tail.slice(multi).join("");
+  // A part whose match can end in `/` (a constraint like `.+` or `[^.]+`) would
+  // keep the slash lookup strips (`/a/:x(.+)` matching `/a//` with `x: "/"`),
+  // and none of the endings below rules that out. The exception is a trailing
+  // catch-all `.*`: any of its matches minus a trailing slash is still one, and
+  // its endings below capture it lazily.
+  if (parts.some((part, i) => canEndInSlash(part) && !(i === last && CATCH_ALL.test(part)))) {
+    return body + LOOKBEHIND_SUFFIX;
+  }
   const empty = parts.findIndex((part) => canBeEmpty(part));
   if (empty < 0) {
     return `${body}/?$`;
@@ -85,6 +96,80 @@ export function withTrailingSlash(body: string): string {
   const inner = parts[last].replace(/^(\(\?<\w+>\.\*)\)$/, "$1?)");
   const lazy = inner.startsWith("(?<_>") ? "" : "?";
   return `${tokens.slice(0, -1).join("")}(?:/${inner})?${lazy}/?$`;
+}
+
+/** A whole-part catch-all capture (`**`, `**:x`, `:x+`, `:x*`, `(.*)`). */
+const CATCH_ALL = /^\(\?<\w+>\.\*\)$/;
+
+// One regex atom (JS syntax, no `u` flag): an escape (`\xHH`, `\uHHHH`, `\cX`,
+// `\k<name>` and digit runs whole), a character class, a group opener, a
+// quantifier, or a single char (`)` and `|` included).
+const ATOM =
+  /\\(?:x[\da-f]{2}|u[\da-f]{4}|c[a-z]|k<[^>]*>|\d+|[^])|\[(?:\\[^]|[^\\\]])*\]?|\((?:\?(?:<?[=!]|<[^>]*>|[\w-]*:))?|(?:[*+?]|\{\d+(?:,\d*)?\})\??|[^]/gi;
+
+/** `[canEndInSlash, canBeEmpty]` of a regex item. */
+type Item = [slash: boolean, empty: boolean];
+
+/**
+ * Whether some match of a segment regex (a body fragment) can end in `/`.
+ * Conservative, so a `false` is a proof: it walks each alternative back from
+ * its end over the items that can match empty, and asks every char, class or
+ * escape reached whether it matches `/`. Backreferences and anything it can't
+ * parse count as ending in `/`. rou3's own `[^/]*` / `[^/]+`, literals and
+ * constraints such as `\d+` or `[a-z0-9-]+` do not; `.+`, `[^.]+`, `\S+` do.
+ */
+function canEndInSlash(fragment: string): boolean {
+  // Open groups: opener, then alternatives as item lists.
+  const stack: [open: string, alternatives: Item[][]][] = [["", [[]]]];
+  for (const atom of fragment.match(ATOM) || []) {
+    const [open, alternatives] = stack[stack.length - 1];
+    const items = alternatives[alternatives.length - 1];
+    if (atom[0] === "(") {
+      stack.push([atom, [[]]]);
+    } else if (atom === ")") {
+      if (stack.length === 1) return true;
+      stack.pop();
+      const parent = stack[stack.length - 1][1];
+      // Look-arounds consume nothing.
+      parent[parent.length - 1].push(/[=!]$/.test(open) ? [false, true] : join(alternatives));
+    } else if (atom === "|") {
+      alternatives.push([]);
+    } else if (/^(?:[*+?]|\{\d)/.test(atom)) {
+      if (items.length === 0) return true;
+      if (/^(?:[*?]|\{0*[,}])/.test(atom)) items[items.length - 1][1] = true;
+    } else if (/^(?:[$^]|\\[bB])$/.test(atom)) {
+      items.push([false, true]);
+    } else if (/^\\[\dk]/.test(atom)) {
+      // Backreference (or octal escape): may repeat anything.
+      items.push([true, true]);
+    } else {
+      items.push([matchesSlash(atom), false]);
+    }
+  }
+  return stack.length > 1 || join(stack[0][1])[0];
+}
+
+/** Combine the alternatives of a group into one item. */
+function join(alternatives: Item[][]): Item {
+  let slash = false;
+  let empty = false;
+  for (const items of alternatives) {
+    for (let i = items.length - 1; i >= 0 && !slash; i--) {
+      slash = items[i][0];
+      if (!items[i][1]) break;
+    }
+    empty ||= items.every((item) => item[1]);
+  }
+  return [slash, empty];
+}
+
+/** Whether a single char, class or escape matches `/`. */
+function matchesSlash(atom: string): boolean {
+  try {
+    return new RegExp(`^(?:${atom})$`).test("/");
+  } catch {
+    return true;
+  }
 }
 
 /** Whether a segment regex (a body fragment) can match the empty string. */

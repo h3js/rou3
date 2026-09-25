@@ -358,6 +358,33 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/path", "/path/", "/path/a", "/path/12//"],
   },
+  // A constraint that can match `/` must not take the trailing slash lookup
+  // strips: behind a bare `/?$`, `[^.]+` matched `/files//` (`name: "/"`) and
+  // captured `report/` on `/files/report/` (see LOOKBEHIND_ROUTES). Mid-path,
+  // such a constraint still spans segments (`/files/a/b`); not modeled.
+  "/files/:name([^.]+)": {
+    regex: /^\/files\/(?<name>[^.]+)(?:(?<=\/)\/|(?<!\/)\/?)$/,
+    match: [
+      ["/files/report", { name: "report" }],
+      ["/files/report/", { name: "report" }],
+    ],
+    noMatch: ["/files", "/files/", "/files//"],
+  },
+  "/path/:x(\\S+)?": {
+    regex: /^\/path(?:\/(?<x>\S+))?(?:(?<=\/)\/|(?<!\/)\/?)$/,
+    match: [["/path"], ["/path/"], ["/path/a", { x: "a" }], ["/path/a/", { x: "a" }]],
+    noMatch: ["/path//"],
+  },
+  // Only the end of the match matters: this one can contain `/` but never end
+  // in one, so it keeps the plain ending.
+  "/path/:file(.+\\.zip)": {
+    regex: /^\/path\/(?<file>.+\.zip)\/?$/,
+    match: [
+      ["/path/a.zip", { file: "a.zip" }],
+      ["/path/a.zip/", { file: "a.zip" }],
+    ],
+    noMatch: ["/path/", "/path//", "/path/a.zip//"],
+  },
 };
 
 // Routes whose regex still ends in the look-behind trailing-slash suffix
@@ -368,10 +395,14 @@ export const regexpCases: Record<string, RegExpCase> = {
 // single named group: a required empty-capable param followed by optional
 // segments, a constraint that can match empty, an empty segment before a
 // trailing wildcard (`/a//*`), or several empty-capable optionals in a row.
+// It also stays when a match can end in `/` (a constraint like `[^.]+`), so
+// that the stripped trailing slash never lands in the capture.
 export const LOOKBEHIND_ROUTES: ReadonlySet<string> = new Set([
   "/path/:id/:tab?",
   "/path/:id(\\d*)",
   "/path{/sub/:id}?",
+  "/files/:name([^.]+)",
+  "/path/:x(\\S+)?",
 ]);
 
 // Routes whose generated regex reuses the same named capture group across

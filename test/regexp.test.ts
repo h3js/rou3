@@ -79,6 +79,56 @@ describe("routeToRegExp", () => {
     expect(mismatches).toEqual([]);
   });
 
+  // Constraints that can match `/` (`.+`, `[^.]+`, `\S+`) are not modeled
+  // mid-path: the regex lets them span segments (`/a/:x(.+)` matches `/a/b/c`),
+  // so the sweep above leaves them out. The trailing slash lookup strips must
+  // still never land inside them: on every path with at most one segment after
+  // the prefix, plus at most one trailing slash, regex and router agree on the
+  // match and on the captures (an unset group stands for the router's `""`).
+  it("keeps the stripped trailing slash out of slash-capable constraints", () => {
+    const units = [
+      ":x(.+)",
+      ":x([^.]+)",
+      ":x(\\S+)",
+      "(.+)",
+      "pre-:x(.+)",
+      ":x(.+)?",
+      ":x([^.]+)?",
+      ":x(.+\\.png)",
+      ":x(.*)",
+      ":x(.*)?",
+    ];
+    const mismatches: string[] = [];
+    for (const prefix of ["", "/a"]) {
+      const paths = new Set([prefix || "/", `${prefix}/`]);
+      for (const seg of ["a", "b", "x.png", "pre-a", ""]) {
+        paths.add(`${prefix}/${seg}`).add(`${prefix}/${seg}/`);
+      }
+      for (const unit of units) {
+        const pattern = `${prefix}/${unit}`;
+        const router = createRouter();
+        addRoute(router, "", pattern, true);
+        const regex = routeToRegExp(pattern);
+        for (const path of paths) {
+          const routed = findRoute(router, "", path);
+          const match = path.match(regex);
+          if (!routed !== !match) {
+            mismatches.push(`${pattern} ${path} (${routed ? "router" : "regex"} only)`);
+            continue;
+          }
+          const groups = normalizeGroups(match?.groups) || {};
+          const params: Record<string, string | undefined> = routed?.params || {};
+          for (const key of new Set([...Object.keys(groups), ...Object.keys(params)])) {
+            if ((groups[key] ?? "") !== (params[key] ?? "")) {
+              mismatches.push(`${pattern} ${path} ${key}: ${groups[key]} != ${params[key]}`);
+            }
+          }
+        }
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
+
   // The ending analysis tokenizes the emitted (JS) body: `[]` and `[^]` close
   // immediately there, unlike PCRE where a leading `]` is a literal.
   it("tokenizes JS character classes in constraints", () => {
