@@ -29,12 +29,14 @@ const ANY = "[\\s\\S]*";
  * The regex matches exactly the paths `findRoute()` matches for a router holding
  * only `route` — including the router's tolerances: one optional trailing slash,
  * empty segments for `:name` / `*` params, and an optional trailing `*` — so it
- * can stand in for the router as a guard or scope check.
+ * can stand in for the router as a guard or scope check. Not modeled: param
+ * constraints that can match `/` (the tree splits on `/` first), repeated
+ * constrained params (`:id(\d+)+`), the empty path, and `normalize: true`.
  *
  * Most routes also compile to RE2-compatible output (RE2, Go, Rust `regex`):
- * the trailing-slash rule is encoded without look-behinds except for the few
- * route endings that have no look-behind-free equivalent (see
- * `withTrailingSlash`).
+ * the trailing-slash rule is encoded without look-behinds, except for the few
+ * endings `withTrailingSlash` lists (e.g. a constraint that can end in `/`, or a
+ * required segment whose constraint can match empty).
  *
  * Note: multi-group or mid-route optionals that cannot be inlined still fall
  * back to alternation and may contain duplicate named groups (valid in JS/Perl,

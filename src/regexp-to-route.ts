@@ -34,8 +34,8 @@ const ROUTE_SPECIAL = new Set([
  *
  * @example
  * regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
- * regExpToRoute(/^\/path\/(?<param>[^/]+)\/?$/); // "/path/:param"
- * regExpToRoute(/^\/path(?:\/(?<_>.*))?\/?$/); // "/path/**"
+ * regExpToRoute(/^\/path\/(?:(?<param>[^/]+)\/?|\/)$/); // "/path/:param"
+ * regExpToRoute(/^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$/); // "/path/**"
  */
 export function regExpToRoute(regexp: RegExp | string): string {
   // Routes carry no flags, so a match-affecting flag (`i`/`m`/`s`) would be
@@ -400,8 +400,9 @@ function mergeGroup(segments: string[], body: string): void {
 function paramToken(name: string, body: string): string {
   const unnamed = /^_\d+$/.test(name);
   // `*` (unnamed `[^/]*`) and `:name` (named `[^/]*`, or `[^/]+` as older
-  // versions emitted) are the only single-segment matchers with dedicated syntax. Every other body becomes an inline `(pat)`
-  // constraint, which `constraint()` rejects if it can't survive path splitting.
+  // versions emitted) are the only single-segment matchers with dedicated
+  // syntax. Every other body becomes an inline `(pat)` constraint, which
+  // `constraint()` rejects if it can't survive path splitting.
   if (unnamed && body === "[^/]*") {
     return "*";
   }
