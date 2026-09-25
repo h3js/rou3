@@ -419,7 +419,12 @@ export const regexpCases: Record<string, RegExpCase> = {
   },
   "/path/:x(\\S+)?": {
     regex: /^\/path(?:\/(?<x>\S+))?(?:(?<=\/)\/|(?<!\/)\/?)$/,
-    match: [["/path"], ["/path/"], ["/path/a", { x: "a" }], ["/path/a/", { x: "a" }]],
+    match: [
+      ["/path", { x: undefined }],
+      ["/path/", { x: undefined }],
+      ["/path/a", { x: "a" }],
+      ["/path/a/", { x: "a" }],
+    ],
     noMatch: ["/path//"],
   },
   // Only the end of the match matters: this one can contain `/` but never end
@@ -510,6 +515,9 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
   // An optional group spanning segments whose last one can be empty.
   "/a{/b/:x}?",
   "/path{/sub/:id}?",
+  // A constraint whose match can end in `/`.
+  "/files/:name([^.]+)",
+  "/path/:x(\\S+)?",
 ]);
 
 // Sweep patterns whose regex reuses a capture group name across alternation
