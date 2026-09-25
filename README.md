@@ -320,33 +320,65 @@ If you keep your own per-route metadata (route rules, middleware, auth gates) in
 import { routeToRegExp } from "rou3";
 
 routeToRegExp("/users/:id(\\d+)");
-// /^\/users\/(?<id>\d+)(?:(?<=\/)\/|(?<!\/)\/?)$/  ->  "/users/123".match(re).groups // { id: "123" }
+// /^\/users\/(?<id>\d+)\/?$/  ->  "/users/123".match(re).groups // { id: "123" }
 ```
 
-The regex matches **exactly** the paths `findRoute()` matches for a router holding only that route, so it is safe to use as a guard or scope check in place of the router. That includes the router's lookup tolerances: one optional trailing slash (`/users/123/`, but not `/users/123//`), empty segments for whole-segment `:name` and `*` params (`/a//b` matches `/a/:x/b`), and an optional trailing `*` (`/a` matches `/a/*`). The trailing `(?:(?<=\/)\/|(?<!\/)\/?)` encodes the slash rule: at most one trailing slash, and exactly one when the path's last segment is empty (`/a//` matches `/a/:x` with `x: ""`, `/a/` does not). Paths are compared as-is, like `findRoute()` without `{ normalize: true }`, so resolve `.`/`..` segments first if the router normalizes them. The fixed-length look-behinds are supported by JavaScript, PCRE and Perl, but not by RE2-based engines (Go, the Rust `regex` crate).
+The regex matches the paths `findRoute()` matches for a router holding only that route, so it can stand in for the router as a guard or scope check. That includes the router's lookup tolerances: one optional trailing slash (`/users/123/`, but not `/users/123//`), empty segments for whole-segment `:name` and `*` params (`/a//b` matches `/a/:x/b`), an optional trailing `*` (`/a` matches `/a/*`), and catch-alls (`**`, `**:name`, `:name+`, `:name*`) that match any character, line terminators included. Paths are compared as-is, like `findRoute()` without `{ normalize: true }`, so resolve `.`/`..` segments first if the router normalizes them. A few cases are not modeled:
+
+- A constraint that can match `/` (`:x(.+)`, `:x([^.]+)`) can span segments in the regex (`/a/:x(.+)` matches `/a/b/c`), while the router splits the path first.
+- The router drops the constraint of a repeated param (`:id(\d+)+`), the regex keeps it.
+- The empty path `""`: the router treats it as `/`, the regex matches it only for root routes whose first segment is optional (`/**`, `/:x*`, `/:x?`, `/*`), not for `/` itself.
+- In PCRE and Perl, `$` also matches before a final `\n`, so there the regex also matches `<path>\n`.
+
+The named groups hold the params. In two cases the regex leaves a group **unset** where the router reports `""`: a required segment that is empty (`/a//` on `/a/:x`, `/a//b` on `/a/:x/:y?`) and a `**` that matches no segment (`/a` on `/a/**`). The first is the cost of avoiding look-behind: capturing `""` there would need look-around, backreferences or the same named group twice. Separately, when optional segments meet a `*` or a constrained optional, the regex can give a segment to a different param than the router (`/a/:x?/*` on `/a/b` sets `x`, the router sets `*`).
+
+The trailing-slash rule (at most one trailing slash, and exactly one when the path's last segment is empty) is built into the end of the regex:
+
+| Route                          | Regex                                                            |
+| ------------------------------ | ---------------------------------------------------------------- |
+| `/users/:id(\d+)`              | `^\/users\/(?<id>\d+)\/?$`                                       |
+| `/path/:id?`                   | `^\/path(?:\/(?<id>[^/]*))??\/?$`                                |
+| `/path/:param`                 | `^\/path\/(?:(?<param>[^/]+)\/?\|\/)$`                           |
+| `/users/:id/:tab?`             | `^\/users\/(?:(?<id>[^/]+)(?:\/\|$)\|\/)(?:(?<tab>[^/]*)\/?)??$` |
+| `/path/**`                     | `^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$`                   |
+| `/base/**:path`                | `^\/base\/(?:\/\|(?<path>(?:[\s\S]*[^/]\|\/)\/*?)\/?)$`          |
+| `/**`                          | `^\/?(?<_>(?:[\s\S]*[^/])?\/*?)\/?$`                             |
+| `/`                            | `^\/$`                                                           |
+| `/path/:id(\d*)` (look-behind) | `^\/path\/(?<id>\d*)(?:(?<=\/)\/\|(?<!\/)\/?)$`                  |
+
+Most routes compile without look-behind, so the output also works in RE2-family engines (RE2, Go `regexp`, the Rust `regex` crate). The look-behind suffix `(?:(?<=\/)\/|(?<!\/)\/?)$` remains only for:
+
+- a constraint at the end of the route whose match can end in `/` (`:name([^.]+)`, `:x(\S+)?`, `:x(.+)`),
+- a required last segment whose constraint can match empty (`/path/:id(\d*)`),
+- optional segments side by side where an earlier one can be empty and a later one can't nest in it (`/a/:x(\d*)?/:y?`, `/a/:x?{/b/c}?`),
+- optional segments side by side after a required segment that can be empty (`/a/:x/:y(\d+)?/:z?`).
+
+Fixed-length look-behinds work in JavaScript, PCRE and Perl. RE2-family engines also reject the duplicate-name alternations in the note below (they have no `DUPNAMES` option) and constraints that use syntax they lack.
 
 The output is **PCRE-compatible**: it uses `(?<name>...)` named groups and avoids JS-only constructs, so the generated `.source` also compiles in PCRE2 engines (`grep -P`, `rg -P`, `pcre2grep`, PHP `preg_*`) and Perl — not just JavaScript. In particular, trailing optional groups are compiled inline as `(?:...)?` instead of an alternation, so a param is never emitted twice as a duplicate named group (which PCRE2 rejects unless `PCRE2_DUPNAMES` is set):
 
 ```js
 routeToRegExp("/blog/:id(\\d+){-:title}?");
-// /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?(?:(?<=\/)\/|(?<!\/)\/?)$/
+// /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
 ```
 
 > [!NOTE]
 > Multi-group or mid-route optionals that cannot be inlined fall back to an alternation and may contain duplicate named groups. That output is valid in JavaScript (per the TC39 duplicate-named-groups proposal) and Perl, but requires `PCRE2_DUPNAMES` on strict PCRE2 engines.
+
+A route that declares the same param name twice (`/files/:path/**:path`; a bare `**` is the `_` param) throws a `rou3:` error, since engines disagree on whether a duplicate named group compiles.
 
 `regExpToRoute(regexp)` is the inverse: it parses an anchored, PCRE-compatible `RegExp` (or its `source` string) back into a route pattern. Pass either a `RegExp` or a source string:
 
 ```js
 import { regExpToRoute } from "rou3";
 
-regExpToRoute(/^\/users\/(?<id>\d+)(?:(?<=\/)\/|(?<!\/)\/?)$/); // "/users/:id(\\d+)"
-regExpToRoute(/^\/path\/(?<param>[^/]+)\/?$/); // "/path/:param"
-regExpToRoute(/^\/path(?:\/(?<_>.*))?\/?$/); // "/path/**"
+regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
+regExpToRoute(/^\/path\/(?:(?<param>[^/]+)\/?|\/)$/); // "/path/:param"
+regExpToRoute(/^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$/); // "/path/**"
 regExpToRoute("^\\/files\\/(?<_0>[^/]*)\\.png\\/?$"); // "/files/*.png"
 ```
 
-It targets the dialect `routeToRegExp()` emits — named groups `(?<name>...)`, `[^/]+`/`[^/]*` segment matchers, `.*`/`.+` catch-alls, `(?:/...)?` optional groups, and a trailing `\/?` or the trailing-slash suffix above. Bare (unnamed) capturing groups such as `(\d+)` are accepted too, and arbitrary regex inside an inline constraint `(...)` is preserved verbatim. Every reversible output round-trips exactly: `routeToRegExp(regExpToRoute(regexp)).source === regexp.source`. Routes that compile to the same regex come back in one spelling: `/base/**:path` and `/base/:path+` both match one or more segments and emit the same regex, which reverses to `/base/:path+`.
+It targets the dialect `routeToRegExp()` emits — named groups `(?<name>...)`, `[^/]*` segment matchers, `[\s\S]*` catch-alls, `(?:/...)?` optional groups and the endings above. Bare (unnamed) capturing groups such as `(\d+)` are accepted too, and arbitrary regex inside an inline constraint `(...)` is preserved verbatim. Regexes from rou3 0.9.x (a plain `\/?` ending, `.*`/`.+` catch-alls, `[^/]+` params) still convert, except those for a catch-all inside an optional group (`/a{/:w*}?`, `/a{/:w+}?`). Every reversible output round-trips exactly: `routeToRegExp(regExpToRoute(regexp)).source === regexp.source`. Routes that compile to the same regex come back in one spelling: `/base/**:path` and `/base/:path+` both become `/base/:path+`, and `/a/:x?/:y?` becomes `/a{/:x/:y?}?`.
 
 Anything outside that dialect throws a clear error rather than returning a corrupt pattern: structural look-arounds (`(?=…)`, `(?<=…)`) and backreferences, bare regex operators outside a constraint (`|`, `.`, `+`, `[…]`, …), match-affecting flags (`i`/`m`/`s`), the non-reversible alternation fallback described above, and inline constraints that can't be expressed as a route (e.g. one containing `/`).
 

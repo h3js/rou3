@@ -39,6 +39,7 @@
     "obuild": "^0.4.40",
     "oxfmt": ">=0.68.0",
     "oxlint": "^1.83.0",
+    "ripgrep": "^0.3.1",
     "rou3-latest": "npm:rou3@^0.9.2",
     "typescript": "^6",
     "vitest": "^5.0.1"
