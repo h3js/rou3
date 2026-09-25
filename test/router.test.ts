@@ -919,16 +919,33 @@ describe("Router remove", function () {
   });
 
   it("remove routes with segments after a wildcard", function () {
-    // `addRoute` stops at `**`, so `/a/**/b` *is* `/a/**` — removal must stop
-    // there too instead of walking on into a nonexistent `/b` static child.
-    const route = "/a/**/b";
-    const router = createRouter([route]);
+    // Segments after `**` live in the wildcard's suffix trie (last segment
+    // first); removal walks it back and prunes it, leaving siblings alone.
+    const router = createRouter(["/a/**", "/a/**/b", "/a/**:p/b", "/a/**/:x/b", "/a/**/c/b"]);
+    expect(formatTree(router.root)).toMatchInlineSnapshot(`
+      "<root>
+          ├── /a
+          │       ├── /** ┈> [GET] /a/**
+          │       │       ├── <suffix>
+          │       │       │       ├── /b ┈> [GET] /a/**/b + /a/**:p/b
+          │       │       │       │       ├── /c ┈> [GET] /a/**/c/b
+          │       │       │       │       ├── /* ┈> [GET] /a/**/:x/b"
+    `);
+    expect(findRoute(router, "GET", "/a/x/y/b")).toMatchObject({ data: { path: "/a/**/:x/b" } });
 
-    expect(findRoute(router, "GET", "/a/x/y")).toMatchObject({ data: { path: route } });
+    removeRoute(router, "GET", "/a/**/b");
+    expect(findRoute(router, "GET", "/a/b")).toMatchObject({ data: { path: "/a/**" } });
+    removeRoute(router, "GET", "/a/**/:x/b");
+    expect(findRoute(router, "GET", "/a/x/b")).toMatchObject({ data: { path: "/a/**:p/b" } });
 
-    removeRoute(router, "GET", route);
+    removeRoute(router, "GET", "/a/**:p/b");
+    expect(findRoute(router, "GET", "/a/x/c/b")).toMatchObject({ data: { path: "/a/**/c/b" } });
 
-    expect(findRoute(router, "GET", "/a/x/y")).toBeUndefined();
+    removeRoute(router, "GET", "/a/**/c/b");
+    expect(findRoute(router, "GET", "/a/x/b")).toMatchObject({ data: { path: "/a/**" } });
+    expect(router.root.static!.a.wildcard!.suffix).toBeUndefined();
+
+    removeRoute(router, "GET", "/a/**");
     expect(formatTree(router.root)).toBe("<root>");
   });
 
@@ -1034,16 +1051,16 @@ describe("Router remove", function () {
     expect(formatTree(router.root)).toBe(formatTree(createRouter([]).root));
   });
 
-  it("removes by tree identity: escaped statics and terminal wildcards", function () {
+  it("removes by tree identity: escaped statics and segments after `**`", function () {
     // The stored identity is keyed exactly like the tree, so spellings that
     // register the same entry remove each other — including patterns that
     // expand (optional/group syntax), whose identity is normalized the same way.
     for (const [add, remove, path] of [
       [String.raw`/a/\)`, "/a/)", "/a/)"],
       ["/a/)", String.raw`/a/\)`, "/a/)"],
-      ["/a/**/b", "/a/**", "/a/x/y"],
-      ["/a/**", "/a/**/b", "/a/x/y"],
-      ["/a/**:rest/x", "/a/**:rest", "/a/x/y"],
+      [String.raw`/a/**/\)`, "/a/**/)", "/a/x/)"],
+      ["/a/**/)", String.raw`/a/**/\)`, "/a/x/)"],
+      ["/a/**:rest/x/", "/a/**:rest/x", "/a/y/x"],
       ["/a/b/", "/a/b//", "/a/b"],
       ["/admin/:page?/", "/admin/:page?", "/admin/x"],
       ["/admin/:page?", "/admin/:page?/", "/admin/x"],

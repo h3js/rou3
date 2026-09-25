@@ -2,7 +2,7 @@ import { expandGroupDelimiters } from "../_group-delimiters.ts";
 import { toGroupName, toUnnamedGroupKey } from "../_group-names.ts";
 import { replaceSegmentWildcards } from "../_segment-wildcards.ts";
 import { NullProtoObj } from "../object.ts";
-import type { RouterContext, ParamsIndexMap } from "../types.ts";
+import type { Node, RouterContext, ParamsIndexMap } from "../types.ts";
 import {
   encodeEscapes,
   expandedRouteId,
@@ -35,7 +35,7 @@ export function addRoute<T>(
  * `/admin` on the same node. A plain pattern's identity is its rewritten
  * segment join — the string `ctx.static` is keyed by (one `join` per entry,
  * no extra parsing) — so spellings the tree cannot tell apart (`\)` vs `)`,
- * `/a/` vs `/a`, segments after a terminal `**`) share one identity.
+ * `/a/` vs `/a`) share one identity.
  */
 function _add<T>(
   ctx: RouterContext<T>,
@@ -74,34 +74,57 @@ function _add<T>(
   const paramsMap: ParamsIndexMap = [];
   const paramsRegexp: RegExp[] = [];
 
+  // Segments after a `**` (static key, or `1` for a param) are inserted into
+  // the wildcard's `suffix` trie last segment first, once the params are read
+  let suffix: (string | 1)[] | undefined;
+  let wildcardIndex = -1;
+  // Nodes on the way to the `**`, flagged `hasSuffix` for a suffix route
+  const trail: Node<T>[] | undefined = path.includes("**") ? [] : undefined;
+
   for (let i = 0; i < segments.length; i++) {
     let segment = segments[i];
     const key = segmentKey(segment);
 
     // Wildcard
     if (key === 2) {
+      if (suffix) {
+        throw new Error(`rou3: a route can have only one \`**\` (${path})`);
+      }
+      trail?.push(node);
       if (!node.wildcard) {
         node.wildcard = { key: "**" };
       }
       node = node.wildcard;
       paramsMap.push([-(i + 1), segment.split(":")[1] || "_", segment.length === 2 /* no id */]);
-      segments.length = i + 1; // terminal: trailing segments are not part of the identity
-      break;
+      if (i === segments.length - 1) {
+        break;
+      }
+      suffix = [];
+      wildcardIndex = i;
+      continue;
     }
 
     // Param
     if (key === 1) {
-      if (!node.param) {
-        node.param = { key: "*" };
+      if (suffix) {
+        suffix.push(1);
+      } else {
+        trail?.push(node);
+        if (!node.param) {
+          node.param = { key: "*" };
+        }
+        node = node.param;
       }
-      node = node.param;
       if (segment === "*") {
-        paramsMap.push([i, String(_unnamedParamIndex++), true /* optional */]);
+        // A trailing `*` may match no segment, but not after a `**`
+        paramsMap.push([i, String(_unnamedParamIndex++), !suffix /* optional */]);
       } else if (segment.includes("(") || segment.includes(":", 1) || !/^:[\w-]+$/.test(segment)) {
         const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex);
         _unnamedParamIndex = nextIndex;
         paramsRegexp[i] = regexp;
-        node.hasRegexParam = true;
+        if (!suffix) {
+          node.hasRegexParam = true;
+        }
         paramsMap.push([i, regexp, false]);
       } else {
         paramsMap.push([i, segment.slice(1), false]);
@@ -111,6 +134,11 @@ function _add<T>(
 
     // Static
     segment = segments[i] = key;
+    if (suffix) {
+      suffix.push(segment);
+      continue;
+    }
+    trail?.push(node);
     const child = node.static?.[segment];
     if (child) {
       node = child;
@@ -124,6 +152,21 @@ function _add<T>(
     }
   }
 
+  if (suffix) {
+    for (const n of trail!) {
+      n.hasSuffix = true;
+    }
+    node = node.suffix ??= { key: "" };
+    for (let j = suffix.length - 1; j >= 0; j--) {
+      const edge = suffix[j];
+      if (edge === 1) {
+        node = node.param ??= { key: "*" };
+      } else {
+        node = (node.static ??= new NullProtoObj())[edge] ??= { key: edge };
+      }
+    }
+  }
+
   // Assign index, params and data to the node
   const hasParams = paramsMap.length > 0;
   const key = "/" + segments.join("/");
@@ -133,6 +176,7 @@ function _add<T>(
     paramsRegexp,
     paramsMap: hasParams ? paramsMap : undefined,
     route: route ?? key,
+    suffix: suffix && [wildcardIndex, suffix.length],
   });
 
   // Static (keyed by the lookup form after its one trailing-slash strip, so

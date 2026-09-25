@@ -16,7 +16,7 @@ import {
  * and same-node siblings registered under other patterns (`/a/:id` vs
  * `/a/:userId`) are left alone. The pattern must be the registered one — it
  * may differ in spelling only where the tree cannot tell the difference
- * (trailing slashes, escaped statics, segments after a terminal `**`).
+ * (trailing slashes, escaped statics).
  */
 export function removeRoute<T>(ctx: RouterContext<T>, method: string = "", path: string): void {
   // Normalize exactly like `addRoute`, or removal targets a different route
@@ -91,20 +91,32 @@ function _remove(
   const segment = segments[index];
   const segKey = segmentKey(segment);
 
-  // Wildcard (terminal: `addRoute` stops at `**`, so skip any trailing segments)
+  // Wildcard
   if (segKey === 2) {
-    if (node.wildcard) {
-      _remove(
-        ctx,
-        node.wildcard,
-        method,
-        segments,
-        segments.length,
-        route,
-        key + "/" + segment,
-        false,
-      );
-      if (_isEmptyNode(node.wildcard)) {
+    const wildcard = node.wildcard;
+    if (wildcard) {
+      if (index === segments.length - 1) {
+        _remove(ctx, wildcard, method, segments, index + 1, route, key + "/" + segment, false);
+      } else if (wildcard.suffix) {
+        // Segments after `**` live in its suffix trie, last segment first
+        for (let i = index; i < segments.length; i++) {
+          const k = segmentKey(segments[i]);
+          key += "/" + (typeof k === "string" ? k : segments[i]);
+        }
+        _removeSuffix(
+          ctx,
+          wildcard.suffix,
+          method,
+          segments,
+          segments.length - 1,
+          index,
+          route ?? key,
+        );
+        if (_isEmptyNode(wildcard.suffix)) {
+          wildcard.suffix = undefined;
+        }
+      }
+      if (_isEmptyNode(wildcard)) {
         node.wildcard = undefined;
       }
     }
@@ -135,11 +147,44 @@ function _remove(
   }
 }
 
+/** `_remove` for a suffix trie: walks from the last segment back to the `**` at `stop`. */
+function _removeSuffix(
+  ctx: RouterContext,
+  node: Node,
+  method: string,
+  segments: string[],
+  index: number,
+  stop: number,
+  route: string,
+): void {
+  if (index === stop) {
+    _remove(ctx, node, method, segments, segments.length, route, "", false);
+    return;
+  }
+  const segKey = segmentKey(segments[index]);
+  const child =
+    segKey === 1 ? node.param : typeof segKey === "string" ? node.static?.[segKey] : undefined;
+  if (child) {
+    _removeSuffix(ctx, child, method, segments, index - 1, stop, route);
+    if (_isEmptyNode(child)) {
+      if (segKey === 1) {
+        node.param = undefined;
+      } else {
+        delete node.static![segKey as string];
+        if (Object.keys(node.static!).length === 0) {
+          node.static = undefined;
+        }
+      }
+    }
+  }
+}
+
 function _isEmptyNode(node: Node) {
   return (
     node.methods === undefined &&
     node.static === undefined &&
     node.param === undefined &&
-    node.wildcard === undefined
+    node.wildcard === undefined &&
+    node.suffix === undefined
   );
 }

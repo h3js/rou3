@@ -1,5 +1,8 @@
 // Shared fixtures for routeToRegExp tests (interpreter + cross-engine PCRE checks).
 
+import { addRoute, createRouter } from "../src/index.ts";
+import type { Node } from "../src/types.ts";
+
 /** Captures by param name (`_N` groups as `"N"`), `undefined` when unset. */
 export type Captures = Readonly<Record<string, string | undefined>>;
 
@@ -122,30 +125,6 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/pathfoo", "/pathfoo/bar", "/path\n/a", "/path\r/a"],
   },
-  "/path/**/suffix": {
-    regex: /^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$/,
-    match: [
-      ["/path/anything/more", { _: "anything/more" }],
-      ["/path/suffix", { _: "suffix" }],
-    ],
-  },
-  // A trailing group after a terminal `**` adds nothing, so it must not be
-  // inlined as an empty `(?:)?`: that hides the catch-all from the ending
-  // analysis, `.*` stays greedy and swallows the stripped trailing slash
-  // (`_: "b/"` on `/a/b/`, where the router reports `"b"`).
-  "/a/**/b{.json}?": {
-    regex: /^\/a(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$/,
-    match: [
-      ["/a", { _: undefined }, { _: "" }],
-      ["/a/", { _: "" }],
-      ["/a/b", { _: "b" }],
-      ["/a/b/", { _: "b" }],
-      ["/a/b//", { _: "b/" }],
-      ["/a/b.json/", { _: "b.json" }],
-      ["/a/x/y/", { _: "x/y" }],
-    ],
-    noMatch: ["/ab", "/ab/b"],
-  },
   "/base/**:path": {
     regex: /^\/base\/(?:\/|(?<path>(?:[\s\S]*[^/]|\/)\/*?)\/?)$/,
     match: [
@@ -162,10 +141,6 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/base/\n/\u2028//", { path: "\n/\u2028/" }],
     ],
     noMatch: ["/base", "/base/", "/basefoo", "/basefoo/bar"],
-  },
-  "/base/**:path/suffix": {
-    regex: /^\/base\/(?:\/|(?<path>(?:[\s\S]*[^/]|\/)\/*?)\/?)$/,
-    match: [["/base/anything/more", { path: "anything/more" }]],
   },
   "/static%3Apath/\\*/\\*\\*": {
     regex: /^\/static%3Apath\/\*\/\*\*\/?$/,
@@ -239,17 +214,6 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/path/\n\r", { rest: "\n\r" }],
     ],
   },
-  // A `+`/`*` modifier before the last segment becomes a terminal `**:name` in
-  // the tree; the segments after it are dropped (`/path/:rest+/suffix` is
-  // `/path/**:rest`), and `*` additionally keeps the route without it.
-  "/path/:rest+/suffix": {
-    regex: /^\/path\/(?:\/|(?<rest>(?:[\s\S]*[^/]|\/)\/*?)\/?)$/,
-    match: [
-      ["/path/a", { rest: "a" }],
-      ["/path/a/b", { rest: "a/b" }],
-    ],
-    noMatch: ["/path", "/path/"],
-  },
   "/path/:rest*": {
     regex: /^\/path(?:\/(?<rest>(?:[\s\S]*[^/])?\/*?))??\/?$/,
     match: [
@@ -296,15 +260,6 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/path/a/", { x: "a" }],
     ],
     noMatch: ["/path/a\nb"],
-  },
-  // A mid-route repeat stays terminal even when a trailing group follows it.
-  "/path/:rest+/meta{.json}?": {
-    regex: /^\/path\/(?:\/|(?<rest>(?:[\s\S]*[^/]|\/)\/*?)\/?)$/,
-    match: [
-      ["/path/a", { rest: "a" }],
-      ["/path/a/b", { rest: "a/b" }],
-    ],
-    noMatch: ["/path"],
   },
   // An empty segment turns trailing, and is dropped, once the optionals after
   // it are absent: `/docs/{v2}?/:page?` also registers `/docs`.
@@ -758,9 +713,6 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   "/a/{b}?/x-:y",
   "/{en}?/:page?",
   "/docs/{v2}?/:page?",
-  // A mid-route `:x*` expands, and so does the trailing group after it.
-  "/:x*/b{.json}?",
-  "/a/:x*/b{.json}?",
   // A mid-segment optional after a greedy capture.
   "/media/*{.webp}?",
 ]);
@@ -779,9 +731,14 @@ export function duplicateGroupNames(source: string): string[] {
 /**
  * Pattern corpus for the router-vs-regex sweeps: every combination of the
  * segment forms below (depth <= 2, with and without a static prefix), plus the
- * fixtures above.
+ * fixtures above, minus the routes with segments after `**` (see
+ * `SUFFIX_ROUTES`).
  */
 export function sweepPatterns(): string[] {
+  return allSweepPatterns().filter((pattern) => !hasSegmentsAfterWildcard(pattern));
+}
+
+function allSweepPatterns(): string[] {
   // `""` is an empty middle segment and `{b}?` an optional one; both can turn
   // into a trailing empty segment the tree drops (`/docs/{v2}?/:page?`).
   const units = [
@@ -843,6 +800,49 @@ export function sweepPatterns(): string[] {
   // Known router limitation, not a regex bug: the tree drops the constraint of
   // a repeated param (`:id(\d+)+` is stored as `**:id`).
   return [...patterns].filter((pattern) => !/\)[+*]$/.test(pattern));
+}
+
+/**
+ * Routes with segments after `**` (a `:x+` / `:x*` before the last segment
+ * becomes one): the router matches those segments from the end of the path,
+ * which `routeToRegExp` does not support yet, so it throws. The sweeps leave
+ * them out (`suffixSweepPatterns()` lists the ones they drop).
+ */
+export const SUFFIX_ROUTES: readonly string[] = [
+  "/**/_payload.json",
+  "/path/**/suffix",
+  "/base/**:path/suffix",
+  "/a/**/b{.json}?",
+  "/path/:rest+/suffix",
+  "/path/:rest*/suffix",
+  "/path/:rest+/meta{.json}?",
+  "/**/*.png",
+  "/:id/**/:file(\\w+).json",
+  "/**.md",
+  "/blog/**.json",
+];
+
+/** Whether the router stores segments after a `**` for `pattern` (or rejects a second `**`). */
+export function hasSegmentsAfterWildcard(pattern: string): boolean {
+  const router = createRouter();
+  try {
+    addRoute(router, "", pattern);
+  } catch (error) {
+    if (/only one `\*\*`/.test((error as Error).message)) return true;
+    throw error;
+  }
+  const hasSuffix = (node: Node | undefined): boolean =>
+    !!node &&
+    (!!node.suffix ||
+      Object.values(node.static || {}).some(hasSuffix) ||
+      hasSuffix(node.param) ||
+      hasSuffix(node.wildcard));
+  return hasSuffix(router.root);
+}
+
+/** The sweep corpus patterns `sweepPatterns()` drops for `hasSegmentsAfterWildcard`. */
+export function suffixSweepPatterns(): string[] {
+  return allSweepPatterns().filter((pattern) => hasSegmentsAfterWildcard(pattern));
 }
 
 /** Every short path, including empty segments and runs of trailing slashes. */

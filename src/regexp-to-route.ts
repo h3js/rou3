@@ -336,8 +336,8 @@ function applyOptional(
     if (g && g.end === rest.length) {
       // A trailing greedy `(?:/(?<_>[\s\S]*))?` is the `**` catch-all. The
       // lazy form is a param named `_` (`:_*`), which the router leaves unset
-      // on `/a/` where `**` reports `""`. (Only at the end: `**` is terminal,
-      // so a mid-route `:_*` must stay as is.)
+      // on `/a/` where `**` reports `""`. (Only at the end: `routeToRegExp`
+      // emits no segments after `**`, so a mid-route `:_*` must stay as is.)
       if (last && !lazy && g.name === "_" && isCatchAll(g.body, dot)) {
         segments.push("**");
         return;

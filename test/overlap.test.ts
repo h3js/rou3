@@ -5,6 +5,7 @@ import {
   createRouter,
   findAllRoutes,
   findOverlappingRoutes,
+  findRoute,
   routesOverlap,
 } from "../src/index.ts";
 import type { RouteComparison } from "../src/index.ts";
@@ -368,5 +369,131 @@ describe("findOverlappingRoutes", () => {
     addRoute(distinct, "GET", "/a/**", f1);
     addRoute(distinct, "GET", "/a/b/**", f2);
     expect(findOverlappingRoutes(distinct, "GET", "/a/b/c").map((m) => m.data)).toEqual([f1, f2]);
+  });
+});
+
+describe("segments after `**`", () => {
+  // Their shape keeps a suffix aligned to the end of the path (`/**\/x` is
+  // `[] [0, Infinity] ["x"]`), so overlap and containment see the whole route.
+  it.each([
+    ["/**/_payload.json", "/blog/:slug/_payload.json", "superset"],
+    ["/**/_payload.json", "/_payload.json", "superset"],
+    ["/**/_payload.json", "/**", "subset"],
+    ["/**/_payload.json", "/blog/**", "partial"],
+    ["/**/_payload.json", "/blog/:slug", "partial"],
+    ["/**/_payload.json", "/blog", "disjoint"],
+    ["/**/_payload.json", "/**/og.png", "disjoint"],
+    ["/**.md", "/**/*.md", "equal"],
+    ["/**:p/x", "/**/:y/x", "equal"],
+    ["/**/:y", "/**:y", "equal"],
+    ["/a/:x+/b", "/a/**:x/b", "equal"],
+    ["/a/:p/**", "/a/**/x", "superset"],
+    ["/:a/**/p", "/**/b/p", "superset"],
+    ["/**/a/b", "/**/b", "subset"],
+    ["/a/**/b", "/**/a/b", "partial"],
+    ["/a/**/b", "/b/**/a", "disjoint"],
+    ["/**/*.png", "/**/x.png", "superset"],
+    ["/**/:n(\\d+)", "/**/:m(\\d+)", "equal"],
+  ] as const)("compareRoutes(%j, %j) === %j", (a, b, expected) => {
+    expect(compareRoutes(a, b)).toBe(expected);
+    expect(routesOverlap(a, b)).toBe(expected !== "disjoint");
+  });
+
+  it("findOverlappingRoutes lists them after the `**` they follow", () => {
+    const router = createRouter<string>();
+    for (const route of ["/**", "/**/_payload.json", "/blog/**", "/blog/:slug", "/api/**"]) {
+      addRoute(router, "GET", route, route);
+    }
+    expect(
+      findOverlappingRoutes(router, "GET", "/blog/x/_payload.json").map((m) => m.data),
+    ).toEqual(["/**", "/**/_payload.json", "/blog/**"]);
+    expect(findOverlappingRoutes(router, "GET", "/api").map((m) => m.data)).toEqual([
+      "/**",
+      "/api/**",
+    ]);
+  });
+
+  it("agrees with the router on every path up to 5 segments (sweep)", () => {
+    // Overlap must never be denied when both routes match a path (and is
+    // exact without regex constraints), and every containment claim must hold
+    // on every path. Without regex constraints the verdicts are exact here.
+    const patterns = [
+      "/**",
+      "/a/**",
+      "/a/**:r",
+      "/:x/**",
+      "/a",
+      "/a/b",
+      "/:x",
+      "/:x/:y",
+      "/a/:x",
+      "/*",
+      "/a/*",
+      "/**/b",
+      "/**:r/b",
+      "/**/:x/b",
+      "/**/a/b",
+      "/**/b/b",
+      "/a/**/b",
+      "/a/**:r/b",
+      "/:x/**/b",
+      "/**/x",
+      "/**/:n(\\d+)",
+      "/a/**/:x",
+      "/**/a/:x",
+      "/b/**/b",
+      "/a/:x/**/b",
+      "/**/*.png",
+      "/**/:x/:y/b",
+      "/a/b/**/b",
+      "/:x(\\d+)/**/b",
+    ];
+    const alphabet = ["a", "b", "x", "1", "q.png"];
+    const paths = ["/"];
+    for (let depth = 1, prev = [""]; depth <= 5; depth++) {
+      prev = prev.flatMap((path) => alphabet.map((segment) => `${path}/${segment}`));
+      paths.push(...prev);
+    }
+    const matchSets = new Map(
+      patterns.map((pattern) => {
+        const router = createRouter();
+        addRoute(router, "", pattern);
+        return [pattern, new Set(paths.filter((path) => findRoute(router, "", path)))];
+      }),
+    );
+    const hasRegex = (pattern: string) => /\(|\*\./.test(pattern);
+    const failures: string[] = [];
+    for (const a of patterns) {
+      for (const b of patterns) {
+        const [setA, setB] = [matchSets.get(a)!, matchSets.get(b)!];
+        const shared = [...setA].some((path) => setB.has(path));
+        const aCoversB = [...setB].every((path) => setA.has(path));
+        const bCoversA = [...setA].every((path) => setB.has(path));
+        const truth =
+          aCoversB && bCoversA
+            ? "equal"
+            : aCoversB
+              ? "superset"
+              : bCoversA
+                ? "subset"
+                : shared
+                  ? "partial"
+                  : "disjoint";
+        const verdict = compareRoutes(a, b);
+        const overlaps = routesOverlap(a, b);
+        if (shared && !overlaps) failures.push(`${a} vs ${b}: overlap denied`);
+        if ((verdict === "superset" || verdict === "equal") && !aCoversB) {
+          failures.push(`${a} vs ${b}: ${verdict} claimed`);
+        }
+        if ((verdict === "subset" || verdict === "equal") && !bCoversA) {
+          failures.push(`${a} vs ${b}: ${verdict} claimed`);
+        }
+        if (verdict === "disjoint" && shared) failures.push(`${a} vs ${b}: disjoint claimed`);
+        if (!hasRegex(a) && !hasRegex(b) && (verdict !== truth || overlaps !== shared)) {
+          failures.push(`${a} vs ${b}: ${verdict} (${truth})`);
+        }
+      }
+    }
+    expect(failures).toEqual([]);
   });
 });

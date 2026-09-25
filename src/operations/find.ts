@@ -1,4 +1,6 @@
 import type { RouterContext, MatchedRoute, Node, MethodData } from "../types.ts";
+import { _findAll } from "./find-all.ts";
+import { hasSuffixMatch, rankFromEnd } from "./_suffix.ts";
 import { getMatchParams, normalizePath, splitPath } from "./_utils.ts";
 
 /**
@@ -29,7 +31,15 @@ export function findRoute<T = unknown>(
   // Lookup tree
   const segments = splitPath(path);
 
-  const match = _lookupTree<T>(ctx.root, method, segments, 0);
+  // A route with segments after `**` matches from the end of the path: when
+  // one does, every match is ranked from the end (see `rankFromEnd`)
+  let match: MethodData<T> | undefined;
+  if (ctx.root.hasSuffix && hasSuffixMatch(ctx.root, method, segments, 0)) {
+    const matches = rankFromEnd(_findAll(ctx.root, method, segments, 0, [], true), segments);
+    match = matches[matches.length - 1];
+  } else {
+    match = _lookupTree<T>(ctx.root, method, segments, 0);
+  }
 
   if (match === undefined) {
     return;
@@ -41,7 +51,7 @@ export function findRoute<T = unknown>(
 
   return {
     data: match.data,
-    params: match.paramsMap ? getMatchParams(segments, match.paramsMap) : undefined,
+    params: match.paramsMap ? getMatchParams(segments, match.paramsMap, match.suffix) : undefined,
   };
 }
 

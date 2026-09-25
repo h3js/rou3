@@ -7,10 +7,12 @@ import {
   regexpCases as routes,
   LOOKBEHIND_ROUTES,
   PCRE2_DUPLICATE_NAME_ROUTES,
+  SUFFIX_ROUTES,
   SWEEP_DUPLICATE_NAME_PATTERNS,
   SWEEP_LOOKBEHIND_PATTERNS,
   duplicateGroupNames,
   hasLookbehind,
+  suffixSweepPatterns,
   sweepPaths,
   sweepPatterns,
 } from "./_regexp-cases.ts";
@@ -380,6 +382,24 @@ describe("regex-body scans", () => {
 // it when one copy sits inside an alternative (the `**:name` / `:name+` ending),
 // Bun, Deno, PCRE2 and RE2 reject it. `routeToRegExp` rejects it up front so
 // every runtime gets the same `rou3:` error.
+describe("routeToRegExp: segments after `**`", () => {
+  // The router matches them from the end of the path; the regex form is not
+  // implemented yet, so every such route throws instead of emitting a regex
+  // that matches other paths than the router (it used to drop them, which is
+  // what the router did before it supported them).
+  const patterns = [...SUFFIX_ROUTES, ...suffixSweepPatterns()];
+
+  it("covers a real part of the sweep corpus", () => {
+    expect(suffixSweepPatterns().length).toBeGreaterThan(50);
+  });
+
+  it.each(patterns)("%s throws", (pattern) => {
+    expect(() => routeToRegExp(pattern)).toThrow(
+      /^rou3: routeToRegExp does not support segments after `\*\*`/,
+    );
+  });
+});
+
 describe("routeToRegExp: duplicate param names", () => {
   it.each([
     ["/files/:path/**:path", "path"],
@@ -409,8 +429,6 @@ describe("routeToRegExp: duplicate param names", () => {
   it.each([
     ...PCRE2_DUPLICATE_NAME_ROUTES,
     "/media/:name{.webp}?",
-    // Expands to `/a/**:x` | `/a/:x`: one `x` per branch.
-    "/a/:x*/:x",
     "/a/*/*",
     "/a/(\\d+)/(\\d+)",
     "/a/*/b/*.png/(\\d+)",
@@ -483,32 +501,11 @@ const OPTIONAL_BEFORE_WILDCARD: CaptureDiff = {
     Object.values(groups)[0] === Object.values(params)[0],
 };
 
-// Pre-existing: alternation branches run in expansion order, so the `**:x`
-// branch wins where the router picks a more specific expansion (`/:x*/:y` on
-// `/a` gives `y`).
-const REPEAT_EXPANSION: CaptureDiff = {
-  reason: "a `:x*` route: the regex captures `x` where the router matches another expansion",
-  test: (pattern, _keys, groups, params) => {
-    const name = /:([\w-]+)\*/.exec(pattern)?.[1];
-    return (
-      name !== undefined && name in groups && Object.keys(groups).length === 1 && !(name in params)
-    );
-  },
-};
-
 /** Sweep patterns whose captures differ from the router beyond the accepted gap. */
 const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
   ...[
     "/a/**",
     "/a/a/**",
-    "/a/**/a",
-    "/a/**/:y",
-    "/a/**/*",
-    "/a/**/:y?",
-    "/a/**/**",
-    "/a/**/*.png",
-    "/a/**/x-:y",
-    "/a/**/b{.json}?",
     "//**",
     "/a//**",
     "/{b}?/**",
@@ -519,7 +516,6 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/a/*/**",
     "/:x?/**",
     "/a/:x?/**",
-    "/a/:x*/**",
     "/:x(\\d+)/**",
     "/a/:x(\\d+)/**",
     "/:x(\\d+)?/**",
@@ -537,18 +533,4 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     // The router prefers the constrained `y` (see `_selectMatcher`).
     "/a/:x?/:y(\\d+)?",
   ].map((pattern) => [pattern, OPTIONAL_BEFORE_WILDCARD] as const),
-  ...[
-    "/:x*/a",
-    "/a/:x*/a",
-    "/:x*/:y",
-    "/a/:x*/:y",
-    "/:x*/*",
-    "/a/:x*/*",
-    "/:x*/:y?",
-    "/a/:x*/:y?",
-    "/:x*/*.png",
-    "/a/:x*/*.png",
-    "/:x*/b{.json}?",
-    "/a/:x*/b{.json}?",
-  ].map((pattern) => [pattern, REPEAT_EXPANSION] as const),
 ]);

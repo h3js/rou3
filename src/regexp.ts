@@ -46,6 +46,11 @@ const ANY = "[\\s\\S]*";
  * name twice (`/files/:path/**:path`, `/a/:x{/b/:x}?`); the resulting duplicate
  * named group would compile on some engines and not on others.
  *
+ * @throws a `rou3:` error when the route has segments after `**`
+ * (`/**\/_payload.json`, and a `:name+` / `:name*` before the last segment),
+ * which the router matches from the end of the path; that is not supported
+ * here yet.
+ *
  * @example
  * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)\/?$/
  * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
@@ -152,8 +157,8 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
     }
     const k = prefix.length;
     const inlineSegs = fullSegs.slice(0, baseLen - 1);
-    // The group may add nothing (`/a/**/b{.json}?`: `**` is terminal), or
-    // only segments that are optional already (`/a{/:x*}?` is `/a/:x*`).
+    // The group may add nothing to the segment, or only segments that are
+    // optional already (`/a{/:x*}?` is `/a/:x*`).
     const optional = k < last.length && isOptionalGroups(last.slice(k));
     inlineSegs.push(
       k === last.length || optional ? last : `${last.slice(0, k)}(?:${last.slice(k)})?`,
@@ -174,8 +179,9 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
 
 /**
  * Whether `route` has a modifier whose tree expansion the inline emitter can't
- * mirror: a `+`/`*` before the last segment turns into a terminal `**:name`
- * (`/a/:x+/b` is `/a/**:x`), and an empty segment followed only by optional
+ * mirror: a `+`/`*` before the last segment turns into a `**:name` with
+ * segments after it (`/a/:x+/b` is `/a/**:x/b`, which `routeToRegExpSegments`
+ * rejects), and an empty segment followed only by optional
  * ones becomes trailing (and is dropped) once they are absent (`/a//:x?`
  * also registers `/a`).
  */
@@ -300,7 +306,13 @@ function routeToRegExpSegments(
       // zero or more segments (`/api` too), `**:name` one or more. A segment may
       // be empty, so one-or-more is the separator plus `ANY` (`/api//` reaches
       // `/api/**:p` with `p: ""`; `/api/` is `/api` after trailing stripping).
-      // A bare `**` is the `_` param (`params._` in the router).
+      // A bare `**` is the `_` param (`params._` in the router). Segments after
+      // it are matched from the end of the path (not supported here yet).
+      if (i < segments.length - 1) {
+        throw new Error(
+          `rou3: routeToRegExp does not support segments after \`**\` (${JSON.stringify(route)})`,
+        );
+      }
       const name = groupName(segment === "**" ? "_" : segment.slice(3));
       starStar = segment === "**";
       if (!starStar) {

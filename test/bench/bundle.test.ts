@@ -62,8 +62,15 @@ describe("benchmark", () => {
     // one same-node sibling without touching the others (#201, #202).
     // +~90B raw / +~30B gzip: expandedRouteId() normalizes that pre-expansion
     // text (trailing empties, escaped statics) so `/a/:x?/` removes `/a/:x?`.
-    expect(bytes).toBeLessThanOrEqual(6820); // <6.82kb
-    expect(gzipSize).toBeLessThanOrEqual(2760); // <2.76kb
+    // +~1900B raw / +~715B gzip: segments after `**` (`/**\/_payload.json`,
+    // `/**.md`, #212): addRoute stores them in a reversed suffix trie on the
+    // wildcard node (plus `hasSuffix` flags for pruning), lookup walks it from
+    // the end of the path, and on paths such a route matches findRoute and
+    // findAllRoutes rank every match from the last segment backwards (the tree
+    // order alone let broader routes win). Routers without such routes pay one
+    // `hasSuffix` read per lookup.
+    expect(bytes).toBeLessThanOrEqual(8720); // <8.72kb
+    expect(gzipSize).toBeLessThanOrEqual(3480); // <3.48kb
   });
 });
 
