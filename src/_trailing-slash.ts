@@ -103,7 +103,7 @@ function canBeEmpty(fragment: string): boolean {
 function tokenize(body: string): string[] {
   const tokens: string[] = [];
   let depth = 0;
-  for (const atom of body.match(/\\[^]|\[\^?\]?(?:\\[^]|[^\\\]])*\]?|\)[?*+]?|[^]/g) || []) {
+  for (const atom of body.match(/\\[^]|\[(?:\\[^]|[^\\\]])*\]?|\)[?*+]?|[^]/g) || []) {
     if (depth === 0) tokens.push("");
     tokens[tokens.length - 1] += atom;
     if (atom === "(") depth++;

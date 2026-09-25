@@ -79,6 +79,22 @@ describe("routeToRegExp", () => {
     expect(mismatches).toEqual([]);
   });
 
+  // The ending analysis tokenizes the emitted (JS) body: `[]` and `[^]` close
+  // immediately there, unlike PCRE where a leading `]` is a literal.
+  it("tokenizes JS character classes in constraints", () => {
+    const paths = ["/a/b", "/a/b/", "/a/b/c", "/a/b/c/", "/a/b//"];
+    for (const pattern of ["/a/:x([]?b)/:y", "/a/:x([]|b)/:y", "/a/:x([^]*)/:y"]) {
+      const router = createRouter();
+      addRoute(router, "", pattern, true);
+      const regex = routeToRegExp(pattern);
+      for (const path of paths) {
+        expect(regex.test(path), `${pattern} ${path}`).toBe(
+          findRoute(router, "", path) !== undefined,
+        );
+      }
+    }
+  });
+
   // Trailing single optional groups are compiled inline (`(?:...)?`) rather than
   // expanded into an alternation of full routes, so a param before the group is
   // never emitted twice. Duplicate named groups are valid JS but rejected by
