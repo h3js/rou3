@@ -417,31 +417,151 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
   },
   // A required param that can be empty, followed by an optional one: `/path/`
-  // must not match, but `/path//` (`id: ""`) and `/path//tab` must. Without
-  // look-around that needs `id` in two alternation branches (see
-  // LOOKBEHIND_ROUTES).
+  // must not match, but `/path//` (`id: ""`) and `/path//tab` must. The
+  // required param splits into a non-empty branch, which may end the path
+  // (`$`) or go on after a slash, and a slash-only branch, and the optional
+  // part follows both. `id` is unset where it is empty (the router reports
+  // `""`), wherever that segment sits: the accepted trade-off of the
+  // look-behind-free required ending (see `withTrailingSlash`).
   "/path/:id/:tab?": {
-    regex: /^\/path\/(?<id>[^/]*)(?:\/(?<tab>[^/]*))?(?:(?<=\/)\/|(?<!\/)\/?)$/,
+    regex: /^\/path\/(?:(?<id>[^/]+)(?:\/|$)|\/)(?:(?<tab>[^/]*)\/?)??$/,
     match: [
       ["/path/1", { id: "1", tab: undefined }],
       ["/path/1/", { id: "1", tab: undefined }],
       ["/path/1/t", { id: "1", tab: "t" }],
-      ["/path//", { id: "", tab: undefined }],
-      ["/path//t", { id: "", tab: "t" }],
+      ["/path/1/t/", { id: "1", tab: "t" }],
+      ["/path/1//", { id: "1", tab: "" }],
+      ["/path//", { id: undefined, tab: undefined }, { id: "" }],
+      ["/path//t", { id: undefined, tab: "t" }, { id: "", tab: "t" }],
+      ["/path///", { id: undefined, tab: "" }, { id: "", tab: "" }],
     ],
-    noMatch: ["/path", "/path/", "/path/1/t//"],
+    noMatch: ["/path", "/path/", "/path/1/t//", "/path/1/t/x"],
   },
-  // An optional group spanning segments whose last one can be empty: `/path/sub/`
-  // must not match (it strips to `/path/sub`, which is neither branch).
+  // Several required segments: only the last one decides the ending.
+  "/users/:org/:id/:tab?": {
+    regex: /^\/users\/(?<org>[^/]*)\/(?:(?<id>[^/]+)(?:\/|$)|\/)(?:(?<tab>[^/]*)\/?)??$/,
+    match: [
+      ["/users/o/1", { org: "o", id: "1", tab: undefined }],
+      ["/users//1/t/", { org: "", id: "1", tab: "t" }],
+      ["/users/o//", { org: "o", id: undefined, tab: undefined }, { org: "o", id: "" }],
+    ],
+    noMatch: ["/users/o", "/users/o/", "/users/o/1/t//"],
+  },
+  "/users/:id/*": {
+    regex: /^\/users\/(?:(?<id>[^/]+)(?:\/|$)|\/)(?:(?<_0>[^/]*)\/?)??$/,
+    match: [
+      ["/users/1", { id: "1", "0": undefined }],
+      ["/users/1/", { id: "1", "0": undefined }],
+      ["/users/1//", { id: "1", "0": "" }],
+      ["/users/1/x", { id: "1", "0": "x" }],
+      ["/users/1/x/", { id: "1", "0": "x" }],
+      ["/users//", { id: undefined, "0": undefined }, { id: "" }],
+      ["/users//x", { id: undefined, "0": "x" }, { id: "", "0": "x" }],
+    ],
+    noMatch: ["/users", "/users/", "/users/1/x/y", "/users/1/x//"],
+  },
+  // A `**` after a required segment. On zero segments its group matches
+  // nothing, and JS leaves an optional group that matched nothing unset (the
+  // router reports `""`), like the `**` of `/path/**` on `/path`.
+  "/users/:id/**": {
+    regex: /^\/users\/(?:(?<id>[^/]+)(?:\/|$)|\/)(?:(?<_>(?:[\s\S]*[^/])?\/*?)\/?)?$/,
+    match: [
+      ["/users/1", { id: "1", _: undefined }, { id: "1", _: "" }],
+      ["/users/1/", { id: "1", _: undefined }, { id: "1", _: "" }],
+      ["/users/1//", { id: "1", _: "" }],
+      ["/users/1/a/b", { id: "1", _: "a/b" }],
+      ["/users/1/a/b/", { id: "1", _: "a/b" }],
+      ["/users/1/a//", { id: "1", _: "a/" }],
+      ["/users//", { id: undefined, _: undefined }, { id: "", _: "" }],
+      ["/users///", { id: undefined, _: "" }, { id: "", _: "" }],
+    ],
+    noMatch: ["/users", "/users/", "/usersx/1"],
+  },
+  "/docs/:lang/:page*": {
+    regex: /^\/docs\/(?:(?<lang>[^/]+)(?:\/|$)|\/)(?:(?<page>(?:[\s\S]*[^/])?\/*?)\/?)??$/,
+    match: [
+      ["/docs/en", { lang: "en", page: undefined }],
+      ["/docs/en/", { lang: "en", page: undefined }],
+      ["/docs/en//", { lang: "en", page: "" }],
+      ["/docs/en/a/b", { lang: "en", page: "a/b" }],
+      ["/docs/en/a/b/", { lang: "en", page: "a/b" }],
+      ["/docs/en/a//", { lang: "en", page: "a/" }],
+      ["/docs//", { lang: undefined, page: undefined }, { lang: "" }],
+      ["/docs//a", { lang: undefined, page: "a" }, { lang: "", page: "a" }],
+    ],
+    noMatch: ["/docs", "/docs/"],
+  },
+  // Optional segments in a row nest: the router only takes `day` along with
+  // `month` (`/posts/:year/:day` is shadowed by `/posts/:year/:month`).
+  "/posts/:year/:month?/:day?": {
+    regex: /^\/posts\/(?:(?<year>[^/]+)(?:\/|$)|\/)(?:(?<month>[^/]*)(?:\/(?<day>[^/]*))??\/?)??$/,
+    match: [
+      ["/posts/2024", { year: "2024", month: undefined, day: undefined }],
+      ["/posts/2024/", { year: "2024", month: undefined, day: undefined }],
+      ["/posts/2024/01", { year: "2024", month: "01", day: undefined }],
+      ["/posts/2024/01/", { year: "2024", month: "01", day: undefined }],
+      ["/posts/2024/01/02/", { year: "2024", month: "01", day: "02" }],
+      ["/posts/2024//", { year: "2024", month: "", day: undefined }],
+      ["/posts/2024/01//", { year: "2024", month: "01", day: "" }],
+      ["/posts/2024///", { year: "2024", month: "", day: "" }],
+      ["/posts//01", { year: undefined, month: "01", day: undefined }, { year: "", month: "01" }],
+    ],
+    noMatch: ["/posts", "/posts/", "/posts/2024/01/02//", "/posts/2024/01/02/x"],
+  },
+  "/a/:x?/:y?": {
+    regex: /^\/a(?:\/(?<x>[^/]*)(?:\/(?<y>[^/]*))??)??\/?$/,
+    match: [
+      ["/a", { x: undefined, y: undefined }],
+      ["/a/", { x: undefined, y: undefined }],
+      ["/a//", { x: "", y: undefined }],
+      ["/a/b", { x: "b", y: undefined }],
+      ["/a/b/", { x: "b", y: undefined }],
+      ["/a/b/c", { x: "b", y: "c" }],
+      ["/a/b//", { x: "b", y: "" }],
+      ["/a///", { x: "", y: "" }],
+    ],
+    noMatch: ["/ab", "/a/b/c//", "/a/b/c/d"],
+  },
+  // An empty segment is required too, and has no non-empty branch.
+  "/a//*": {
+    regex: /^\/a\/\/(?:(?<_0>[^/]*)\/?)??$/,
+    match: [
+      ["/a//", { "0": undefined }],
+      ["/a///", { "0": "" }],
+      ["/a//x", { "0": "x" }],
+      ["/a//x/", { "0": "x" }],
+    ],
+    noMatch: ["/a", "/a/", "/a/x", "/a//x//", "/a//x/y"],
+  },
+  // An optional group spanning segments whose last one can be empty:
+  // `/path/sub/` must not match (it strips to `/path/sub`, which is neither
+  // branch). The group ends in the required ending, and `id` is unset where it
+  // is empty (the router reports `""`), like a top-level `/path/sub/:id`.
   "/path{/sub/:id}?": {
-    regex: /^\/path(?:\/sub\/(?<id>[^/]*))?(?:(?<=\/)\/|(?<!\/)\/?)$/,
+    regex: /^\/path(?:\/(?:sub\/(?:(?<id>[^/]+)\/?|\/))?)?$/,
     match: [
       ["/path", { id: undefined }],
       ["/path/", { id: undefined }],
       ["/path/sub/1", { id: "1" }],
-      ["/path/sub//", { id: "" }],
+      ["/path/sub/1/", { id: "1" }],
+      ["/path/sub//", { id: undefined }, { id: "" }],
     ],
-    noMatch: ["/path/sub", "/path/sub/"],
+    noMatch: ["/path/sub", "/path/sub/", "/path//", "/path/sub/1//"],
+  },
+  // A group whose required segment is followed by an optional one.
+  "/path{/sub/:id/*}?": {
+    regex: /^\/path(?:\/(?:sub\/(?:(?<id>[^/]+)(?:\/|$)|\/)(?:(?<_0>[^/]*)\/?)??)?)?$/,
+    match: [
+      ["/path", { id: undefined, "0": undefined }],
+      ["/path/", { id: undefined, "0": undefined }],
+      ["/path/sub/1", { id: "1", "0": undefined }],
+      ["/path/sub/1/", { id: "1", "0": undefined }],
+      ["/path/sub/1//", { id: "1", "0": "" }],
+      ["/path/sub/1/x/", { id: "1", "0": "x" }],
+      ["/path/sub//", { id: undefined, "0": undefined }, { id: "" }],
+      ["/path/sub//x", { id: undefined, "0": "x" }, { id: "", "0": "x" }],
+    ],
+    noMatch: ["/path/sub", "/path/sub/", "/path//", "/path/sub/1/x//"],
   },
   // A constraint that can match empty has no non-empty form to branch on.
   "/path/:id(\\d*)": {
@@ -572,18 +692,15 @@ export const regexpCases: Record<string, RegExpCase> = {
 // `(?:(?<=\/)\/|(?<!\/)\/?)`, which RE2-family engines (Go, Rust `regex`,
 // RE2) reject. Every other fixture gets a look-behind-free ending (see
 // src/_trailing-slash.ts); the sweep corpus has more look-behind routes,
-// pinned in SWEEP_LOOKBEHIND_PATTERNS. The suffix remains where the path must
-// not stop right after a separator but the capture that decides it has to
-// stay a single named group: a required empty-capable param followed by
-// optional segments, a constraint that can match empty, an empty segment
-// before a trailing wildcard (`/a//*`), several empty-capable optionals in a
-// row, or an optional group spanning segments whose last one can be empty.
-// It also stays when a match can end in `/` (a constraint like `[^.]+`), so
-// that the stripped trailing slash never lands in the capture.
+// pinned in SWEEP_LOOKBEHIND_PATTERNS. The suffix remains for a required
+// last segment whose constraint can match empty (its non-empty part isn't
+// derived), for optional siblings where an earlier one can be empty and a
+// later one can't nest in it, for optional siblings after a required segment
+// that can be empty (not implemented), and where a match can end in `/` (a
+// constraint like `[^.]+`), so that the stripped trailing slash never lands
+// in the capture.
 export const LOOKBEHIND_ROUTES: ReadonlySet<string> = new Set([
-  "/path/:id/:tab?",
   "/path/:id(\\d*)",
-  "/path{/sub/:id}?",
   "/files/:name([^.]+)",
   "/path/:x(\\S+)?",
 ]);
@@ -609,48 +726,15 @@ export const PCRE2_DUPLICATE_NAME_ROUTES: ReadonlySet<string> = new Set([
 // (test/regexp.pcre.test.ts); pinned in test/regexp.test.ts so a change that
 // moves more routes onto the suffix fails instead of silently shrinking it.
 export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
-  // A required empty-capable segment followed by optional ones.
-  "/:x/*",
-  "/:x/**",
-  "/:x/:y?",
-  "/*/*",
-  "/*/**",
-  "/*/:y?",
-  "/a/:x/*",
-  "/a/:x/**",
-  "/a/:x/:y?",
-  "/a/*/*",
-  "/a/*/**",
-  "/a/*/:y?",
-  "/path/:id/:tab?",
-  // Several empty-capable optionals in a row.
-  "/:x?/*",
-  "/:x?/**",
-  "/:x?/:y?",
-  "/a/:x?/*",
-  "/a/:x?/**",
-  "/a/:x?/:y?",
-  "/a{/*/:y?}?",
-  "/a{/b/*/:y?}?",
-  // An empty segment before a trailing wildcard (`{b}?` leaves one when absent).
-  "//*",
-  "//**",
-  "/a//*",
-  "/a//**",
-  "/{b}?/*",
-  "/{b}?/**",
-  "/a/{b}?/*",
-  "/a/{b}?/**",
-  // A constraint that can match empty.
+  // A constraint that can match empty, as a required last segment.
   "/path/:id(\\d*)",
-  // An optional group spanning segments whose last one can be empty.
-  "/a{/b/:x}?",
-  "/a{/b/:y}?",
-  "/a{/b/:y+}?",
-  "/a{/b/**:r}?",
-  "/a{/b/:x/*}?",
-  "/a{/b/:x/**}?",
-  "/path{/sub/:id}?",
+  "/a/:x(\\d*)/:y?",
+  // Optional siblings where an earlier one can be empty and a later one can't
+  // nest in it.
+  "/a/:x(\\d*)?/:y?",
+  "/a/:x?{/b/c}?",
+  // Optional siblings after a required segment that can be empty.
+  "/a/:x/:y(\\d+)?/:z?",
   // A constraint whose match can end in `/`.
   "/files/:name([^.]+)",
   "/path/:x(\\S+)?",
@@ -723,6 +807,26 @@ export function sweepPatterns(): string[] {
     "/{en}?/:page?",
     // An optional group spanning segments ends in an empty-capable one.
     "/a{/b/:x}?",
+    // Required segments that can be empty, then optionals, nested ones too.
+    "/a/:x/:y/:z?",
+    "/a/:x/:y?/:z?",
+    "/a/:x/*/:z?",
+    "/a/*/:y?/:z?",
+    "/a/:x?/:y?/:z?",
+    "/:x/:y?/**",
+    "/a{/b/:x/:y?}?",
+    "/a{/:x/:y?}?",
+    "/a/:x{/b/:y}?",
+    // Optional siblings: nestable (`:y` matches no segment `:x` doesn't), or
+    // not and the earlier one can't be empty.
+    "/a/:x?/:y(\\d+)?",
+    "/a/:x(\\d+)?/:y?",
+    "/a/:x(\\d+)?/:y?/:z?",
+    // Look-behind fallbacks (SWEEP_LOOKBEHIND_PATTERNS).
+    "/a/:x(\\d*)?/:y?",
+    "/a/:x?{/b/c}?",
+    "/a/:x/:y(\\d+)?/:z?",
+    "/a/:x(\\d*)/:y?",
     ...Object.keys(regexpCases),
   ]);
   // Optional segments nested in an inline group (`/a{/b/*}?`), including an

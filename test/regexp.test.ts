@@ -107,7 +107,8 @@ describe("routeToRegExp", () => {
       "/:p*",
       "/a{/v1/**}?",
       "/a{/v1/:p*}?",
-      // Look-behind endings.
+      // A required catch-all inside a group, and after a constraint that can
+      // match `/`.
       "/a{/v1/**:p}?",
       "/a/:x(\\S+)/**:p",
     ];
@@ -210,9 +211,10 @@ describe("routeToRegExp", () => {
 
   // Captures must agree too: consumers read params off the regex. The one
   // accepted difference is the look-behind-free ending of a required
-  // whole-segment `:x` / `**:x` / `:x+` (see `withTrailingSlash`): on a path
-  // whose last segment is empty it leaves the group unset where the router
-  // reports `""`. Anything else must be listed in KNOWN_CAPTURE_DIFFS.
+  // segment that can be empty (`:x`, `**:x`, `:x+`, see `withTrailingSlash`):
+  // where that segment is empty, at the end of the path or before optional
+  // ones, it leaves the group unset where the router reports `""`. Anything
+  // else must be listed in KNOWN_CAPTURE_DIFFS.
   it("captures what findRoute captures", () => {
     const paths = sweepPaths();
     const unexpected: string[] = [];
@@ -233,9 +235,10 @@ describe("routeToRegExp", () => {
           (key) => groups[key] !== params[key],
         );
         if (keys.length === 0) continue;
-        if (keys.every((key) => isEmptyLastSegmentGap(router, path, key, groups, params))) {
+        const rest = keys.filter((key) => !isRequiredSegmentGap(router, path, key, groups, params));
+        if (rest.length === 0) {
           accepted++;
-        } else if (known?.test(pattern, keys, groups, params)) {
+        } else if (known?.test(pattern, rest, groups, params)) {
           seen.add(pattern);
         } else {
           unexpected.push(
@@ -401,24 +404,31 @@ function fmt(captures: Record<string, string>): string {
 }
 
 /**
- * The accepted trade-off of the look-behind-free required ending: on a path
- * whose last segment is empty (`/a//` strips to `/a/`), the slash-only branch
- * leaves the group that takes that segment unset where the router reports
- * `""`. `key` is that group iff filling the segment in (`/a/z/`) makes the
- * router capture it (`**` has its own, listed, zero-segment difference).
+ * The accepted trade-off of the look-behind-free endings for a required
+ * segment that can be empty: where it is empty (`/a//` for `/a/:x`, `/a//b`
+ * for `/a/:x/:y?`), its group is unset and the router reports `""`. `key` is
+ * that group iff for some empty segment of `path`, the route can end right
+ * after it, with `key` taking it: cut there and filled in (`/a/z`), the path
+ * is routed with `key: "z"`. (`**` has its own, listed, zero-segment
+ * difference.)
  */
-function isEmptyLastSegmentGap(
+function isRequiredSegmentGap(
   router: ReturnType<typeof createRouter>,
   path: string,
   key: string,
   groups: Record<string, string>,
   params: Record<string, string>,
 ): boolean {
-  if (key === "_" || key in groups || params[key] !== "" || !path.endsWith("//")) {
+  if (key === "_" || key in groups || params[key] !== "") {
     return false;
   }
-  const filled = findRoute(router, "", `${path.slice(0, -1)}z/`)?.params?.[key];
-  return filled?.endsWith("z") === true;
+  const segments = path.split("/");
+  return segments.some(
+    (segment, i) =>
+      i > 0 &&
+      segment === "" &&
+      findRoute(router, "", `${segments.slice(0, i).join("/")}/z`)?.params?.[key] === "z",
+  );
 }
 
 interface CaptureDiff {
@@ -443,7 +453,8 @@ const ZERO_SEGMENT_CATCH_ALL: CaptureDiff = {
 // Pre-existing: the regex's first optional group is greedy and takes a lone
 // segment, while the router matches the `/*` expansion, which ends there.
 const OPTIONAL_BEFORE_WILDCARD: CaptureDiff = {
-  reason: "an optional param before a trailing `*` takes the segment (`x` vs the router's `0`)",
+  reason:
+    "an optional param takes the segment the router gives a later optional (`x` vs the router's `0`)",
   test: (_pattern, _keys, groups, params) =>
     Object.keys(groups).length === 1 &&
     Object.keys(params).length === 1 &&
@@ -494,10 +505,16 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/a{/b/**}?",
     "/a{/:x/**}?",
     "/a{/b/:x/**}?",
+    "/:x/:y?/**",
   ].map((pattern) => [pattern, ZERO_SEGMENT_CATCH_ALL] as const),
-  ...["/:x?/*", "/a/:x?/*", "/:x(\\d+)?/*", "/a/:x(\\d+)?/*"].map(
-    (pattern) => [pattern, OPTIONAL_BEFORE_WILDCARD] as const,
-  ),
+  ...[
+    "/:x?/*",
+    "/a/:x?/*",
+    "/:x(\\d+)?/*",
+    "/a/:x(\\d+)?/*",
+    // The router prefers the constrained `y` (see `_selectMatcher`).
+    "/a/:x?/:y(\\d+)?",
+  ].map((pattern) => [pattern, OPTIONAL_BEFORE_WILDCARD] as const),
   ...[
     "/:x*/a",
     "/a/:x*/a",

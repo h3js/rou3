@@ -7,7 +7,8 @@ import {
 } from "./_escape.ts";
 import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcards.ts";
 import { expandModifiers, splitRoute } from "./operations/_utils.ts";
-import { isOptionalGroups, withTrailingSlash } from "./_trailing-slash.ts";
+import { isOptionalGroups } from "./_regexp-scan.ts";
+import { withTrailingSlash } from "./_trailing-slash.ts";
 
 // Catch-all body. The router splits paths on `/` only, so a catch-all takes
 // any char, line terminators included; `.` would not (JS excludes `\n`, `\r`,
@@ -246,6 +247,27 @@ function routeToRegExpSegments(
     return toGroupName(name);
   };
 
+  // Optional segments (`:x?`, a trailing `*`, `:x*`, `**`) are appended to the
+  // previous segment as `(?:/…)?`. After a whole-segment `:x?` / `*`, the
+  // next ones nest inside its group: of the router's expansions of
+  // `/a/:x?/:y?`, `/a/:y` matches no path `/a/:x` doesn't, so both forms
+  // match the same paths, and only the nested one leaves a single optional
+  // group at the end (see `withTrailingSlash`). Both give a lone segment to
+  // `x`, as the router does unless `/a/:y` wins it (a `*` or a constrained
+  // `:y`). `nest` counts the `)?` closers to insert before.
+  let nest = 0;
+  const pushOptional = (inner: string, nestable: boolean) => {
+    if (reSegments.length === 0) {
+      ownSeparator = true;
+      reSegments.push(`(?:/${inner})?`);
+    } else {
+      const prev = reSegments.pop()!;
+      const at = prev.length - 2 * nest;
+      reSegments.push(`${prev.slice(0, at)}(?:/${inner})?${prev.slice(at)}`);
+    }
+    if (nestable) nest++;
+  };
+
   const segments = splitRoute(route);
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
@@ -254,6 +276,7 @@ function routeToRegExpSegments(
     // and trailing empties (`/a//` = `/a/` = `/a`).
     if (!segment) {
       reSegments.push("");
+      nest = 0;
       continue;
     }
 
@@ -265,11 +288,9 @@ function routeToRegExpSegments(
         !segments.slice(i + 1).every((s) => paramModifier(s) === "?" || paramModifier(s) === "*")
       ) {
         reSegments.push(star);
-      } else if (reSegments.length > 0) {
-        reSegments.push(`${reSegments.pop()}(?:/${star})?`);
+        nest = 0;
       } else {
-        ownSeparator = true;
-        reSegments.push(`(?:/${star})?`);
+        pushOptional(star, true);
       }
     } else if (segment.startsWith("**")) {
       // The separator before a catch-all must stay anchored to the prefix: a
@@ -283,7 +304,7 @@ function routeToRegExpSegments(
       if (!starStar) {
         reSegments.push(`(?<${name}>${ANY})`);
       } else if (reSegments.length > 0) {
-        reSegments.push(`${reSegments.pop()}(?:/(?<_>${ANY}))?`);
+        pushOptional(`(?<_>${ANY})`, false);
       } else {
         reSegments.push(`?(?<_>${ANY})`);
       }
@@ -298,21 +319,15 @@ function routeToRegExpSegments(
         const [, base, mod] = modMatch;
 
         if (mod === "?") {
+          const whole = /^:[\w-]+$/.test(base);
           const inner = escapeBareDots(
             base.replace(
               /:([\w-]+)(?:\(([^)]*)\))?/g,
-              (_, id, pattern) =>
-                `(?<${groupName(id)}>${pattern || (/^:[\w-]+$/.test(base) ? "[^/]*" : "[^/]+")})`,
+              (_, id, pattern) => `(?<${groupName(id)}>${pattern || (whole ? "[^/]*" : "[^/]+")})`,
             ),
           );
-          if (reSegments.length > 0) {
-            // Append optional group to previous segment: /foo(?:/<inner>)?
-            const prevQ: string = reSegments.pop()!;
-            reSegments.push(`${prevQ}(?:/${inner})?`);
-          } else {
-            ownSeparator = true;
-            reSegments.push(`(?:/${inner})?`);
-          }
+          // Append optional group to previous segment: /foo(?:/<inner>)?
+          pushOptional(inner, whole);
           continue;
         }
 
@@ -321,18 +336,12 @@ function routeToRegExpSegments(
         const [, id, pattern] = base.match(/:([\w-]+)(?:\(([^)]*)\))?/)!;
         const name = groupName(id);
         if (reSegments.length > 0) {
-          const prevMod: string = reSegments.pop()!;
-          if (pattern) {
-            const repeated = `${pattern}(?:/${pattern})*`;
-            reSegments.push(
-              mod === "+"
-                ? `${prevMod}/(?<${name}>${repeated})`
-                : `${prevMod}(?:/(?<${name}>${repeated}))?`,
-            );
+          const repeated = pattern ? `${pattern}(?:/${pattern})*` : ANY;
+          if (mod === "*") {
+            pushOptional(`(?<${name}>${repeated})`, false);
           } else {
-            reSegments.push(
-              mod === "+" ? `${prevMod}/(?<${name}>${ANY})` : `${prevMod}(?:/(?<${name}>${ANY}))?`,
-            );
+            reSegments.push(`${reSegments.pop()}/(?<${name}>${repeated})`);
+            nest = 0;
           }
         } else {
           if (pattern) {
@@ -342,6 +351,7 @@ function routeToRegExpSegments(
             // `+` needs at least one segment, so its separator is required.
             reSegments.push(mod === "+" ? `(?<${name}>${ANY})` : `?(?<${name}>${ANY})`);
           }
+          nest = 0;
         }
 
         continue;
@@ -368,8 +378,10 @@ function routeToRegExpSegments(
           ),
         ),
       );
+      nest = 0;
     } else {
       reSegments.push(segment.replace(/\\(.)/g, "$1").replace(/[.*+?^${}()|[\]]/g, "\\$&"));
+      nest = 0;
     }
   }
 

@@ -96,3 +96,51 @@ export function tokenize(body: string): string[] {
   }
   return tokens;
 }
+
+/**
+ * Split a level into its head up to the last segment (empty, or ending in
+ * `/`), that segment, and the inners of the optional groups after it (the
+ * last one is the next level). `undefined` when a part's match can end in `/`
+ * (a constraint like `.+` or `[^.]+`): it would keep the slash lookup strips
+ * (`/a/:x(.+)` matching `/a//` with `x: "/"`), and no rewritten ending rules
+ * that out. The exception is a trailing catch-all (or `.*`): any of its
+ * matches minus a trailing slash is still one, and its endings leave that
+ * slash out of the capture.
+ */
+export function parseLevel(
+  level: string,
+): [prefix: string, last: string, groups: string[]] | undefined {
+  const tokens = tokenize(level);
+  let end = tokens.length;
+  while (end > 0 && OPTIONAL_GROUP.test(tokens[end - 1])) {
+    end--;
+  }
+  const sep = tokens.slice(0, end).lastIndexOf("/");
+  const last = tokens.slice(sep + 1, end).join("");
+  const groups = tokens.slice(end).map((group) => group.slice(4, -2));
+  if (
+    groups.slice(0, -1).some((group) => canEndInSlash(group)) ||
+    (canEndInSlash(last) && !(groups.length === 0 && CATCH_ALL.test(last)))
+  ) {
+    return;
+  }
+  return [tokens.slice(0, sep + 1).join(""), last, groups];
+}
+
+/**
+ * Whether `fragment` is only whole-segment optional groups `(?:/…)?`, i.e.
+ * already optional as a whole.
+ */
+export function isOptionalGroups(fragment: string): boolean {
+  const tokens = tokenize(fragment);
+  return tokens.length > 0 && tokens.every((token) => OPTIONAL_GROUP.test(token));
+}
+
+/** A whole-segment optional group `(?:/…)?`. */
+const OPTIONAL_GROUP = /^\(\?:\/.*\)\?$/s;
+
+/**
+ * A whole-part catch-all capture (`**`, `**:x`, `:x+`, `:x*`), or a `(.*)`
+ * constraint: `[name, body]`.
+ */
+export const CATCH_ALL: RegExp = /^\(\?<(\w+)>(\[\\s\\S\]\*|\.\*)\)$/;

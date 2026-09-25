@@ -145,6 +145,10 @@ describe("regExpToRoute", () => {
       "/:x(.*)",
       "/:x(.*)?",
       "/a/(.*)",
+      // In endings with the trailing-slash rule built in.
+      "/a/:x/:y(.*)?",
+      "/a{/b/:x(.*)}?",
+      "/a{/b/:x/:y(.*)?}?",
       "/a/:x+",
       "/a/:x*",
       "/:x+",
@@ -276,6 +280,18 @@ const KNOWN_NON_EQUIVALENT: Record<string, readonly [back: string, reason: strin
   "/:x([\\s\\S]*)": ["/:x+", "a `[\\s\\S]*` constraint comes back as a catch-all"],
   "/a/:x([\\s\\S]*)": ["/a/:x+", "a `[\\s\\S]*` constraint comes back as a catch-all"],
   "/a/:x([\\s\\S]*)?": ["/a/:x*", "a `[\\s\\S]*` constraint comes back as a catch-all"],
+  // Optionals after a whole-segment `:x?` nest in its group (see
+  // `routeToRegExpSegments`), so these compile to the regex of the `{/:x/…}?`
+  // route and come back as it: the same paths, captured like the regex does,
+  // which differs from the original route (KNOWN_CAPTURE_DIFFS in
+  // test/regexp.test.ts).
+  "/a/:x?/*": ["/a{/:x/*}?", "the router gives a lone segment to `*`, the regex to `x`"],
+  "/a/:x?/**": ["/a{/:x/**}?", 'the router reports `**` as `""` on `/a`, the regex not'],
+  "/:x/:y?/**": ["/:x{/:y/**}?", 'the router reports `**` as `""` on `/a`, the regex not'],
+  "/a/:x?/:y(\\d+)?": [
+    "/a{/:x/:y(\\d+)?}?",
+    "the router gives a lone number to `y`, the regex to `x`",
+  ],
 };
 
 /** Sweep paths, also under the route's leading static segments (`/path/…`). */
