@@ -18,6 +18,7 @@ src/
   _group-names.ts     # Capture-group name codec (param name <-> group name escaping)
   _segment-wildcards.ts# Wildcard segment capture handling
   _trailing-slash.ts  # routeToRegExp() trailing-slash suffix (look-behind-free where possible, RE2)
+  _regexp-scan.ts     # Regex-body syntax scans for _trailing-slash.ts (tokenize, canBeEmpty, canEndInSlash)
   _overlap.ts         # Pattern-overlap shape model (tree entry -> RouteShape, shape intersection)
   _subsume.ts         # Shape subsumption/canonicalization (shapeSubsumes, mergeShapes, regex-key normalization)
   route-node-keys.ts  # routeNodeKeys() - radix-node identity keys for a pattern
