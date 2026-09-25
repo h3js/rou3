@@ -424,6 +424,9 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/a/:x(\\d+)/**",
     "/:x(\\d+)?/**",
     "/a/:x(\\d+)?/**",
+    "/a{/b/**}?",
+    "/a{/:x/**}?",
+    "/a{/b/:x/**}?",
   ].map((pattern) => [pattern, ZERO_SEGMENT_CATCH_ALL] as const),
   ...["/:x?/*", "/a/:x?/*", "/:x(\\d+)?/*", "/a/:x(\\d+)?/*"].map(
     (pattern) => [pattern, OPTIONAL_BEFORE_WILDCARD] as const,

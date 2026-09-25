@@ -70,6 +70,26 @@ export function regExpToRoute(regexp: RegExp | string): string {
     return "/";
   }
 
+  return "/" + parseSegments(src, true).join("/");
+}
+
+// The look-behind-free endings `withTrailingSlash` emits, as `RegExp#source`
+// spells them (`x` stands for any group name):
+// - a required `:x`: `(?:(?<x>[^/]+)\/?|\/)`
+// - a required catch-all (`**:x`, `:x+`): `(?:\/|(?<x>(?:.*[^/]|\/)\/*?)\/?)`
+// - a trailing catch-all, possibly inside optional groups: `(?<x>(?:.*[^/])?\/*?)`
+// - a root `:x*`, whole: `(?:\/?(?<x>(?:.*[^/])?\/*?))??\/?`
+const REQUIRED_PARAM = /\(\?:\(\?<(\w+)>\[\^\/\]\+\)\\\/\?\|\\\/\)$/;
+const REQUIRED_CATCH_ALL = /\(\?:\\\/\|\(\?<(\w+)>\(\?:\.\*\[\^\/\]\|\\\/\)\\\/\*\?\)\\\/\?\)$/;
+const TRAILING_CATCH_ALL = /\(\?<(\w+)>\(\?:\.\*\[\^\/\]\)\?\\\/\*\?\)((?:\)\?\??)*)\\\/\?$/;
+const ROOT_REPEAT = /^\(\?:\\\/\?\(\?<(\w+)>\(\?:\.\*\[\^\/\]\)\?\\\/\*\?\)\)\?\?\\\/\?$/;
+
+/**
+ * Parse a regex body (segments after `\/`, optional groups) into route
+ * segments. `atEnd`: whether the body ends the route, where a trailing
+ * `(?:\/(?<_>.*))?` is `**`.
+ */
+function parseSegments(src: string, atEnd: boolean): string[] {
   const segments: string[] = [];
   const n = src.length;
   let i = 0;
@@ -84,7 +104,7 @@ export function regExpToRoute(regexp: RegExp | string): string {
       }
       const lazy = src[end + 1] === "?";
       const next = end + (lazy ? 2 : 1);
-      applyOptional(segments, src.slice(i + 3, end - 1), next === n, lazy);
+      applyOptional(segments, src.slice(i + 3, end - 1), atEnd && next === n, lazy);
       i = next;
       continue;
     }
@@ -121,19 +141,8 @@ export function regExpToRoute(regexp: RegExp | string): string {
     throw new Error(`rou3: cannot parse "${src}" at index ${i}`);
   }
 
-  return "/" + segments.join("/");
+  return segments;
 }
-
-// The look-behind-free endings `withTrailingSlash` emits, as `RegExp#source`
-// spells them (`x` stands for any group name):
-// - a required `:x`: `(?:(?<x>[^/]+)\/?|\/)`
-// - a required catch-all (`**:x`, `:x+`): `(?:\/|(?<x>(?:.*[^/]|\/)\/*?)\/?)`
-// - a trailing catch-all, possibly inside optional groups: `(?<x>(?:.*[^/])?\/*?)`
-// - a root `:x*`, whole: `(?:\/?(?<x>(?:.*[^/])?\/*?))??\/?`
-const REQUIRED_PARAM = /\(\?:\(\?<(\w+)>\[\^\/\]\+\)\\\/\?\|\\\/\)$/;
-const REQUIRED_CATCH_ALL = /\(\?:\\\/\|\(\?<(\w+)>\(\?:\.\*\[\^\/\]\|\\\/\)\\\/\*\?\)\\\/\?\)$/;
-const TRAILING_CATCH_ALL = /\(\?<(\w+)>\(\?:\.\*\[\^\/\]\)\?\\\/\*\?\)((?:\)\?\??)*)\\\/\?$/;
-const ROOT_REPEAT = /^\(\?:\\\/\?\(\?<(\w+)>\(\?:\.\*\[\^\/\]\)\?\\\/\*\?\)\)\?\?\\\/\?$/;
 
 /** Reverse a single segment (no top-level separators) into route syntax. */
 function reverseSegment(seg: string): string {
@@ -225,8 +234,9 @@ function applyOptional(segments: string[], inner: string, last: boolean, lazy: b
       segments.push(optionalParam(g.name, g.body));
       return;
     }
-    // Literal / mixed optional segment -> `{/...}?` merged onto the previous.
-    mergeGroup(segments, `/${reverseSegment(rest)}`);
+    // Literal / mixed optional segments, possibly with optionals of their own
+    // (`{/sub/**}?`) -> `{/...}?` merged onto the previous segment.
+    mergeGroup(segments, `/${parseSegments(inner, last).join("/")}`);
     return;
   }
   // In-segment optional -> `{...}?` merged onto the previous segment.

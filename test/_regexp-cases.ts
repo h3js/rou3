@@ -449,6 +449,71 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/a/b//", { path: "a/b/" }],
     ],
   },
+  // Trailing optionals nested in an inline group get the same endings as
+  // top-level ones: a catch-all never keeps the stripped trailing slash, an
+  // inner `*` / `:x?` / `:x*` stays unset where the router takes the route
+  // without it, and no look-behind is needed.
+  "/path{/sub/**}?": {
+    regex: /^\/path(?:\/sub(?:\/(?<_>(?:.*[^/])?\/*?))?)?\/?$/,
+    match: [
+      ["/path", { _: undefined }],
+      ["/path/", { _: undefined }],
+      ["/path/sub/", { _: "" }],
+      ["/path/sub//", { _: "" }],
+      ["/path/sub/a", { _: "a" }],
+      ["/path/sub/a/", { _: "a" }],
+      ["/path/sub/a//", { _: "a/" }],
+      ["/path/sub/a/b", { _: "a/b" }],
+    ],
+    noMatch: ["/path//", "/path/subx", "/path/other"],
+  },
+  "/path{/sub/:rest*}?": {
+    regex: /^\/path(?:\/sub(?:\/(?<rest>(?:.*[^/])?\/*?))??)?\/?$/,
+    match: [
+      ["/path", { rest: undefined }],
+      ["/path/sub", { rest: undefined }],
+      ["/path/sub/", { rest: undefined }],
+      ["/path/sub//", { rest: "" }],
+      ["/path/sub/a/", { rest: "a" }],
+      ["/path/sub/a/b//", { rest: "a/b/" }],
+    ],
+    noMatch: ["/path//", "/path/subx"],
+  },
+  "/path{/sub/*}?": {
+    regex: /^\/path(?:\/sub(?:\/(?<_0>[^/]*))??)?\/?$/,
+    match: [
+      ["/path", { "0": undefined }],
+      ["/path/sub", { "0": undefined }],
+      ["/path/sub/", { "0": undefined }],
+      ["/path/sub//", { "0": "" }],
+      ["/path/sub/a", { "0": "a" }],
+      ["/path/sub/a/", { "0": "a" }],
+    ],
+    noMatch: ["/path//", "/path/sub/a//", "/path/sub/a/b"],
+  },
+  "/path{/sub/:id?}?": {
+    regex: /^\/path(?:\/sub(?:\/(?<id>[^/]*))??)?\/?$/,
+    match: [
+      ["/path", { id: undefined }],
+      ["/path/sub/", { id: undefined }],
+      ["/path/sub//", { id: "" }],
+      ["/path/sub/1/", { id: "1" }],
+    ],
+    noMatch: ["/path//", "/path/sub/1//"],
+  },
+  // An inline group holding a single optional segment adds nothing: it is the
+  // same route as `/path/:rest*`.
+  "/path{/:rest*}?": {
+    regex: /^\/path(?:\/(?<rest>(?:.*[^/])?\/*?))??\/?$/,
+    match: [
+      ["/path", { rest: undefined }],
+      ["/path/", { rest: undefined }],
+      ["/path//", { rest: "" }],
+      ["/path/a/", { rest: "a" }],
+      ["/path/a//", { rest: "a/" }],
+    ],
+    noMatch: ["/pathx"],
+  },
 };
 
 // Fixtures whose regex still ends in the look-behind trailing-slash suffix
@@ -513,6 +578,8 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
   "/a/:x?/*",
   "/a/:x?/**",
   "/a/:x?/:y?",
+  "/a{/*/:y?}?",
+  "/a{/b/*/:y?}?",
   // An empty segment before a trailing wildcard (`{b}?` leaves one when absent).
   "//*",
   "//**",
@@ -526,6 +593,11 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
   "/path/:id(\\d*)",
   // An optional group spanning segments whose last one can be empty.
   "/a{/b/:x}?",
+  "/a{/b/:y}?",
+  "/a{/b/:y+}?",
+  "/a{/b/**:r}?",
+  "/a{/b/:x/*}?",
+  "/a{/b/:x/**}?",
   "/path{/sub/:id}?",
   // A constraint whose match can end in `/`.
   "/files/:name([^.]+)",
@@ -601,6 +673,11 @@ export function sweepPatterns(): string[] {
     "/a{/b/:x}?",
     ...Object.keys(regexpCases),
   ]);
+  // Optional segments nested in an inline group (`/a{/b/*}?`), including an
+  // empty-capable group head (`{/:x/*}?`) and optional siblings (`{/b/*/:y?}?`).
+  for (const t of ["*", ":y?", ":y*", ":y+", "**", "**:r", ":y", "*/:y?", ":x/*", ":x/**"]) {
+    patterns.add(`/a{/b/${t}}?`).add(`/a{/${t}}?`);
+  }
   for (const u of units) {
     for (const t of tails) {
       patterns.add(t ? `/${u}/${t}` : `/${u}`);

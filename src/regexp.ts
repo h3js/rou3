@@ -7,7 +7,7 @@ import {
 } from "./_escape.ts";
 import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcards.ts";
 import { expandModifiers, splitRoute } from "./operations/_utils.ts";
-import { withTrailingSlash } from "./_trailing-slash.ts";
+import { isOptionalGroups, withTrailingSlash } from "./_trailing-slash.ts";
 
 /**
  * Convert a rou3 route pattern into an anchored {@link RegExp}.
@@ -143,9 +143,17 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
     }
     const k = prefix.length;
     const inlineSegs = fullSegs.slice(0, baseLen - 1);
-    // The group may add nothing (`/a/**/b{.json}?`: `**` is terminal).
-    inlineSegs.push(k === last.length ? last : `${last.slice(0, k)}(?:${last.slice(k)})?`);
-    return new RegExp(`^${withTrailingSlash(joinSegments(inlineSegs, fullOwnSep), starStar)}`);
+    // The group may add nothing (`/a/**/b{.json}?`: `**` is terminal), or
+    // only segments that are optional already (`/a{/:x*}?` is `/a/:x*`).
+    const optional = k < last.length && isOptionalGroups(last.slice(k));
+    inlineSegs.push(
+      k === last.length || optional ? last : `${last.slice(0, k)}(?:${last.slice(k)})?`,
+    );
+    // `/a{/**}?` also registers `/a`, which wins where `**` would match no
+    // segment: its group is skipped there like `:_*`'s.
+    return new RegExp(
+      `^${withTrailingSlash(joinSegments(inlineSegs, fullOwnSep), starStar && !optional)}`,
+    );
   }
 
   // `body` adds one or more whole segments (e.g. `/foo` -> `/foo/bar`); make

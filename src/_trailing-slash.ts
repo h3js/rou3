@@ -24,15 +24,20 @@ const SOME_TAIL = "(?:.*[^/]|/)/*?";
 
 /**
  * Append the trailing-slash rule to a route regex `body`, rewriting its ending
- * when that removes the need for look-behinds:
+ * when that removes the need for look-behinds. The ending is the body's last
+ * segment and its trailing optional groups `(?:/…)?`, including the ones
+ * nested in the last group (`{/sub/*}?` compiles to `(?:/sub(?:/…)?)?`):
  *
  * - The body can never end in `/` (static or non-empty last segment, or
  *   trailing optional groups that cannot be empty, none of them able to match
  *   a string ending in `/`): a plain `/?$`.
- * - Only the last optional group can be empty (`:x?`, trailing `*`, `:x*`,
- *   `**`): every match ending in `/` minus that `/` is still a match, so `/?$`
- *   is exact too; the group is made lazy so captures agree with the router
- *   (`/a/` leaves `x` unset, `/a//` gives `x: ""`).
+ * - Only the innermost last optional group can be empty (`:x?`, trailing `*`,
+ *   `:x*`, `**`), apart from the single-segment heads of the groups around it
+ *   (`{/:x/*}?`): every match ending in `/` minus that `/` is still a match
+ *   (the empty group, or the group around the empty head, skipped), so `/?$`
+ *   is exact too. Each of those groups is made lazy so captures agree with
+ *   the router (`/a/` leaves `x` unset, `/a//` gives `x: ""`), except for a
+ *   `**` group: the router reports `**` as `""` on `/a/`.
  * - A required whole-segment `:x` / `**:x` ends the route: split into a
  *   non-empty branch with an optional slash and an empty branch with exactly
  *   one. That branch leaves the group unset where the router reports `""`.
@@ -58,26 +63,39 @@ export function withTrailingSlash(body: string, starStar = false): string {
     return starStar ? `/?(?<${root[1]}>${ANY_TAIL})/?$` : `(?:/?(?<${root[1]}>${ANY_TAIL}))??/?$`;
   }
 
-  const tokens = tokenize(body);
-
-  // Peel trailing whole-segment optional groups `(?:/…)?`.
-  let end = tokens.length;
-  while (end > 0 && /^\(\?:\/.*\)\?$/s.test(tokens[end - 1])) {
-    end--;
+  // Walk the ending, one level per nested last group. `prefixes[i]` is level
+  // `i` up to its last group, whose inner is level `i + 1`.
+  const prefixes: string[] = [];
+  // Last segment of each level's head, and of each optional before its last
+  // group. Only the last part and `optional` ones (the head of a level inside a
+  // group, when it is that group's first segment) may be empty.
+  const parts: string[] = [];
+  const optional = new Set<number>();
+  let level = body;
+  let tokens = tokenize(level);
+  for (;;) {
+    let end = tokens.length;
+    while (end > 0 && OPTIONAL_GROUP.test(tokens[end - 1])) {
+      end--;
+    }
+    // A level made only of optionals has no head, and at the top the route
+    // can't end in `/` without them.
+    const sep = tokens.slice(0, end).lastIndexOf("/");
+    if (prefixes.length === 0 && end === 0) {
+      parts.push("x");
+    } else {
+      if (prefixes.length > 0 && sep < 0) optional.add(parts.length);
+      parts.push(tokens.slice(sep + 1, end).join(""));
+    }
+    const groups = tokens.slice(end).map((group) => group.slice(4, -2));
+    if (groups.length === 0) break;
+    parts.push(...groups.slice(0, -1));
+    prefixes.push(tokens.slice(0, -1).join(""));
+    level = groups[groups.length - 1];
+    tokens = tokenize(level);
   }
-  // The last segment before them (none if the body is only optionals), then
-  // each optional's inner regex. Only the last of these may match empty.
-  const sep = tokens.slice(0, end).lastIndexOf("/");
-  const parts = [
-    end > 0 ? tokens.slice(sep + 1, end).join("") : "x",
-    ...tokens.slice(end).map((group) => group.slice(4, -2)),
-  ];
   const last = parts.length - 1;
-  // An inline group can span segments (`{/bar/:id}?`): only its last one can
-  // leave the match ending in `/`, and stripping that `/` is then no match.
-  const tail = tokenize(parts[last]);
-  const multi = tail.lastIndexOf("/") + 1;
-  parts[last] = tail.slice(multi).join("");
+
   // A part whose match can end in `/` (a constraint like `.+` or `[^.]+`) would
   // keep the slash lookup strips (`/a/:x(.+)` matching `/a//` with `x: "/"`),
   // and none of the endings below rules that out. The exception is a trailing
@@ -86,12 +104,9 @@ export function withTrailingSlash(body: string, starStar = false): string {
   if (parts.some((part, i) => canEndInSlash(part) && !(i === last && CATCH_ALL.test(part)))) {
     return body + LOOKBEHIND_SUFFIX;
   }
-  const empty = parts.findIndex((part) => canBeEmpty(part));
-  if (empty < 0) {
+  const empty = parts.map((part) => canBeEmpty(part));
+  if (!empty.includes(true)) {
     return `${body}/?$`;
-  }
-  if (empty < last || multi > 0) {
-    return body + LOOKBEHIND_SUFFIX;
   }
 
   if (last === 0) {
@@ -99,22 +114,43 @@ export function withTrailingSlash(body: string, starStar = false): string {
     if (!param) {
       return body + LOOKBEHIND_SUFFIX;
     }
-    const head = tokens.slice(0, sep + 1).join("");
+    const head = level.slice(0, level.length - parts[0].length);
     return param[2] === ".*"
       ? `${head}(?:/|(?<${param[1]}>${SOME_TAIL})/?)$`
       : `${head}(?:(?<${param[1]}>[^/]+)/?|/)$`;
   }
+  // An empty-capable required segment or optional sibling before the last
+  // group, or a last segment after a separator inside its group
+  // (`{/bar/:id}?`, where stripping the slash is no match) needs look-around;
+  // so would making that sibling lazy, which shifts values into later groups
+  // (`/*/:y?` capturing `y` instead of `0`).
+  if (empty.some((canBe, i) => canBe && !optional.has(i))) {
+    return body + LOOKBEHIND_SUFFIX;
+  }
 
-  // Every match ending in `/` then ends in the last group, taken empty, and is
-  // still a match without it, so `/?$` is exact. Captures need that group
-  // lazy, which only works when no earlier one can be empty (it would shift
-  // values into later groups: `/*/:y?` capturing `y` instead of `0`).
-  // `.*` must not swallow the stripped slash. The router reports `**` as `""`
-  // on `/a/` (group taken), every other optional as unset (group skipped).
-  const inner = CATCH_ALL.test(parts[last]) ? parts[last].replace(".*", ANY_TAIL) : parts[last];
-  const lazy = starStar && parts[last] === "(?<_>.*)" ? "" : "?";
-  return `${tokens.slice(0, -1).join("")}(?:/${inner})?${lazy}/?$`;
+  // Rebuild from the innermost level out: a nested group can only be taken
+  // with the ones around it, so making each lazy never shifts a value. A group
+  // that can't be empty has a single parse and stays as is.
+  let out = CATCH_ALL.test(level) ? level.replace(".*", ANY_TAIL) : level;
+  for (let i = prefixes.length - 1; i >= 0; i--) {
+    const greedy =
+      !canBeEmpty(out) || (starStar && i === prefixes.length - 1 && level === "(?<_>.*)");
+    out = `${prefixes[i]}(?:/${out})?${greedy ? "" : "?"}`;
+  }
+  return `${out}/?$`;
 }
+
+/**
+ * Whether `fragment` is only whole-segment optional groups `(?:/…)?`, i.e.
+ * already optional as a whole.
+ */
+export function isOptionalGroups(fragment: string): boolean {
+  const tokens = tokenize(fragment);
+  return tokens.length > 0 && tokens.every((token) => OPTIONAL_GROUP.test(token));
+}
+
+/** A whole-segment optional group `(?:/…)?`. */
+const OPTIONAL_GROUP = /^\(\?:\/.*\)\?$/s;
 
 /** A whole-part catch-all capture (`**`, `**:x`, `:x+`, `:x*`, `(.*)`). */
 const CATCH_ALL = /^\(\?<\w+>\.\*\)$/;
