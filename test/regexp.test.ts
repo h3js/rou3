@@ -343,8 +343,8 @@ const ZERO_SEGMENT_CATCH_ALL: CaptureDiff = {
     keys.length === 1 && keys[0] === "_" && !("_" in groups) && params._ === "",
 };
 
-// Pre-existing: the regex's first optional group is greedy, while the tree
-// matches the shorter `/*` expansion's param node first.
+// Pre-existing: the regex's first optional group is greedy and takes a lone
+// segment, while the router matches the `/*` expansion, which ends there.
 const OPTIONAL_BEFORE_WILDCARD: CaptureDiff = {
   reason: "an optional param before a trailing `*` takes the segment (`x` vs the router's `0`)",
   test: (_pattern, _keys, groups, params) =>
@@ -360,7 +360,9 @@ const REPEAT_EXPANSION: CaptureDiff = {
   reason: "a `:x*` route: the regex captures `x` where the router matches another expansion",
   test: (pattern, _keys, groups, params) => {
     const name = /:([\w-]+)\*/.exec(pattern)?.[1];
-    return !!name && fmt(groups) === fmt({ [name]: groups[name] }) && !(name in params);
+    return (
+      name !== undefined && name in groups && Object.keys(groups).length === 1 && !(name in params)
+    );
   },
 };
 
