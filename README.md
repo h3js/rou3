@@ -380,17 +380,21 @@ Most routes compile without look-behind, so the output also works in RE2-family 
 - a segment that can be empty right before a catch-all followed by optional segments only (`/a/:p/**/:n(\d+)?`),
 - an optional group after a catch-all and an optional segment that can be empty (`/a/**/:y?{/b}?`).
 
-Fixed-length look-behinds work in JavaScript, PCRE and Perl. RE2-family engines also reject the duplicate-name alternations in the note below (they have no `DUPNAMES` option) and constraints that use syntax they lack.
+Fixed-length look-behinds work in JavaScript, PCRE and Perl. RE2-family engines also reject the look-aheads of a param shared inside one segment (below) and constraints that use syntax they lack.
 
-The output is **PCRE-compatible**: it uses `(?<name>...)` named groups and avoids JS-only constructs, so the generated `.source` also compiles in PCRE2 engines (`grep -P`, `rg -P`, `pcre2grep`, PHP `preg_*`) and Perl — not just JavaScript. In particular, trailing optional groups are compiled inline as `(?:...)?` instead of an alternation, so a param is never emitted twice as a duplicate named group (which PCRE2 rejects unless `PCRE2_DUPNAMES` is set):
+The output is **PCRE-compatible**: it uses `(?<name>...)` named groups and avoids JS-only constructs, so the generated `.source` also compiles in PCRE2 engines (`grep -P`, `rg -P`, `pcre2grep`, PHP `preg_*`) and Perl — not just JavaScript. Each param is declared once, since Node 22, PCRE2 (without `PCRE2_DUPNAMES`) and RE2 reject a duplicate named group even across alternatives. Optional groups compile inline as `(?:...)?`, and routes the router expands into several patterns (several groups, a group before more of the route) have those merged back into one:
 
 ```js
 routeToRegExp("/blog/:id(\\d+){-:title}?");
 // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
+routeToRegExp("/users{/:id}?/posts/:post");
+// /^\/users(?:\/(?<id>[^/]*))?\/posts\/(?:(?<post>[^/]+)\/?|\/)$/
 ```
 
+When the variants share a param inside one segment (`/files/:name{.:ext}?` is `/files/:name.:ext` or `/files/:name`), it is captured once, with a look-ahead holding each variant to its own rest of the segment: `/files/archive.tar.gz` gives `name: "archive.tar"`, `ext: "gz"`, as the router does.
+
 > [!NOTE]
-> Multi-group or mid-route optionals that cannot be inlined fall back to an alternation and may contain duplicate named groups, and so do a `:name*` before a `*` (`/a/:rest*/b/*`) and a group right after a bare `**` (`/a/**{.png}?`). That output is valid in JavaScript (per the TC39 duplicate-named-groups proposal) and Perl, but requires `PCRE2_DUPNAMES` on strict PCRE2 engines.
+> Where several variants of a route match one path, the captures are the first variant's, as the router's usually are, except next to an optional param, where the merge can't keep that order: `/:lang?/docs{/:section}?/:page` on `/docs/docs/p` may set `lang` where the router sets `section`. Shapes no merge fits still compile to an alternation that repeats a group name, which only engines supporting duplicate named groups accept: malformed ones (a modifier right before a group, `/:x?{.json}?`), and a `:name*` before a `*` that shares a param with the route without it (`/a/:rest*/:y?/*`).
 
 A route that declares the same param name twice (`/files/:path/**:path`; a bare `**` is the `_` param) throws a `rou3:` error, since engines disagree on whether a duplicate named group compiles.
 
@@ -410,7 +414,7 @@ regExpToRoute(/^\/?(?<_>[\s\S]*)\/_payload\.json\/?$/); // "/**/_payload.json"
 
 It targets the dialect `routeToRegExp()` emits — named groups `(?<name>...)`, `[^/]*` segment matchers, `[\s\S]*` catch-alls, `(?:/...)?` optional groups and the endings above. Bare (unnamed) capturing groups such as `(\d+)` are accepted too, and arbitrary regex inside an inline constraint `(...)` is preserved verbatim. Regexes from rou3 0.9.x (a plain `\/?` ending, `.*`/`.+` catch-alls, `[^/]+` params) still convert, except those for a catch-all inside an optional group (`/a{/:w*}?`, `/a{/:w+}?`). Every reversible output round-trips exactly: `routeToRegExp(regExpToRoute(regexp)).source === regexp.source`. Routes that compile to the same regex come back in one spelling: `/base/**:path` and `/base/:path+` both become `/base/:path+` (also with segments after it), `/**.md` becomes `/**/*.md`, and `/a/:x?/:y?` becomes `/a{/:x/:y?}?`.
 
-Anything outside that dialect throws a clear error rather than returning a corrupt pattern: structural look-arounds (`(?=…)`, `(?<=…)`) and backreferences, bare regex operators outside a constraint (`|`, `.`, `+`, `[…]`, …), match-affecting flags (`i`/`m`/`s`), the non-reversible alternation fallback described above, and inline constraints that can't be expressed as a route (e.g. one containing `/`).
+Anything outside that dialect throws a clear error rather than returning a corrupt pattern: structural look-arounds (`(?=…)`, `(?<=…)`) and backreferences, bare regex operators outside a constraint (`|`, `.`, `+`, `[…]`, …), match-affecting flags (`i`/`m`/`s`), merged variants it can't read back (an alternation between segments, a param held by look-aheads), and inline constraints that can't be expressed as a route (e.g. one containing `/`).
 
 ## Compiler
 

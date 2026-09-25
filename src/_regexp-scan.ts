@@ -4,7 +4,7 @@
 // One regex atom (JS syntax, no `u` flag): an escape (`\xHH`, `\uHHHH`, `\cX`,
 // `\k<name>` and digit runs whole), a character class, a group opener, a
 // quantifier, or a single char (`)` and `|` included).
-const ATOM =
+export const ATOM: RegExp =
   /\\(?:x[\da-f]{2}|u[\da-f]{4}|c[a-z]|k<[^>]*>|\d+|[^])|\[(?:\\[^]|[^\\\]])*\]?|\((?:\?(?:<?[=!]|<[^>]*>|[\w-]*:))?|(?:[*+?]|\{\d+(?:,\d*)?\})\??|[^]/gi;
 
 /** `[canEndInSlash, canBeEmpty]` of a regex item. */
@@ -113,6 +113,9 @@ export function parseLevel(
   level: string,
 ): [prefix: string, last: string, groups: string[]] | undefined {
   const tokens = tokenize(level);
+  // A merged body (`mergeBodies`) can alternate at this level; its segments
+  // don't line up with the tokens.
+  if (tokens.includes("|")) return;
   let end = tokens.length;
   while (end > 0 && OPTIONAL_GROUP.test(tokens[end - 1])) {
     end--;
