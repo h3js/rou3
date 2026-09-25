@@ -7,12 +7,11 @@ import {
   regexpCases as routes,
   LOOKBEHIND_ROUTES,
   PCRE2_DUPLICATE_NAME_ROUTES,
-  SUFFIX_ROUTES,
   SWEEP_DUPLICATE_NAME_PATTERNS,
   SWEEP_LOOKBEHIND_PATTERNS,
   duplicateGroupNames,
   hasLookbehind,
-  suffixSweepPatterns,
+  TWO_CATCH_ALL_ROUTES,
   sweepPaths,
   sweepPatterns,
 } from "./_regexp-cases.ts";
@@ -377,29 +376,21 @@ describe("regex-body scans", () => {
   });
 });
 
+// `addRoute` allows one `**` per route (a `:x+` / `:x*` before the last
+// segment is one); `routeToRegExp` rejects the others with the same error.
+describe("routeToRegExp: more than one `**`", () => {
+  it.each(TWO_CATCH_ALL_ROUTES)("%s throws like addRoute", (route) => {
+    const message = /^rou3: a route can have only one `\*\*`/;
+    expect(() => addRoute(createRouter(), "", route)).toThrow(message);
+    expect(() => routeToRegExp(route)).toThrow(message);
+  });
+});
+
 // A route expansion that declares a param name twice would emit a duplicate
 // named group. Engines disagree on whether that compiles: V8 (Node 24) accepts
 // it when one copy sits inside an alternative (the `**:name` / `:name+` ending),
 // Bun, Deno, PCRE2 and RE2 reject it. `routeToRegExp` rejects it up front so
 // every runtime gets the same `rou3:` error.
-describe("routeToRegExp: segments after `**`", () => {
-  // The router matches them from the end of the path; the regex form is not
-  // implemented yet, so every such route throws instead of emitting a regex
-  // that matches other paths than the router (it used to drop them, which is
-  // what the router did before it supported them).
-  const patterns = [...SUFFIX_ROUTES, ...suffixSweepPatterns()];
-
-  it("covers a real part of the sweep corpus", () => {
-    expect(suffixSweepPatterns().length).toBeGreaterThan(50);
-  });
-
-  it.each(patterns)("%s throws", (pattern) => {
-    expect(() => routeToRegExp(pattern)).toThrow(
-      /^rou3: routeToRegExp does not support segments after `\*\*`/,
-    );
-  });
-});
-
 describe("routeToRegExp: duplicate param names", () => {
   it.each([
     ["/files/:path/**:path", "path"],
@@ -449,8 +440,10 @@ function fmt(captures: Record<string, string>): string {
  * for `/a/:x/:y?`), its group is unset and the router reports `""`. `key` is
  * that group iff for some empty segment of `path`, the route can end right
  * after it, with `key` taking it: cut there and filled in (`/a/z`), the path
- * is routed with `key: "z"`. (`**` has its own, listed, zero-segment
- * difference.)
+ * is routed with `key: "z"`. After a `**`, segments count from the end of the
+ * path, so cutting it moves `key`: there it is filled in and the rest kept
+ * (`/**\/:x/:y?` on `/a///`: `/a/z//` gives `x: "z"`). (`**` has its own,
+ * listed, zero-segment difference.)
  */
 function isRequiredSegmentGap(
   router: ReturnType<typeof createRouter>,
@@ -467,7 +460,8 @@ function isRequiredSegmentGap(
     (segment, i) =>
       i > 0 &&
       segment === "" &&
-      findRoute(router, "", `${segments.slice(0, i).join("/")}/z`)?.params?.[key] === "z",
+      (findRoute(router, "", `${segments.slice(0, i).join("/")}/z`)?.params?.[key] === "z" ||
+        findRoute(router, "", segments.with(i, "z").join("/"))?.params?.[key] === "z"),
   );
 }
 
@@ -524,6 +518,28 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/a{/:x/**}?",
     "/a{/b/:x/**}?",
     "/:x/:y?/**",
+    // Segments after `**`: its group is unset where it matches no segment
+    // (with a prefix before it; at the root the leading slash doubles as the
+    // separator and `_` is `""`).
+    "/a/**/a",
+    "/a/**/:y",
+    "/a/**/*",
+    "/a/**/*.png",
+    "/a/**.png",
+    "/a/**/b{.json}?",
+    "/a/**/:y?",
+    "/a/**/:page?",
+    "/a/**/:n(\\d+)?",
+    "/**/:y?",
+    "/:x/**/a",
+    "/:x(\\d+)/**/:y",
+    "/a//**/b",
+    "/a/**//b",
+    "/a/:x?/**/b",
+    "/**/:x/:y?",
+    "/a/**/:y(\\d+)?",
+    "/**/:y{/c}?",
+    "/a/**/:y{/c}?",
   ].map((pattern) => [pattern, ZERO_SEGMENT_CATCH_ALL] as const),
   ...[
     "/:x?/*",

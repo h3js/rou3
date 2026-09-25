@@ -85,9 +85,11 @@ describe("regExpToRoute", () => {
     // segments), so the named catch-all comes back as `:name+`.
     expect(routeToRegExp("/base/**:path").source).toBe(routeToRegExp("/base/:path+").source);
     expect(regExpToRoute(routeToRegExp("/base/**:path"))).toBe("/base/:path+");
-    // `(?<_>.*)` is `**` only when it ends the route; `**` is terminal.
+    // A greedy `(?:/(?<_>…))?` is `**`, also with segments after it.
     expect(regExpToRoute(routeToRegExp("/a/**"))).toBe("/a/**");
-    expect(regExpToRoute(/^\/a(?:\/(?<_>.*))?\/b\/?$/)).toBe("/a/:_*/b");
+    expect(regExpToRoute(/^\/a(?:\/(?<_>.*))?\/b\/?$/)).toBe("/a/**/b");
+    expect(regExpToRoute(routeToRegExp("/a/**/b"))).toBe("/a/**/b");
+    expect(regExpToRoute(routeToRegExp("/a/:_*/b"))).toBe("/a/:_*/b");
     // A param named `_` is not `**`: the router leaves `:_*` unset on `/a/`
     // where `**` reports `""`, so the two compile to different regexes (the
     // lazy `)??` group) and each reverses to itself.
@@ -296,6 +298,7 @@ const KNOWN_NON_EQUIVALENT: Record<string, readonly [back: string, reason: strin
   "/a/:x?/*": ["/a{/:x/*}?", "the router gives a lone segment to `*`, the regex to `x`"],
   "/a/:x?/**": ["/a{/:x/**}?", 'the router reports `**` as `""` on `/a`, the regex not'],
   "/:x/:y?/**": ["/:x{/:y/**}?", 'the router reports `**` as `""` on `/a`, the regex not'],
+  "/a/:x?/**/b": ["/a{/:x/**}?/b", 'the router reports `**` as `""` on `/a/b`, the regex not'],
   "/a/:x?/:y(\\d+)?": [
     "/a{/:x/:y(\\d+)?}?",
     "the router gives a lone number to `y`, the regex to `x`",

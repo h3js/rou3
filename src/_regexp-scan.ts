@@ -99,8 +99,10 @@ export function tokenize(body: string): string[] {
 
 /**
  * Split a level into its head up to the last segment (empty, or ending in
- * `/`), that segment, and the inners of the optional groups after it (the
- * last one is the next level). `undefined` when a part's match can end in `/`
+ * `/` or in an optional group `(?:…/)?`), that segment, and the inners of the
+ * optional groups after it (the last one is the next level). The head may be
+ * anything, a catch-all with segments after it included: the endings don't
+ * depend on it. `undefined` when a part's match can end in `/`
  * (a constraint like `.+` or `[^.]+`): it would keep the slash lookup strips
  * (`/a/:x(.+)` matching `/a//` with `x: "/"`), and no rewritten ending rules
  * that out. The exception is a trailing catch-all (or `.*`): any of its
@@ -115,7 +117,10 @@ export function parseLevel(
   while (end > 0 && OPTIONAL_GROUP.test(tokens[end - 1])) {
     end--;
   }
-  const sep = tokens.slice(0, end).lastIndexOf("/");
+  // The last segment starts after a separator, or after an optional group
+  // that ends in one (`(?:(?<_>[\s\S]*)/)?`, a catch-all before it).
+  let sep = end - 1;
+  while (sep >= 0 && tokens[sep] !== "/" && !SEPARATOR_GROUP.test(tokens[sep])) sep--;
   const last = tokens.slice(sep + 1, end).join("");
   const groups = tokens.slice(end).map((group) => group.slice(4, -2));
   if (
@@ -135,6 +140,9 @@ export function isOptionalGroups(fragment: string): boolean {
   const tokens = tokenize(fragment);
   return tokens.length > 0 && tokens.every((token) => OPTIONAL_GROUP.test(token));
 }
+
+/** An optional group that ends in a separator, `(?:…/)?`. */
+const SEPARATOR_GROUP = /^\(\?:.*\/\)\?$/s;
 
 /** A whole-segment optional group `(?:/…)?`. */
 const OPTIONAL_GROUP = /^\(\?:\/.*\)\?$/s;

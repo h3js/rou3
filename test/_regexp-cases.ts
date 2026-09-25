@@ -1,7 +1,6 @@
 // Shared fixtures for routeToRegExp tests (interpreter + cross-engine PCRE checks).
 
 import { addRoute, createRouter } from "../src/index.ts";
-import type { Node } from "../src/types.ts";
 
 /** Captures by param name (`_N` groups as `"N"`), `undefined` when unset. */
 export type Captures = Readonly<Record<string, string | undefined>>;
@@ -641,6 +640,179 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/pathx"],
   },
+  // Segments after `**` match the end of the path, the `**` what is between
+  // (empty segments included). At the root the leading slash doubles as the
+  // separator, so `_` is `""` where it matches no segment, as in the router.
+  "/**/_payload.json": {
+    regex: /^\/?(?<_>[\s\S]*)\/_payload\.json\/?$/,
+    match: [
+      ["/_payload.json", { _: "" }],
+      ["//_payload.json", { _: "" }],
+      ["/blog/post/_payload.json", { _: "blog/post" }],
+      ["/blog/post/_payload.json/", { _: "blog/post" }],
+      ["/a//_payload.json", { _: "a/" }],
+      ["/a/\n/_payload.json", { _: "a/\n" }],
+    ],
+    noMatch: ["/", "/_payload.json//", "/_payload.jsonx", "/x_payload.json", "/_payload.json/x"],
+  },
+  // After a prefix, the separator stays with it (`/pathx/suffix` must not
+  // match); `_` is unset where it matches no segment (the router: `""`).
+  "/path/**/suffix": {
+    regex: /^\/path(?:\/(?<_>[\s\S]*))?\/suffix\/?$/,
+    match: [
+      ["/path/suffix", { _: undefined }, { _: "" }],
+      ["/path//suffix", { _: "" }],
+      ["/path/a/b/suffix", { _: "a/b" }],
+      ["/path/suffix/suffix/", { _: "suffix" }],
+    ],
+    noMatch: ["/path", "/pathsuffix", "/pathx/suffix", "/path/suffix/x", "/path/suffix//"],
+  },
+  "/base/**:path/suffix": {
+    regex: /^\/base\/(?<path>[\s\S]*)\/suffix\/?$/,
+    match: [
+      ["/base//suffix", { path: "" }],
+      ["/base/a/suffix", { path: "a" }],
+      ["/base/a/b/suffix/", { path: "a/b" }],
+    ],
+    noMatch: ["/base/suffix", "/base", "/basex/a/suffix"],
+  },
+  // The last segment is fixed by the path, so the greedy `**` can't take it.
+  "/a/**/b{.json}?": {
+    regex: /^\/a(?:\/(?<_>[\s\S]*))?\/b(?:\.json)?\/?$/,
+    match: [
+      ["/a/b", { _: undefined }, { _: "" }],
+      ["/a/b.json/", { _: undefined }, { _: "" }],
+      ["/a/x/b.json", { _: "x" }],
+      ["/a/b/b", { _: "b" }],
+    ],
+    noMatch: ["/a", "/ab", "/ab/b", "/a/b/c", "/a/b.jsonx"],
+  },
+  "/path/:rest+/suffix": {
+    regex: /^\/path\/(?<rest>[\s\S]*)\/suffix\/?$/,
+    match: [
+      ["/path/a/suffix", { rest: "a" }],
+      ["/path/a/b/suffix", { rest: "a/b" }],
+      ["/path//suffix", { rest: "" }],
+    ],
+    noMatch: ["/path", "/path/suffix", "/path/a"],
+  },
+  // A `:x+` / `:x*` before the last segment is a `**:x` in the tree; `:x*`
+  // also registers the route without it (lazy: `rest` unset on `/path/suffix`).
+  "/path/:rest*/suffix": {
+    regex: /^\/path(?:\/(?<rest>[\s\S]*))??\/suffix\/?$/,
+    match: [
+      ["/path/suffix", { rest: undefined }],
+      ["/path//suffix", { rest: "" }],
+      ["/path/a/b/suffix", { rest: "a/b" }],
+    ],
+    noMatch: ["/path", "/path/a", "/pathsuffix"],
+  },
+  "/path/:rest+/meta{.json}?": {
+    regex: /^\/path\/(?<rest>[\s\S]*)\/meta(?:\.json)?\/?$/,
+    match: [
+      ["/path/a/meta", { rest: "a" }],
+      ["/path/a/b/meta.json/", { rest: "a/b" }],
+    ],
+    noMatch: ["/path/meta", "/path/a/metax", "/path/secret"],
+  },
+  // `**<rest>` is `**/*<rest>`; a `*` after `**` takes one segment.
+  "/**/*.png": {
+    regex: /^\/?(?<_>[\s\S]*)\/(?<_0>[^/]*)\.png\/?$/,
+    match: [
+      ["/x.png", { "0": "x", _: "" }],
+      ["/.png", { "0": "", _: "" }],
+      ["/a/b/x.png", { "0": "x", _: "a/b" }],
+      ["/a/x.png/", { "0": "x", _: "a" }],
+    ],
+    noMatch: ["/", "/x.jpg", "/x.png/y"],
+  },
+  "/:id/**/:file(\\w+).json": {
+    regex: /^\/(?<id>[^/]*)(?:\/(?<_>[\s\S]*))?\/(?<file>\w+)\.json\/?$/,
+    match: [
+      ["/1/c.json", { id: "1", _: undefined, file: "c" }, { id: "1", _: "", file: "c" }],
+      ["/1/a/b/c.json", { id: "1", _: "a/b", file: "c" }],
+    ],
+    noMatch: ["/c.json", "/1/c-d.json", "/1/a/.json"],
+  },
+  "/**.md": {
+    regex: /^\/?(?<_>[\s\S]*)\/(?<_0>[^/]*)\.md\/?$/,
+    match: [
+      ["/readme.md", { "0": "readme", _: "" }],
+      ["/docs/guide/intro.md/", { "0": "intro", _: "docs/guide" }],
+    ],
+    noMatch: ["/", "/a.mdx", "/a.md/b"],
+  },
+  "/blog/**.json": {
+    regex: /^\/blog(?:\/(?<_>[\s\S]*))?\/(?<_0>[^/]*)\.json\/?$/,
+    match: [
+      ["/blog/post.json", { "0": "post", _: undefined }, { "0": "post", _: "" }],
+      ["/blog/a/post.json", { "0": "post", _: "a" }],
+    ],
+    noMatch: ["/blog", "/post.json", "/blogpost.json"],
+  },
+  // A last segment that can be empty gets the closed ending.
+  "/**/:file": {
+    regex: /^\/?(?<_>[\s\S]*)\/(?:(?<file>[^/]+)\/?|\/)$/,
+    match: [
+      ["/a", { _: "", file: "a" }],
+      ["/a/b/c", { _: "a/b", file: "c" }],
+      ["/a/b/", { _: "a", file: "b" }],
+      ["//", { _: "", file: undefined }, { _: "", file: "" }],
+      ["/a//", { _: "a", file: undefined }, { _: "a", file: "" }],
+    ],
+    noMatch: ["/"],
+  },
+  // A lone optional segment after `**` (or `:x*`): the router takes the
+  // route with it wherever it matches, so both fit in one optional group.
+  "/a/**/:page?": {
+    regex: /^\/a(?:\/(?:(?:(?<_>[\s\S]*)\/)?(?:(?<page>[^/]+)\/?|\/))?)?$/,
+    match: [
+      ["/a", { _: undefined, page: undefined }, { _: "" }],
+      ["/a/", { _: undefined, page: undefined }, { _: "" }],
+      ["/a/x", { _: undefined, page: "x" }, { _: "", page: "x" }],
+      ["/a/x/y", { _: "x", page: "y" }],
+      ["/a/x/y/", { _: "x", page: "y" }],
+      ["/a//", { _: undefined, page: undefined }, { _: "", page: "" }],
+    ],
+    noMatch: ["/ab", "/b"],
+  },
+  "/a/:x*/*": {
+    regex: /^\/a(?:\/(?:(?:(?<x>[\s\S]*)\/)?(?:(?<_0>[^/]+)\/?|\/))?)?$/,
+    match: [
+      ["/a", { "0": undefined, x: undefined }],
+      ["/a/b", { "0": "b", x: undefined }],
+      ["/a/b/c", { "0": "c", x: "b" }],
+      ["/a/b/c/d/", { "0": "d", x: "b/c" }],
+    ],
+    noMatch: ["/ab", "/b"],
+  },
+  // Other optionals right after a `**`: it is lazy, so they take the end
+  // of the path where they match, and `/?$` is exact (the `**` absorbs a
+  // stripped slash).
+  "/a/**/:n(\\d+)?": {
+    regex: /^\/a(?:\/(?<_>[\s\S]*?))??(?:\/(?<n>\d+))?\/?$/,
+    match: [
+      ["/a", { _: undefined, n: undefined }, { _: "" }],
+      ["/a/1", { _: undefined, n: "1" }, { _: "", n: "1" }],
+      ["/a/b/1", { _: "b", n: "1" }],
+      ["/a/b/c", { _: "b/c", n: undefined }],
+      ["/a/b/", { _: "b", n: undefined }],
+    ],
+    noMatch: ["/ab"],
+  },
+  // ... but not after a required catch-all, which takes a single segment
+  // where the optional one is absent (look-behind).
+  "/a/**:r/:y?": {
+    regex: /^\/a\/(?<r>[\s\S]*?)(?:\/(?<y>[^/]*))?(?:(?<=\/)\/|(?<!\/)\/?)$/,
+    match: [
+      ["/a/b", { r: "b", y: undefined }],
+      ["/a/b/", { r: "b", y: undefined }],
+      ["/a/b/c", { r: "b", y: "c" }],
+      ["/a//", { r: "", y: undefined }],
+      ["/a/b//", { r: "b", y: "" }],
+    ],
+    noMatch: ["/a", "/a/", "/ab"],
+  },
 };
 
 // Fixtures whose regex still ends in the look-behind trailing-slash suffix
@@ -658,6 +830,7 @@ export const LOOKBEHIND_ROUTES: ReadonlySet<string> = new Set([
   "/path/:id(\\d*)",
   "/files/:name([^.]+)",
   "/path/:x(\\S+)?",
+  "/a/**:r/:y?",
 ]);
 
 // Routes whose generated regex reuses the same named capture group across
@@ -693,6 +866,13 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
   // A constraint whose match can end in `/`.
   "/files/:name([^.]+)",
   "/path/:x(\\S+)?",
+  // A required catch-all (`**:r`, `:x+`) right before an optional segment:
+  // where that segment is absent the catch-all takes a single one, and
+  // telling a trailing slash from it needs the look-behind.
+  "/**:r/:y?",
+  "/a/**:r/:y?",
+  "/:x+/:y?",
+  "/a/:x+/:y?",
 ]);
 
 // Sweep patterns whose regex reuses a capture group name across alternation
@@ -731,11 +911,10 @@ export function duplicateGroupNames(source: string): string[] {
 /**
  * Pattern corpus for the router-vs-regex sweeps: every combination of the
  * segment forms below (depth <= 2, with and without a static prefix), plus the
- * fixtures above, minus the routes with segments after `**` (see
- * `SUFFIX_ROUTES`).
+ * fixtures above, minus the routes `addRoute` rejects (a second `**`).
  */
 export function sweepPatterns(): string[] {
-  return allSweepPatterns().filter((pattern) => !hasSegmentsAfterWildcard(pattern));
+  return allSweepPatterns().filter((pattern) => routerAccepts(pattern));
 }
 
 function allSweepPatterns(): string[] {
@@ -784,6 +963,30 @@ function allSweepPatterns(): string[] {
     "/a/:x?{/b/c}?",
     "/a/:x/:y(\\d+)?/:z?",
     "/a/:x(\\d*)/:y?",
+    // Segments after a catch-all (matched from the end of the path), with a
+    // param or empty segment on either side, several of them, optional ones
+    // after it (the router picks between the route with and without them).
+    "/:x/**/a",
+    "/:x(\\d+)/**/:y",
+    "/a/**/b/c",
+    "/**/:y/b",
+    "/**/:y(\\d+)",
+    "/a//**/b",
+    "/a/**//b",
+    "/a/:x?/**/b",
+    "/:x+/b/c",
+    "/a/:x*/b/:y",
+    "/**:r/:y(\\d+)",
+    "/**.png",
+    "/a/**.png",
+    "/**/x-*.png",
+    "/**/\\*",
+    "/**/b/:y?",
+    "/**/:x/:y?",
+    "/a/**/:y(\\d+)?",
+    "/**/:y{/c}?",
+    "/a/**/:y{/c}?",
+    "/**/b{/c}?",
     ...Object.keys(regexpCases),
   ]);
   // Optional segments nested in an inline group (`/a{/b/*}?`), including an
@@ -803,46 +1006,27 @@ function allSweepPatterns(): string[] {
 }
 
 /**
- * Routes with segments after `**` (a `:x+` / `:x*` before the last segment
- * becomes one): the router matches those segments from the end of the path,
- * which `routeToRegExp` does not support yet, so it throws. The sweeps leave
- * them out (`suffixSweepPatterns()` lists the ones they drop).
+ * Routes `addRoute` rejects: more than one `**` (a `:x+` / `:x*` before the
+ * last segment is one). `routeToRegExp` throws the same error for them.
  */
-export const SUFFIX_ROUTES: readonly string[] = [
-  "/**/_payload.json",
-  "/path/**/suffix",
-  "/base/**:path/suffix",
-  "/a/**/b{.json}?",
-  "/path/:rest+/suffix",
-  "/path/:rest*/suffix",
-  "/path/:rest+/meta{.json}?",
-  "/**/*.png",
-  "/:id/**/:file(\\w+).json",
-  "/**.md",
-  "/blog/**.json",
+export const TWO_CATCH_ALL_ROUTES: readonly string[] = [
+  "/**/**",
+  "/a/**/b/**:x",
+  "/a/:x+/b/:y+",
+  "/**/a/:x*",
+  "/a/:x*/**",
+  "/a/**/:y+",
+  "/**.md/**",
 ];
 
-/** Whether the router stores segments after a `**` for `pattern` (or rejects a second `**`). */
-export function hasSegmentsAfterWildcard(pattern: string): boolean {
-  const router = createRouter();
+/** Whether `addRoute` accepts `pattern`. */
+function routerAccepts(pattern: string): boolean {
   try {
-    addRoute(router, "", pattern);
-  } catch (error) {
-    if (/only one `\*\*`/.test((error as Error).message)) return true;
-    throw error;
+    addRoute(createRouter(), "", pattern);
+    return true;
+  } catch {
+    return false;
   }
-  const hasSuffix = (node: Node | undefined): boolean =>
-    !!node &&
-    (!!node.suffix ||
-      Object.values(node.static || {}).some(hasSuffix) ||
-      hasSuffix(node.param) ||
-      hasSuffix(node.wildcard));
-  return hasSuffix(router.root);
-}
-
-/** The sweep corpus patterns `sweepPatterns()` drops for `hasSegmentsAfterWildcard`. */
-export function suffixSweepPatterns(): string[] {
-  return allSweepPatterns().filter((pattern) => hasSegmentsAfterWildcard(pattern));
 }
 
 /** Every short path, including empty segments and runs of trailing slashes. */
