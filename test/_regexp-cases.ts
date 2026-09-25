@@ -12,7 +12,10 @@ export interface RegExpCase {
    * reports `""` for some groups the regex leaves unset).
    */
   match: ReadonlyArray<readonly [path: string, groups?: Captures, params?: Captures]>;
-  /** Paths neither the router nor the regex may match. */
+  /**
+   * Paths neither the router nor the regex may match. Paths with a `\n` are
+   * fed only to engines that take the input whole (not line by line).
+   */
   noMatch?: ReadonlyArray<string>;
 }
 
@@ -35,6 +38,7 @@ export const regexpCases: Record<string, RegExpCase> = {
     match: [
       ["/path/value", { param: "value" }],
       ["/path/value/", { param: "value" }],
+      ["/path/\n", { param: "\n" }],
       // An empty last segment takes the slash-only branch, which leaves
       // `param` unset where the router reports `""` (no look-behind, RE2-safe).
       ["/path//", { param: undefined }, { param: "" }],
@@ -52,6 +56,7 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/path//", { "0": "" }],
       ["/path/x", { "0": "x" }],
       ["/path/x/", { "0": "x" }],
+      ["/path/\r", { "0": "\r" }],
     ],
     noMatch: ["/pathx", "/path/x/y", "/path/x//"],
   },
@@ -97,7 +102,7 @@ export const regexpCases: Record<string, RegExpCase> = {
     match: [["/path/file-a-b.png", { "0": "a", "1": "b" }]],
   },
   "/path/**": {
-    regex: /^\/path(?:\/(?<_>(?:.*[^/])?\/*?))?\/?$/,
+    regex: /^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$/,
     match: [
       // The whole catch-all group is skipped, so the regex leaves `_` unset
       // while the router reports `""`.
@@ -108,11 +113,17 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/path/a/", { _: "a" }],
       ["/path/a//", { _: "a/" }],
       ["/path/anything/more", { _: "anything/more" }],
+      // The router splits on `/` only: line terminators are ordinary chars,
+      // mid-path and last alike (a JS `.` excludes all four).
+      ["/path/\n", { _: "\n" }],
+      ["/path/a\rb/c", { _: "a\rb/c" }],
+      ["/path/a/\u2028/", { _: "a/\u2028" }],
+      ["/path/\u2029x//", { _: "\u2029x/" }],
     ],
-    noMatch: ["/pathfoo", "/pathfoo/bar"],
+    noMatch: ["/pathfoo", "/pathfoo/bar", "/path\n/a", "/path\r/a"],
   },
   "/path/**/suffix": {
-    regex: /^\/path(?:\/(?<_>(?:.*[^/])?\/*?))?\/?$/,
+    regex: /^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$/,
     match: [
       ["/path/anything/more", { _: "anything/more" }],
       ["/path/suffix", { _: "suffix" }],
@@ -123,7 +134,7 @@ export const regexpCases: Record<string, RegExpCase> = {
   // analysis, `.*` stays greedy and swallows the stripped trailing slash
   // (`_: "b/"` on `/a/b/`, where the router reports `"b"`).
   "/a/**/b{.json}?": {
-    regex: /^\/a(?:\/(?<_>(?:.*[^/])?\/*?))?\/?$/,
+    regex: /^\/a(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$/,
     match: [
       ["/a", { _: undefined }, { _: "" }],
       ["/a/", { _: "" }],
@@ -136,7 +147,7 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/ab", "/ab/b"],
   },
   "/base/**:path": {
-    regex: /^\/base\/(?:\/|(?<path>(?:.*[^/]|\/)\/*?)\/?)$/,
+    regex: /^\/base\/(?:\/|(?<path>(?:[\s\S]*[^/]|\/)\/*?)\/?)$/,
     match: [
       ["/base/anything/more", { path: "anything/more" }],
       // One or more segments, and a segment may be empty. The router reports
@@ -147,11 +158,13 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/base///", { path: "/" }],
       ["/base/a/", { path: "a" }],
       ["/base/a//", { path: "a/" }],
+      ["/base/x\ry", { path: "x\ry" }],
+      ["/base/\n/\u2028//", { path: "\n/\u2028/" }],
     ],
     noMatch: ["/base", "/base/", "/basefoo", "/basefoo/bar"],
   },
   "/base/**:path/suffix": {
-    regex: /^\/base\/(?:\/|(?<path>(?:.*[^/]|\/)\/*?)\/?)$/,
+    regex: /^\/base\/(?:\/|(?<path>(?:[\s\S]*[^/]|\/)\/*?)\/?)$/,
     match: [["/base/anything/more", { path: "anything/more" }]],
   },
   "/static%3Apath/\\*/\\*\\*": {
@@ -159,7 +172,7 @@ export const regexpCases: Record<string, RegExpCase> = {
     match: [["/static%3Apath/*/**"]],
   },
   "/**": {
-    regex: /^\/?(?<_>(?:.*[^/])?\/*?)\/?$/,
+    regex: /^\/?(?<_>(?:[\s\S]*[^/])?\/*?)\/?$/,
     match: [
       ["/", { _: "" }],
       ["//", { _: "" }],
@@ -167,19 +180,25 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/a//", { _: "a/" }],
       ["/anything", { _: "anything" }],
       ["/any/deep/path", { _: "any/deep/path" }],
+      ["/\u2028\u2029", { _: "\u2028\u2029" }],
+      ["/a\n/b\r/", { _: "a\n/b\r" }],
     ],
   },
   "/**:path": {
-    regex: /^\/(?:\/|(?<path>(?:.*[^/]|\/)\/*?)\/?)$/,
+    regex: /^\/(?:\/|(?<path>(?:[\s\S]*[^/]|\/)\/*?)\/?)$/,
     match: [
       ["/anything", { path: "anything" }],
       ["/any/deep/path", { path: "any/deep/path" }],
+      ["/\r\n", { path: "\r\n" }],
     ],
     noMatch: ["/"],
   },
   "/:path+": {
-    regex: /^\/(?:\/|(?<path>(?:.*[^/]|\/)\/*?)\/?)$/,
-    match: [["/a/b", { path: "a/b" }]],
+    regex: /^\/(?:\/|(?<path>(?:[\s\S]*[^/]|\/)\/*?)\/?)$/,
+    match: [
+      ["/a/b", { path: "a/b" }],
+      ["/a\u2029b/", { path: "a\u2029b" }],
+    ],
     noMatch: ["/"],
   },
   "/path/:id(\\d+)": {
@@ -213,17 +232,18 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
   },
   "/path/:rest+": {
-    regex: /^\/path\/(?:\/|(?<rest>(?:.*[^/]|\/)\/*?)\/?)$/,
+    regex: /^\/path\/(?:\/|(?<rest>(?:[\s\S]*[^/]|\/)\/*?)\/?)$/,
     match: [
       ["/path/a/b", { rest: "a/b" }],
       ["/path/a", { rest: "a" }],
+      ["/path/\n\r", { rest: "\n\r" }],
     ],
   },
   // A `+`/`*` modifier before the last segment becomes a terminal `**:name` in
   // the tree; the segments after it are dropped (`/path/:rest+/suffix` is
   // `/path/**:rest`), and `*` additionally keeps the route without it.
   "/path/:rest+/suffix": {
-    regex: /^\/path\/(?:\/|(?<rest>(?:.*[^/]|\/)\/*?)\/?)$/,
+    regex: /^\/path\/(?:\/|(?<rest>(?:[\s\S]*[^/]|\/)\/*?)\/?)$/,
     match: [
       ["/path/a", { rest: "a" }],
       ["/path/a/b", { rest: "a/b" }],
@@ -231,13 +251,14 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/path", "/path/"],
   },
   "/path/:rest*": {
-    regex: /^\/path(?:\/(?<rest>(?:.*[^/])?\/*?))??\/?$/,
+    regex: /^\/path(?:\/(?<rest>(?:[\s\S]*[^/])?\/*?))??\/?$/,
     match: [
       ["/path/a/b", { rest: "a/b" }],
       ["/path/a/b/", { rest: "a/b" }],
       ["/path/a//", { rest: "a/" }],
       ["/path", { rest: undefined }],
       ["/path/", { rest: undefined }],
+      ["/path/a\n/b\r/", { rest: "a\n/b\r" }],
     ],
   },
   "/path/(\\d+)": {
@@ -245,13 +266,40 @@ export const regexpCases: Record<string, RegExpCase> = {
     match: [["/path/123", { "0": "123" }]],
   },
   // A trailing unnamed `(.*)` constraint must reverse to `(.*)`, not `:_0+`.
+  // Its `.` keeps its JS meaning (the router runs constraints in JS: no line
+  // terminators), so unlike a catch-all it is matched lazily to leave the
+  // stripped trailing slash out of the capture.
   "/path/(.*)": {
-    regex: /^\/path\/(?:\/|(?<_0>(?:.*[^/]|\/)\/*?)\/?)$/,
-    match: [["/path/a", { "0": "a" }]],
+    regex: /^\/path\/(?:\/|(?<_0>.+?)\/?)$/,
+    match: [
+      ["/path/a", { "0": "a" }],
+      ["/path/a/", { "0": "a" }],
+      ["/path//", { "0": undefined }, { "0": "" }],
+    ],
+    noMatch: ["/path", "/path/", "/path/a\nb"],
+  },
+  "/path/:x(.*)": {
+    regex: /^\/path\/(?:\/|(?<x>.+?)\/?)$/,
+    match: [
+      ["/path/a.b", { x: "a.b" }],
+      ["/path/a.b/", { x: "a.b" }],
+    ],
+    noMatch: ["/path", "/path/", "/path/a\nb"],
+  },
+  "/path/:x(.*)?": {
+    regex: /^\/path(?:\/(?<x>.*?))??\/?$/,
+    match: [
+      ["/path", { x: undefined }],
+      ["/path/", { x: undefined }],
+      ["/path//", { x: "" }],
+      ["/path/a", { x: "a" }],
+      ["/path/a/", { x: "a" }],
+    ],
+    noMatch: ["/path/a\nb"],
   },
   // A mid-route repeat stays terminal even when a trailing group follows it.
   "/path/:rest+/meta{.json}?": {
-    regex: /^\/path\/(?:\/|(?<rest>(?:.*[^/]|\/)\/*?)\/?)$/,
+    regex: /^\/path\/(?:\/|(?<rest>(?:[\s\S]*[^/]|\/)\/*?)\/?)$/,
     match: [
       ["/path/a", { rest: "a" }],
       ["/path/a/b", { rest: "a/b" }],
@@ -330,7 +378,7 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
   },
   "/api/**:test-id": {
-    regex: /^\/api\/(?:\/|(?<__rou3_esc_test_hid>(?:.*[^/]|\/)\/*?)\/?)$/,
+    regex: /^\/api\/(?:\/|(?<__rou3_esc_test_hid>(?:[\s\S]*[^/]|\/)\/*?)\/?)$/,
     match: [["/api/a/b", { "test-id": "a/b" }]],
     noMatch: ["/api", "/api/", "/apifoo"],
   },
@@ -440,13 +488,15 @@ export const regexpCases: Record<string, RegExpCase> = {
   // A root `:x*` (unlike `/**`) leaves `x` unset on `/`: the router takes the
   // route without it there.
   "/:path*": {
-    regex: /^(?:\/?(?<path>(?:.*[^/])?\/*?))??\/?$/,
+    regex: /^(?:\/?(?<path>(?:[\s\S]*[^/])?\/*?))??\/?$/,
     match: [
       ["/", { path: undefined }],
       ["//", { path: "" }],
       ["/a", { path: "a" }],
       ["/a/b/", { path: "a/b" }],
       ["/a/b//", { path: "a/b/" }],
+      ["/\n", { path: "\n" }],
+      ["/a\u2028b/", { path: "a\u2028b" }],
     ],
   },
   // Trailing optionals nested in an inline group get the same endings as
@@ -454,7 +504,7 @@ export const regexpCases: Record<string, RegExpCase> = {
   // inner `*` / `:x?` / `:x*` stays unset where the router takes the route
   // without it, and no look-behind is needed.
   "/path{/sub/**}?": {
-    regex: /^\/path(?:\/sub(?:\/(?<_>(?:.*[^/])?\/*?))?)?\/?$/,
+    regex: /^\/path(?:\/sub(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?)?\/?$/,
     match: [
       ["/path", { _: undefined }],
       ["/path/", { _: undefined }],
@@ -464,11 +514,12 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/path/sub/a/", { _: "a" }],
       ["/path/sub/a//", { _: "a/" }],
       ["/path/sub/a/b", { _: "a/b" }],
+      ["/path/sub/\ra\n/", { _: "\ra\n" }],
     ],
     noMatch: ["/path//", "/path/subx", "/path/other"],
   },
   "/path{/sub/:rest*}?": {
-    regex: /^\/path(?:\/sub(?:\/(?<rest>(?:.*[^/])?\/*?))??)?\/?$/,
+    regex: /^\/path(?:\/sub(?:\/(?<rest>(?:[\s\S]*[^/])?\/*?))??)?\/?$/,
     match: [
       ["/path", { rest: undefined }],
       ["/path/sub", { rest: undefined }],
@@ -476,6 +527,7 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/path/sub//", { rest: "" }],
       ["/path/sub/a/", { rest: "a" }],
       ["/path/sub/a/b//", { rest: "a/b/" }],
+      ["/path/sub/\u2028x/y", { rest: "\u2028x/y" }],
     ],
     noMatch: ["/path//", "/path/subx"],
   },
@@ -504,7 +556,7 @@ export const regexpCases: Record<string, RegExpCase> = {
   // An inline group holding a single optional segment adds nothing: it is the
   // same route as `/path/:rest*`.
   "/path{/:rest*}?": {
-    regex: /^\/path(?:\/(?<rest>(?:.*[^/])?\/*?))??\/?$/,
+    regex: /^\/path(?:\/(?<rest>(?:[\s\S]*[^/])?\/*?))??\/?$/,
     match: [
       ["/path", { rest: undefined }],
       ["/path/", { rest: undefined }],
@@ -700,5 +752,12 @@ export function sweepPaths(): string[] {
     }
   };
   walk("", 3);
+  // The router splits on `/` only, so line terminators are ordinary chars:
+  // alone, at either end of a segment, mid-path and last.
+  for (const lt of ["\n", "\r", "\u2028", "\u2029"]) {
+    for (const path of [`/${lt}`, `/a/${lt}`, `/a/${lt}b`, `/a${lt}/b`, `/a/b/x${lt}`]) {
+      paths.add(path).add(`${path}/`).add(`${path}//`);
+    }
+  }
   return [...paths];
 }

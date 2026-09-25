@@ -22,6 +22,9 @@ interface PcreTool {
   // PCRE2-family engines reject duplicate named groups unless PCRE2_DUPNAMES is
   // set; Perl accepts them. See PCRE2_DUPLICATE_NAME_ROUTES.
   strictDuplicateNames: boolean;
+  // Whether `match` sees the input whole. The grep-like tools read it line by
+  // line, so an input with a `\n` can't be tested there.
+  wholeInput: boolean;
   compile: (source: string) => CompileResult;
   match: (source: string, input: string) => boolean;
 }
@@ -51,6 +54,7 @@ function grepLike(
   patternArgs: (src: string) => string[],
 ): Omit<PcreTool, "name" | "strictDuplicateNames"> {
   return {
+    wholeInput: false,
     compile(source) {
       const r = run(cmd, patternArgs(source), { input: "" });
       return r.ok && r.status !== 2 ? "ok" : "error";
@@ -63,6 +67,7 @@ function grepLike(
 }
 
 const perl: Omit<PcreTool, "name" | "strictDuplicateNames"> = {
+  wholeInput: true,
   compile(source) {
     const r = run("perl", ["-e", "qr/$ENV{RE}/; 1"], { env: { ...process.env, RE: source } });
     return r.ok && r.status === 0 ? "ok" : "error";
@@ -83,6 +88,7 @@ const php: Omit<PcreTool, "name" | "strictDuplicateNames"> = (() => {
     return r.error ? null : r.stdout;
   };
   return {
+    wholeInput: true,
     compile: (source) =>
       call(source, "") === null ? "error" : call(source, "") === "E" ? "error" : "ok",
     match: (source, input) => call(source, input) === "1",
@@ -140,12 +146,14 @@ describe("routeToRegExp PCRE compatibility", () => {
         it(`compiles and matches "${route}"`, () => {
           expect(tool.compile(source), `${tool.name} should compile ${source}`).toBe("ok");
           for (const [input] of match) {
+            if (!tool.wholeInput && input.includes("\n")) continue;
             expect(
               tool.match(source, input),
               `${tool.name} should match ${JSON.stringify(input)}`,
             ).toBe(true);
           }
           for (const input of noMatch) {
+            if (!tool.wholeInput && input.includes("\n")) continue;
             expect(
               tool.match(source, input),
               `${tool.name} should not match ${JSON.stringify(input)}`,
@@ -198,10 +206,13 @@ describe("routeToRegExp RE2 compatibility (rg, Rust regex)", () => {
     }
     it(`compiles and matches "${route}"`, () => {
       expect(re2.compile(source), `should compile ${source}`).toBe("ok");
+      // `rg` reads its input line by line.
       for (const [input] of match) {
+        if (input.includes("\n")) continue;
         expect(re2.match(source, input), `should match ${JSON.stringify(input)}`).toBe(true);
       }
       for (const input of noMatch) {
+        if (input.includes("\n")) continue;
         expect(re2.match(source, input), `should not match ${JSON.stringify(input)}`).toBe(false);
       }
     });
@@ -211,9 +222,9 @@ describe("routeToRegExp RE2 compatibility (rg, Rust regex)", () => {
   // (asserted exact in test/regexp.test.ts) compiles in RE2 and matches the
   // same paths as in JS (which the JS sweep ties to `findRoute`); the pinned
   // ones really are rejected. One `rg` run per pattern, with the paths as
-  // input lines.
+  // input lines (so none with a `\n`).
   it("agrees with JS on the sweep corpus", () => {
-    const paths = sweepPaths();
+    const paths = sweepPaths().filter((path) => !path.includes("\n"));
     const mismatches: string[] = [];
     const compiled: string[] = [];
     for (const pattern of sweepPatterns()) {

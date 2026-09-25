@@ -91,12 +91,79 @@ describe("routeToRegExp", () => {
     expect(mismatches).toEqual([]);
   });
 
+  // The router splits paths on `/` only, so a line terminator is an ordinary
+  // char to it (`/admin/**:p` routes `/admin/x\ry` with `p: "x\ry"`). A JS `.`
+  // excludes `\n`, `\r`, U+2028 and U+2029, and other engines disagree on `\r`
+  // and U+2028, so a catch-all built on `.` lets a guard miss a routed path.
+  it("matches line terminators in catch-alls like findRoute", () => {
+    const routes = [
+      "/a/**",
+      "/a/**:p",
+      "/a/:p+",
+      "/a/:p*",
+      "/**",
+      "/**:p",
+      "/:p+",
+      "/:p*",
+      "/a{/v1/**}?",
+      "/a{/v1/:p*}?",
+      // Look-behind endings.
+      "/a{/v1/**:p}?",
+      "/a/:x(\\S+)/**:p",
+    ];
+    const paths: string[] = [];
+    for (const lt of ["\n", "\r", "\u2028", "\u2029"]) {
+      for (const path of [
+        `/${lt}`,
+        `/a/${lt}`,
+        `/a/x${lt}y`,
+        `/a/${lt}/b`,
+        `/a/b/x${lt}`,
+        `/a/b/${lt}${lt}`,
+        `/a/v1/${lt}`,
+        `/a/v1/x${lt}/y${lt}`,
+      ]) {
+        paths.push(path, `${path}/`, `${path}//`);
+      }
+    }
+    const mismatches: string[] = [];
+    let routed = 0;
+    for (const route of routes) {
+      const router = createRouter();
+      addRoute(router, "", route, true);
+      const regex = routeToRegExp(route);
+      for (const path of paths) {
+        const found = findRoute(router, "", path);
+        const match = path.match(regex);
+        const where = `${route} ${JSON.stringify(path)}`;
+        if (!found !== !match) {
+          mismatches.push(`${where} (${found ? "router" : "regex"} only)`);
+          continue;
+        }
+        if (!found || !match) continue;
+        routed++;
+        const groups = definedCaptures(normalizeGroups(match.groups));
+        const params = definedCaptures(found.params);
+        for (const key of new Set([...Object.keys(groups), ...Object.keys(params)])) {
+          // An unset group where the router reports `""` is the accepted gap.
+          if (groups[key] !== params[key] && !(groups[key] === undefined && params[key] === "")) {
+            mismatches.push(`${where} ${key}: ${JSON.stringify([groups[key], params[key]])}`);
+          }
+        }
+      }
+    }
+    expect(mismatches).toEqual([]);
+    expect(routed).toBeGreaterThan(200);
+  });
+
   // Constraints that can match `/` (`.+`, `[^.]+`, `\S+`) are not modeled
   // mid-path: the regex lets them span segments (`/a/:x(.+)` matches `/a/b/c`),
   // so the sweep above leaves them out. The trailing slash lookup strips must
   // still never land inside them: on every path with at most one segment after
   // the prefix, plus at most one trailing slash, regex and router agree on the
   // match and on the captures (an unset group stands for the router's `""`).
+  // A `.` the user wrote keeps its JS meaning (no line terminators), as in the
+  // router, which runs the constraint in JS.
   it("keeps the stripped trailing slash out of slash-capable constraints", () => {
     const units = [
       ":x(.+)",
@@ -113,7 +180,7 @@ describe("routeToRegExp", () => {
     const mismatches: string[] = [];
     for (const prefix of ["", "/a"]) {
       const paths = new Set([prefix || "/", `${prefix}/`]);
-      for (const seg of ["a", "b", "x.png", "pre-a", ""]) {
+      for (const seg of ["a", "b", "x.png", "pre-a", "", "a\nb", "\u2028", "x\r.png"]) {
         paths.add(`${prefix}/${seg}`).add(`${prefix}/${seg}/`);
       }
       for (const unit of units) {

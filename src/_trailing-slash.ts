@@ -12,17 +12,25 @@ import { canBeEmpty, canEndInSlash, tokenize } from "./_regexp-scan.ts";
 // look-behind free and only the rest fall back to `LOOKBEHIND_SUFFIX`.
 const LOOKBEHIND_SUFFIX = "(?:(?<=/)/|(?<!/)/?)$";
 
-// Catch-all bodies for the look-behind-free endings, in place of `.*`: they
-// match the same strings, minus one trailing slash left for the `/?$` after
-// them (`a/b/` captures `a/b`, `a//` captures `a/`). `(?:.*[^/])?` runs
-// greedily to the last non-slash char and only the run of trailing slashes is
-// taken lazily, so a lazy step per char (`.*?`, several times slower on long
-// paths) is paid per trailing slash only. `ANY_TAIL` may be empty, `SOME_TAIL`
-// may not (a `//` tail gives `/`). Unlike `.`, `[^/]` also matches a line
-// terminator, so one is accepted as the last non-slash char (the router takes
-// line terminators anywhere; `.*` rejects them elsewhere).
-const ANY_TAIL = "(?:.*[^/])?/*?";
-const SOME_TAIL = "(?:.*[^/]|/)/*?";
+// Catch-all bodies for the look-behind-free endings, in place of `[\s\S]*`:
+// they match the same strings, minus one trailing slash left for the `/?$`
+// after them (`a/b/` captures `a/b`, `a//` captures `a/`). `(?:[\s\S]*[^/])?`
+// runs greedily to the last non-slash char and only the run of trailing
+// slashes is taken lazily, so a lazy step per char (`[\s\S]*?`, several times
+// slower on long paths) is paid per trailing slash only. `ANY_TAIL` may be
+// empty, `SOME_TAIL` may not (a `//` tail gives `/`).
+const ANY_TAIL = "(?:[\\s\\S]*[^/])?/*?";
+const SOME_TAIL = "(?:[\\s\\S]*[^/]|/)/*?";
+
+/**
+ * `[possibly empty, non-empty]` tail bodies for a trailing whole-part capture
+ * of `body`: rou3's catch-all `[\s\S]*`, or a `.*` constraint. The router runs
+ * a constraint in JS, where `.` excludes line terminators, so `.*` keeps its
+ * `.` (`[^/]` would take one as the last char) and is matched lazily instead.
+ */
+function tails(body: string): readonly [any: string, some: string] {
+  return body === ".*" ? [".*?", ".+?"] : [ANY_TAIL, SOME_TAIL];
+}
 
 /**
  * Append the trailing-slash rule to a route regex `body`, rewriting its ending
@@ -44,8 +52,8 @@ const SOME_TAIL = "(?:.*[^/]|/)/*?";
  *   non-empty branch with an optional slash and an empty branch with exactly
  *   one. That branch leaves the group unset where the router reports `""`.
  *
- * A trailing catch-all `.*` becomes `ANY_TAIL` / `SOME_TAIL` in these endings,
- * so it never captures the slash `/?$` strips.
+ * A trailing catch-all `[\s\S]*` (or `(.*)` constraint) gets a tail body from
+ * `tails()` in these endings, so it never captures the slash `/?$` strips.
  *
  * Anything else keeps the look-behind suffix. That includes a required
  * empty-capable segment followed by optional ones (`/a/:x/:y?`): the path must
@@ -60,7 +68,7 @@ const SOME_TAIL = "(?:.*[^/]|/)/*?";
  */
 export function withTrailingSlash(body: string, starStar = false): string {
   // Root catch-all (`/**`, `/:x*`): every path matches. `:x*` is unset on `/`.
-  const root = /^\/\?\(\?<(\w+)>\.\*\)$/.exec(body);
+  const root = /^\/\?\(\?<(\w+)>\[\\s\\S\]\*\)$/.exec(body);
   if (root) {
     return starStar ? `/?(?<${root[1]}>${ANY_TAIL})/?$` : `(?:/?(?<${root[1]}>${ANY_TAIL}))??/?$`;
   }
@@ -101,8 +109,8 @@ export function withTrailingSlash(body: string, starStar = false): string {
   // A part whose match can end in `/` (a constraint like `.+` or `[^.]+`) would
   // keep the slash lookup strips (`/a/:x(.+)` matching `/a//` with `x: "/"`),
   // and none of the endings below rules that out. The exception is a trailing
-  // catch-all `.*`: any of its matches minus a trailing slash is still one, and
-  // its endings below leave that slash out of the capture.
+  // catch-all (or `.*`): any of its matches minus a trailing slash is still
+  // one, and its endings below leave that slash out of the capture.
   if (parts.some((part, i) => canEndInSlash(part) && !(i === last && CATCH_ALL.test(part)))) {
     return body + LOOKBEHIND_SUFFIX;
   }
@@ -112,14 +120,14 @@ export function withTrailingSlash(body: string, starStar = false): string {
   }
 
   if (last === 0) {
-    const param = /^\(\?<(\w+)>(\[\^\/\]\*|\.\*)\)$/.exec(parts[0]);
+    const param = /^\(\?<(\w+)>(\[\^\/\]\*|\[\\s\\S\]\*|\.\*)\)$/.exec(parts[0]);
     if (!param) {
       return body + LOOKBEHIND_SUFFIX;
     }
     const head = level.slice(0, level.length - parts[0].length);
-    return param[2] === ".*"
-      ? `${head}(?:/|(?<${param[1]}>${SOME_TAIL})/?)$`
-      : `${head}(?:(?<${param[1]}>[^/]+)/?|/)$`;
+    return param[2] === "[^/]*"
+      ? `${head}(?:(?<${param[1]}>[^/]+)/?|/)$`
+      : `${head}(?:/|(?<${param[1]}>${tails(param[2])[1]})/?)$`;
   }
   // An empty-capable required segment or optional sibling before the last
   // group, or a last segment after a separator inside its group
@@ -133,10 +141,11 @@ export function withTrailingSlash(body: string, starStar = false): string {
   // Rebuild from the innermost level out: a nested group can only be taken
   // with the ones around it, so making each lazy never shifts a value. A group
   // that can't be empty has a single parse and stays as is.
-  let out = CATCH_ALL.test(level) ? level.replace(".*", ANY_TAIL) : level;
+  const tail = CATCH_ALL.exec(level);
+  let out = tail ? `(?<${tail[1]}>${tails(tail[2])[0]})` : level;
   for (let i = prefixes.length - 1; i >= 0; i--) {
     const greedy =
-      !canBeEmpty(out) || (starStar && i === prefixes.length - 1 && level === "(?<_>.*)");
+      !canBeEmpty(out) || (starStar && i === prefixes.length - 1 && level === "(?<_>[\\s\\S]*)");
     out = `${prefixes[i]}(?:/${out})?${greedy ? "" : "?"}`;
   }
   return `${out}/?$`;
@@ -154,5 +163,8 @@ export function isOptionalGroups(fragment: string): boolean {
 /** A whole-segment optional group `(?:/…)?`. */
 const OPTIONAL_GROUP = /^\(\?:\/.*\)\?$/s;
 
-/** A whole-part catch-all capture (`**`, `**:x`, `:x+`, `:x*`, `(.*)`). */
-const CATCH_ALL = /^\(\?<\w+>\.\*\)$/;
+/**
+ * A whole-part catch-all capture (`**`, `**:x`, `:x+`, `:x*`), or a `(.*)`
+ * constraint: `[name, body]`.
+ */
+const CATCH_ALL = /^\(\?<(\w+)>(\[\\s\\S\]\*|\.\*)\)$/;

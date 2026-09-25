@@ -9,6 +9,12 @@ import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcard
 import { expandModifiers, splitRoute } from "./operations/_utils.ts";
 import { isOptionalGroups, withTrailingSlash } from "./_trailing-slash.ts";
 
+// Catch-all body. The router splits paths on `/` only, so a catch-all takes
+// any char, line terminators included; `.` would not (JS excludes `\n`, `\r`,
+// U+2028 and U+2029, PCRE and RE2 by default only `\n`). `[\s\S]` is any char
+// in all of them.
+const ANY = "[\\s\\S]*";
+
 /**
  * Convert a rou3 route pattern into an anchored {@link RegExp}.
  *
@@ -133,12 +139,12 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
       return;
     }
     // If the base segment ends in a greedy, open-ended capture (`[^/]*` from a
-    // `*` wildcard / unconstrained param, or `.*`/`.+`), appending `(?:tail)?`
-    // lets that capture swallow the optional literal instead of leaving it out
-    // — changing the captured value (`/media/*{.webp}?` would capture the whole
-    // `photo.webp` instead of `photo`). Fall back to alternation, which anchors
-    // the literal outside the capture in one branch.
-    if (/(?:\[\^\/\]|\.)[*+]\)?$/.test(prefix)) {
+    // `*` wildcard / unconstrained param, or `.*`/`.+`/`[\s\S]*`), appending
+    // `(?:tail)?` lets that capture swallow the optional literal instead of
+    // leaving it out — changing the captured value (`/media/*{.webp}?` would
+    // capture the whole `photo.webp` instead of `photo`). Fall back to
+    // alternation, which anchors the literal outside the capture in one branch.
+    if (/(?:\[\^\/\]|\[\\s\\S\]|\.)[*+]\)?$/.test(prefix)) {
       return;
     }
     const k = prefix.length;
@@ -269,17 +275,17 @@ function routeToRegExpSegments(
       // The separator before a catch-all must stay anchored to the prefix: a
       // bare optional `/?` would let `/api/**` match `/apifoo`. `**` matches
       // zero or more segments (`/api` too), `**:name` one or more. A segment may
-      // be empty, so one-or-more is the separator plus `.*` (`/api//` reaches
+      // be empty, so one-or-more is the separator plus `ANY` (`/api//` reaches
       // `/api/**:p` with `p: ""`; `/api/` is `/api` after trailing stripping).
       // A bare `**` is the `_` param (`params._` in the router).
       const name = groupName(segment === "**" ? "_" : segment.slice(3));
       starStar = segment === "**";
       if (!starStar) {
-        reSegments.push(`(?<${name}>.*)`);
+        reSegments.push(`(?<${name}>${ANY})`);
       } else if (reSegments.length > 0) {
-        reSegments.push(`${reSegments.pop()}(?:/(?<_>.*))?`);
+        reSegments.push(`${reSegments.pop()}(?:/(?<_>${ANY}))?`);
       } else {
-        reSegments.push("?(?<_>.*)");
+        reSegments.push(`?(?<_>${ANY})`);
       }
       break;
     } else if (
@@ -325,7 +331,7 @@ function routeToRegExpSegments(
             );
           } else {
             reSegments.push(
-              mod === "+" ? `${prevMod}/(?<${name}>.*)` : `${prevMod}(?:/(?<${name}>.*))?`,
+              mod === "+" ? `${prevMod}/(?<${name}>${ANY})` : `${prevMod}(?:/(?<${name}>${ANY}))?`,
             );
           }
         } else {
@@ -334,7 +340,7 @@ function routeToRegExpSegments(
             reSegments.push(mod === "+" ? `?(?<${name}>${repeated})` : `?(?<${name}>${repeated})?`);
           } else {
             // `+` needs at least one segment, so its separator is required.
-            reSegments.push(mod === "+" ? `(?<${name}>.*)` : `?(?<${name}>.*)`);
+            reSegments.push(mod === "+" ? `(?<${name}>${ANY})` : `?(?<${name}>${ANY})`);
           }
         }
 

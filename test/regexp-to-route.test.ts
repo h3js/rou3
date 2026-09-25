@@ -7,6 +7,9 @@ import {
   sweepPatterns,
 } from "./_regexp-cases.ts";
 
+// The look-behind trailing-slash suffix (as `RegExp#source` spells it).
+const LB = "(?:(?<=\\/)\\/|(?<!\\/)\\/?)$";
+
 describe("regExpToRoute", () => {
   // Every fixture route -> regex -> route must round-trip (its regex, converted
   // back, produces a route whose regex is identical) and route the same way:
@@ -104,6 +107,51 @@ describe("regExpToRoute", () => {
     // bare optional separator (`\/?`). Keep parsing that form.
     expect(regExpToRoute(/^\/path\/?(?<_>.*)\/?$/)).toBe("/path/**");
     expect(regExpToRoute(/^\/base\/?(?<path>.+)\/?$/)).toBe("/base/**:path");
+  });
+
+  // Released versions built catch-alls on `.` (`.*` / `.+`), where
+  // `routeToRegExp` now emits `[\s\S]*`. Their output still reverses to an
+  // equivalent route: `[source, route it was emitted for, reversed route]`.
+  it.each([
+    // main: look-behind trailing-slash suffix.
+    ["^\\/path(?:\\/(?<_>.*))?" + LB, "/path/**", "/path/**"],
+    ["^\\/base\\/(?<p>.*)" + LB, "/base/**:p", "/base/:p+"],
+    ["^\\/(?<p>.*)" + LB, "/:p+", "/:p+"],
+    ["^\\/?(?<_>.*)" + LB, "/**", "/**"],
+    ["^\\/?(?<x>.*)" + LB, "/:x*", "/:x*"],
+    ["^\\/a(?:\\/(?<x>.*))?" + LB, "/a/:x*", "/a/:x*"],
+    ["^\\/a(?:\\/b\\/(?<r>.*))?" + LB, "/a{/b/**:r}?", "/a{/b/:r+}?"],
+    ["^\\/a(?:\\/b(?:\\/(?<_>.*))?)?" + LB, "/a{/b/**}?", "/a{/b/**}?"],
+    ["^\\/a\\/(?<y>[^/]*)(?:\\/(?<_>.*))?" + LB, "/a/:y/**", "/a/:y/**"],
+    // 0.9.x: plain `\/?` ending, `.+` for one-or-more.
+    ["^\\/?(?<_>.*)\\/?$", "/**", "/**"],
+    ["^\\/?(?<x>.*)\\/?$", "/:x*", "/:x*"],
+    ["^\\/?(?<p>.+)\\/?$", "/**:p", "/**:p"],
+    ["^\\/a\\/(?<x>.+)\\/?$", "/a/:x+", "/a/:x+"],
+    ["^\\/a(?:\\/(?<x>.*))?\\/?$", "/a/:x*", "/a/:x*"],
+    ["^\\/a(?:\\/b\\/?(?<r>.+))?\\/?$", "/a{/b/**:r}?", "/a{/b/**:r}?"],
+    ["^\\/a(?:\\/b\\/?(?<_>.*))?\\/?$", "/a{/b/**}?", "/a{/b/**}?"],
+  ])("reverses %s", (source, route, back) => {
+    expect(regExpToRoute(source)).toBe(back);
+    expect(routingDiffs(route, back, pathsUnder(route))).toEqual([]);
+  });
+
+  // rou3's catch-alls match any char (`[\s\S]*`); a `.*` is a constraint the
+  // user wrote, and keeps its own ending, so the two no longer collide.
+  it("tells a `(.*)` constraint apart from a catch-all", () => {
+    for (const route of [
+      "/a/:x(.*)",
+      "/a/:x(.*)?",
+      "/:x(.*)",
+      "/:x(.*)?",
+      "/a/(.*)",
+      "/a/:x+",
+      "/a/:x*",
+      "/:x+",
+      "/:x*",
+    ]) {
+      expect(regExpToRoute(routeToRegExp(route)), route).toBe(route);
+    }
   });
 
   it("accepts the two-trailing-slash suffix emitted by older versions (#209)", () => {
@@ -223,12 +271,11 @@ describe("regExpToRoute", () => {
 
 // Routes whose reversal is not equivalent, with the route they come back as.
 const KNOWN_NON_EQUIVALENT: Record<string, readonly [back: string, reason: string]> = {
-  // Not modeled by routeToRegExp (see AGENTS.md): the tree splits on `/`
-  // before testing a constraint, the regex doesn't, so both compile to the
-  // same catch-all regex.
-  "/:x(.*)": ["/:x+", "a constraint that can match `/` comes back as a catch-all"],
-  "/a/:x(.*)": ["/a/:x+", "a constraint that can match `/` comes back as a catch-all"],
-  "/a/:x(.*)?": ["/a/:x*", "a constraint that can match `/` comes back as a catch-all"],
+  // A constraint spelled like rou3's catch-all body compiles to the catch-all
+  // regex (constraints that can match `/` are not modeled, see AGENTS.md).
+  "/:x([\\s\\S]*)": ["/:x+", "a `[\\s\\S]*` constraint comes back as a catch-all"],
+  "/a/:x([\\s\\S]*)": ["/a/:x+", "a `[\\s\\S]*` constraint comes back as a catch-all"],
+  "/a/:x([\\s\\S]*)?": ["/a/:x*", "a `[\\s\\S]*` constraint comes back as a catch-all"],
 };
 
 /** Sweep paths, also under the route's leading static segments (`/path/…`). */

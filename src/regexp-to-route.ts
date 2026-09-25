@@ -1,8 +1,9 @@
 // Inverse of `routeToRegExp()`: parse an anchored, PCRE-compatible RegExp back
 // into a rou3 route pattern. Targets the dialect emitted by `routeToRegExp()`
-// (named groups `(?<name>...)`, `[^/]+`/`[^/]*` segment matchers, `.*`/`.+`
-// catch-alls, `(?:/...)?` optional groups, the trailing-slash suffix). Hand-written regexes that follow the
-// same conventions convert too; constructs outside the dialect throw.
+// (named groups `(?<name>...)`, `[^/]+`/`[^/]*` segment matchers, `[\s\S]*`
+// catch-alls (`.*`/`.+` in older versions), `(?:/...)?` optional groups, the
+// trailing-slash suffix). Hand-written regexes that follow the same
+// conventions convert too; constructs outside the dialect throw.
 
 import { fromGroupName } from "./_group-names.ts";
 
@@ -57,10 +58,15 @@ export function regExpToRoute(regexp: RegExp | string): string {
   if (rootRepeat) {
     return `/:${fromGroupName(rootRepeat[1])}*`;
   }
+  // A lazy `.*` ending is a `(.*)` constraint; older versions emitted `.*`
+  // for catch-alls too, so elsewhere a whole `.*` still reads as one.
+  const dotConstraint = REQUIRED_DOT.test(src) || TRAILING_DOT.test(src);
   src = src
     .replace(REQUIRED_PARAM, "(?<$1>[^/]*)\\/?")
-    .replace(REQUIRED_CATCH_ALL, "(?<$1>.*)\\/?")
-    .replace(TRAILING_CATCH_ALL, "(?<$1>.*)$2\\/?");
+    .replace(REQUIRED_CATCH_ALL, "(?<$1>[\\s\\S]*)\\/?")
+    .replace(TRAILING_CATCH_ALL, "(?<$1>[\\s\\S]*)$2\\/?")
+    .replace(REQUIRED_DOT, "(?<$1>.*)\\/?")
+    .replace(TRAILING_DOT, "(?<$1>.*)$2\\/?");
   if (src.endsWith(TRAILING_SLASH)) src = src.slice(0, -TRAILING_SLASH.length);
   else if (src.endsWith(LEGACY_TRAILING_SLASHES)) {
     src = src.slice(0, -LEGACY_TRAILING_SLASHES.length);
@@ -70,26 +76,41 @@ export function regExpToRoute(regexp: RegExp | string): string {
     return "/";
   }
 
-  return "/" + parseSegments(src, true).join("/");
+  return "/" + parseSegments(src, true, !dotConstraint).join("/");
 }
 
 // The look-behind-free endings `withTrailingSlash` emits, as `RegExp#source`
 // spells them (`x` stands for any group name):
 // - a required `:x`: `(?:(?<x>[^/]+)\/?|\/)`
-// - a required catch-all (`**:x`, `:x+`): `(?:\/|(?<x>(?:.*[^/]|\/)\/*?)\/?)`
-// - a trailing catch-all, possibly inside optional groups: `(?<x>(?:.*[^/])?\/*?)`
-// - a root `:x*`, whole: `(?:\/?(?<x>(?:.*[^/])?\/*?))??\/?`
+// - a required catch-all (`**:x`, `:x+`): `(?:\/|(?<x>(?:[\s\S]*[^/]|\/)\/*?)\/?)`
+// - a trailing catch-all, possibly inside optional groups: `(?<x>(?:[\s\S]*[^/])?\/*?)`
+// - a root `:x*`, whole: `(?:\/?(?<x>(?:[\s\S]*[^/])?\/*?))??\/?`
+// - a required `(.*)` constraint: `(?:\/|(?<x>.+?)\/?)`
+// - a trailing optional one, possibly inside optional groups: `(?:\/(?<x>.*?))??`
 const REQUIRED_PARAM = /\(\?:\(\?<(\w+)>\[\^\/\]\+\)\\\/\?\|\\\/\)$/;
-const REQUIRED_CATCH_ALL = /\(\?:\\\/\|\(\?<(\w+)>\(\?:\.\*\[\^\/\]\|\\\/\)\\\/\*\?\)\\\/\?\)$/;
-const TRAILING_CATCH_ALL = /\(\?<(\w+)>\(\?:\.\*\[\^\/\]\)\?\\\/\*\?\)((?:\)\?\??)*)\\\/\?$/;
-const ROOT_REPEAT = /^\(\?:\\\/\?\(\?<(\w+)>\(\?:\.\*\[\^\/\]\)\?\\\/\*\?\)\)\?\?\\\/\?$/;
+const REQUIRED_CATCH_ALL =
+  /\(\?:\\\/\|\(\?<(\w+)>\(\?:\[\\s\\S\]\*\[\^\/\]\|\\\/\)\\\/\*\?\)\\\/\?\)$/;
+const TRAILING_CATCH_ALL =
+  /\(\?<(\w+)>\(\?:\[\\s\\S\]\*\[\^\/\]\)\?\\\/\*\?\)((?:\)\?\??)*)\\\/\?$/;
+const ROOT_REPEAT = /^\(\?:\\\/\?\(\?<(\w+)>\(\?:\[\\s\\S\]\*\[\^\/\]\)\?\\\/\*\?\)\)\?\?\\\/\?$/;
+const REQUIRED_DOT = /\(\?:\\\/\|\(\?<(\w+)>\.\+\?\)\\\/\?\)$/;
+const TRAILING_DOT = /(?<=\(\?:\\\/)\(\?<(\w+)>\.\*\?\)(\)\?\?(?:\)\?\??)*)\\\/\?$/;
+
+/**
+ * Whether a whole group `body` is a catch-all: `[\s\S]*`, or `.*` as older
+ * versions emitted it (`dot`), where it reads the same as a `(.*)` constraint.
+ */
+function isCatchAll(body: string, dot: boolean): boolean {
+  return body === "[\\s\\S]*" || (dot && body === ".*");
+}
 
 /**
  * Parse a regex body (segments after `\/`, optional groups) into route
  * segments. `atEnd`: whether the body ends the route, where a trailing
- * `(?:\/(?<_>.*))?` is `**`.
+ * `(?:\/(?<_>[\s\S]*))?` is `**`. `dot`: whether a whole `.*` is a catch-all
+ * (see `isCatchAll`).
  */
-function parseSegments(src: string, atEnd: boolean): string[] {
+function parseSegments(src: string, atEnd: boolean, dot: boolean): string[] {
   const segments: string[] = [];
   const n = src.length;
   let i = 0;
@@ -104,27 +125,28 @@ function parseSegments(src: string, atEnd: boolean): string[] {
       }
       const lazy = src[end + 1] === "?";
       const next = end + (lazy ? 2 : 1);
-      applyOptional(segments, src.slice(i + 3, end - 1), atEnd && next === n, lazy);
+      applyOptional(segments, src.slice(i + 3, end - 1), atEnd && next === n, lazy, dot);
       i = next;
       continue;
     }
 
-    // Catch-all unit: `/?(?<name>.*)` or `/?(?<name>.+)` at the end. Emitted by
-    // `routeToRegExp` only for a root `/**`; older versions used it after any
-    // prefix, so it is still accepted as input.
+    // Catch-all unit at the end: `/?(?<_>[\s\S]*)`, emitted by `routeToRegExp`
+    // only for a root `/**`. Older versions used it after any prefix, with
+    // `.*` (`**`, or a root `:name*`) and `.+` (`**:name`), so those forms are
+    // still accepted as input.
     if (src.startsWith("\\/?", i)) {
       const g = matchNamedGroup(src, i + 3);
-      if (g && g.end === n && (g.body === ".*" || g.body === ".+")) {
-        segments.push(g.name === "_" ? "**" : `**:${g.name}`);
+      if (g && g.end === n && (g.body === ".+" || isCatchAll(g.body, dot))) {
+        segments.push(g.body === ".+" ? `**:${g.name}` : g.name === "_" ? "**" : `:${g.name}*`);
         break;
       }
     }
 
-    // One-or-more catch-all at the end: `/(?<name>.*)` (`**:name` / `:name+`).
-    // An unnamed `(?<_N>.*)` is a `(.*)` constraint, not a param name.
+    // One-or-more catch-all at the end: `/(?<name>[\s\S]*)` (`**:name` /
+    // `:name+`). An unnamed `(?<_N>…)` is a constraint, not a param name.
     if (src.startsWith("\\/", i)) {
       const g = matchNamedGroup(src, i + 2);
-      if (g && g.end === n && g.body === ".*" && !/^_\d+$/.test(g.name)) {
+      if (g && g.end === n && isCatchAll(g.body, dot) && !/^_\d+$/.test(g.name)) {
         segments.push(`:${g.name}+`);
         break;
       }
@@ -217,26 +239,32 @@ const LEGACY_TRAILING_SLASHES = "(?:\\/\\/|(?<!\\/)\\/?)";
 const BARE_META = new Set([".", "^", "$", "*", "+", "?", "|", "[", "]", "{", "}", ")"]);
 
 /** Reverse a `(?:...)?` optional unit into route syntax, appending to `segments`. */
-function applyOptional(segments: string[], inner: string, last: boolean, lazy: boolean): void {
+function applyOptional(
+  segments: string[],
+  inner: string,
+  last: boolean,
+  lazy: boolean,
+  dot: boolean,
+): void {
   if (inner.startsWith("\\/")) {
     const rest = inner.slice(2);
     const g = matchNamedGroup(rest, 0);
     if (g && g.end === rest.length) {
-      // A trailing greedy `(?:/(?<_>.*))?` is the `**` catch-all. The lazy form
-      // is a param named `_` (`:_*`), which the router leaves unset on `/a/`
-      // where `**` reports `""`. (Only at the end: `**` is terminal, so a
-      // mid-route `:_*` must stay as is.)
-      if (last && !lazy && g.name === "_" && g.body === ".*") {
+      // A trailing greedy `(?:/(?<_>[\s\S]*))?` is the `**` catch-all. The
+      // lazy form is a param named `_` (`:_*`), which the router leaves unset
+      // on `/a/` where `**` reports `""`. (Only at the end: `**` is terminal,
+      // so a mid-route `:_*` must stay as is.)
+      if (last && !lazy && g.name === "_" && isCatchAll(g.body, dot)) {
         segments.push("**");
         return;
       }
       // A single whole-segment param -> `:name?` / `:name*` / `:name(pat)?|*`.
-      segments.push(optionalParam(g.name, g.body));
+      segments.push(optionalParam(g.name, g.body, dot));
       return;
     }
     // Literal / mixed optional segments, possibly with optionals of their own
     // (`{/sub/**}?`) -> `{/...}?` merged onto the previous segment.
-    mergeGroup(segments, `/${parseSegments(inner, last).join("/")}`);
+    mergeGroup(segments, `/${parseSegments(inner, last, dot).join("/")}`);
     return;
   }
   // In-segment optional -> `{...}?` merged onto the previous segment.
@@ -266,7 +294,7 @@ function paramToken(name: string, body: string): string {
 }
 
 /** Classify a param inside an optional group (`:name?`, `:name*`, ...). */
-function optionalParam(name: string, body: string): string {
+function optionalParam(name: string, body: string, dot: boolean): string {
   // `(?:/(?<_N>[^/]*))?` is a trailing `*` (optional in the tree).
   if (/^_\d+$/.test(name) && body === "[^/]*") {
     return "*";
@@ -274,7 +302,7 @@ function optionalParam(name: string, body: string): string {
   if (body === "[^/]*" || body === "[^/]+") {
     return `:${name}?`;
   }
-  if (body === ".*") {
+  if (isCatchAll(body, dot)) {
     return `:${name}*`;
   }
   const rep = matchRepeat(body);
