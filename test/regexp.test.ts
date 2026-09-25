@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { routeToRegExp, createRouter, addRoute, findRoute } from "../src/index.ts";
 import { fromGroupName } from "../src/_group-names.ts";
+import { canBeEmpty, canEndInSlash } from "../src/_regexp-scan.ts";
 import {
   type Captures,
   regexpCases as routes,
@@ -350,6 +351,27 @@ describe("routeToRegExp", () => {
     }
     expect(lookbehind.sort()).toEqual([...SWEEP_LOOKBEHIND_PATTERNS].sort());
     expect(duplicates.sort()).toEqual([...SWEEP_DUPLICATE_NAME_PATTERNS].sort());
+  });
+});
+
+// `canEndInSlash` decides whether an ending may drop the look-behind, so a
+// `false` must be a proof: anything it can't reason about counts as able to
+// end in `/` (and an unparseable fragment as able to be empty).
+describe("regex-body scans", () => {
+  it("treats anchors and word boundaries as zero-width", () => {
+    expect(canEndInSlash("\\w+\\b")).toBe(false);
+    expect(canEndInSlash("\\d+$")).toBe(false);
+    expect(canEndInSlash("[^.]+\\b")).toBe(true);
+  });
+
+  it("assumes backreferences and unparseable atoms can end in a slash", () => {
+    expect(canEndInSlash("(a)\\1")).toBe(true);
+    expect(canEndInSlash("\\k<x>")).toBe(true);
+    expect(canEndInSlash("[z-a]")).toBe(true);
+  });
+
+  it("assumes an unparseable fragment can be empty", () => {
+    expect(canBeEmpty("(?<x>a)\\k<y>")).toBe(true);
   });
 });
 

@@ -252,6 +252,14 @@ describe("regExpToRoute", () => {
     }
   });
 
+  it("reads a top-level character class as one atom", () => {
+    // The `(` in `[(]` is literal: the class is rejected as a bare
+    // metacharacter, not scanned as the start of a group.
+    expect(() => regExpToRoute(/^\/a[(](?:\/(?<x>[^/]*))??\/?$/)).toThrow(
+      /unsupported metacharacter "\["/,
+    );
+  });
+
   it("rejects match-affecting regexp flags", () => {
     expect(() => regExpToRoute(/^\/path\/?$/i)).toThrow(/flag/);
     expect(() => regExpToRoute(/^\/path\/?$/m)).toThrow(/flag/);
