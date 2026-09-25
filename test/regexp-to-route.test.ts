@@ -1,20 +1,63 @@
 import { describe, it, expect } from "vitest";
-import { regExpToRoute, routeToRegExp } from "../src/index.ts";
-import { regexpCases, PCRE2_DUPLICATE_NAME_ROUTES } from "./_regexp-cases.ts";
+import { addRoute, createRouter, findRoute, regExpToRoute, routeToRegExp } from "../src/index.ts";
+import {
+  regexpCases,
+  PCRE2_DUPLICATE_NAME_ROUTES,
+  sweepPaths,
+  sweepPatterns,
+} from "./_regexp-cases.ts";
 
 describe("regExpToRoute", () => {
   // Every fixture route -> regex -> route must round-trip (its regex, converted
-  // back, produces a route whose regex is identical). Alternation-fallback
-  // routes (PCRE2_DUPLICATE_NAME_ROUTES) are not reversible and excluded.
-  for (const [route, { regex }] of Object.entries(regexpCases)) {
+  // back, produces a route whose regex is identical) and route the same way:
+  // equal sources alone let `/path/:rest*` come back as `/path/:rest(.*?)?`.
+  // Alternation-fallback routes (PCRE2_DUPLICATE_NAME_ROUTES) are not
+  // reversible and excluded.
+  for (const [route, { regex, match, noMatch = [] }] of Object.entries(regexpCases)) {
     if (PCRE2_DUPLICATE_NAME_ROUTES.has(route)) {
       continue;
     }
     it(`round-trips "${route}"`, () => {
       const back = regExpToRoute(regex);
       expect(routeToRegExp(back).source).toBe(regex.source);
+      if (!KNOWN_NON_EQUIVALENT[route]) {
+        const paths = [...match.map(([path]) => path), ...noMatch, ...pathsUnder(route)];
+        expect(routingDiffs(route, back, paths)).toEqual([]);
+      }
     });
   }
+
+  // The same over the sweep corpus, plus the listed non-equivalences. Only
+  // alternation output (several expansions OR-ed together) may be rejected.
+  it("reverses sweep patterns to equivalent routes", () => {
+    const paths = sweepPaths();
+    const mismatches: string[] = [];
+    const stale: string[] = [];
+    for (const pattern of new Set([...sweepPatterns(), ...Object.keys(KNOWN_NON_EQUIVALENT)])) {
+      let back: string;
+      try {
+        back = regExpToRoute(routeToRegExp(pattern));
+      } catch (error) {
+        expect((error as Error).message, pattern).toMatch(/unsupported non-optional group/);
+        continue;
+      }
+      const diffs = routingDiffs(pattern, back, paths);
+      const known = KNOWN_NON_EQUIVALENT[pattern];
+      if (known) {
+        if (known[0] !== back || diffs.length === 0) stale.push(`${pattern} -> ${back}`);
+      } else if (diffs.length > 0) {
+        mismatches.push(`${pattern} -> ${back}: ${diffs.slice(0, 3).join(", ")}`);
+      }
+    }
+    expect(mismatches).toEqual([]);
+    expect(stale, "KNOWN_NON_EQUIVALENT entries that no longer apply").toEqual([]);
+  });
+
+  it("reverses a named catch-all to an equivalent `:name+`", () => {
+    const back = regExpToRoute(routeToRegExp("/base/**:path"));
+    expect(back).toBe("/base/:path+");
+    expect(routingDiffs("/base/**:path", back, pathsUnder("/base/**:path"))).toEqual([]);
+  });
 
   it("accepts a RegExp or a source string", () => {
     expect(regExpToRoute(/^\/path\/(?<id>\d+)\/?$/)).toBe("/path/:id(\\d+)");
@@ -154,3 +197,48 @@ describe("regExpToRoute", () => {
     expect(() => regExpToRoute(/^\/path\/([^/]+)\/?$/)).toThrow(/cannot contain/);
   });
 });
+
+// Routes whose reversal is not equivalent, with the route they come back as.
+const KNOWN_NON_EQUIVALENT: Record<string, readonly [back: string, reason: string]> = {
+  // Pre-existing: the root catch-all form parses back as `**:x`, which needs a
+  // segment (its regex differs from the original's, too).
+  "/:x*": ["/**:x", "root `/:x*` comes back as `/**:x`, which does not match `/`"],
+  // Not modeled by routeToRegExp (see AGENTS.md): the tree splits on `/`
+  // before testing a constraint, the regex doesn't, so both compile to the
+  // same catch-all regex.
+  "/:x(.*)": ["/:x+", "a constraint that can match `/` comes back as a catch-all"],
+  "/a/:x(.*)": ["/a/:x+", "a constraint that can match `/` comes back as a catch-all"],
+  "/a/:x(.*)?": ["/a/:x*", "a constraint that can match `/` comes back as a catch-all"],
+};
+
+/** Sweep paths, also under the route's leading static segments (`/path/…`). */
+function pathsUnder(route: string): string[] {
+  const prefix = /^(?:\/[\w%-]+)*/.exec(route)![0];
+  const paths = sweepPaths();
+  return prefix ? [...paths, ...paths.map((path) => prefix + path)] : paths;
+}
+
+/** Paths where `a` and `b`, each alone in a router, route differently. */
+function routingDiffs(a: string, b: string, paths: Iterable<string>): string[] {
+  const routerA = createRouter();
+  addRoute(routerA, "", a, true);
+  const routerB = createRouter();
+  addRoute(routerB, "", b, true);
+  const diffs: string[] = [];
+  for (const path of new Set(paths)) {
+    const foundA = describeMatch(findRoute(routerA, "", path));
+    const foundB = describeMatch(findRoute(routerB, "", path));
+    if (foundA !== foundB) diffs.push(`${path} (${foundA} vs ${foundB})`);
+  }
+  return diffs;
+}
+
+/** A match as its params, unset ones dropped (the router reports some as `undefined`). */
+function describeMatch(match?: { params?: Record<string, string | undefined> }): string {
+  if (!match) return "no match";
+  const params: Record<string, string> = {};
+  for (const key in match.params) {
+    if (match.params[key] !== undefined) params[key] = match.params[key];
+  }
+  return JSON.stringify(params);
+}
