@@ -175,7 +175,14 @@ const hasRe2 =
 
 describe("routeToRegExp RE2 compatibility (rg, Rust regex)", () => {
   if (!hasRe2) {
-    it.skip("ripgrep not found", () => {});
+    // CI installs ripgrep; a silent skip there would drop the whole suite.
+    if (process.env.CI) {
+      it("ripgrep is available in CI", () => {
+        expect.fail("ripgrep (Rust regex engine) not found");
+      });
+    } else {
+      it.skip("ripgrep not found", () => {});
+    }
     return;
   }
 
