@@ -62,8 +62,8 @@ type ExtractWildcards<
     ? Named extends `${infer Name}/${infer Tail}`
       ? Name | ExtractWildcards<Tail, Count>
       : Named
-    : Rest extends `*${infer Tail}` // Double wildcard (**) -> "_", `**<rest>` is `**/*<rest>`
-      ? "_" | ExtractWildcards<Tail extends "" | `/${string}` ? Tail : `*${Tail}`, Count>
+    : Rest extends `*${infer Tail}` // Double wildcard (**) -> "_", `**<rest>` is `**/*<rest>` (a `}` closes a group)
+      ? "_" | ExtractWildcards<Tail extends "" | `${"/" | "}"}${string}` ? Tail : `*${Tail}`, Count>
       : `${Count["length"]}` | ExtractWildcards<Rest, [...Count, unknown]> // Single wildcard (*) -> "0", "1", etc.
   : never; // No more wildcards found
 
@@ -72,11 +72,22 @@ type ExtractWildcards<
 type ExtractTrailingWildcard<
   TPath extends string,
   TRoute extends string,
-> = TRoute extends `${string}${"**" | "+/"}${string}`
+> = TRoute extends `${string}**${string}`
   ? never
-  : TPath extends `${infer Prefix}/*${"" | "/"}`
-    ? Exclude<ExtractWildcards<TPath>, ExtractWildcards<Prefix>>
-    : never;
+  : HasRepeatParam<TRoute> extends true
+    ? never
+    : TPath extends `${infer Prefix}/*${"" | "/"}`
+      ? Exclude<ExtractWildcards<TPath>, ExtractWildcards<Prefix>>
+      : never;
+
+// A `:name+` before the last segment (not a static segment ending in `+`)
+type HasRepeatParam<TRoute extends string> = TRoute extends `${string}:${infer Rest}`
+  ? Rest extends `${infer Token}/${infer Tail}`
+    ? Token extends `${string}+`
+      ? true
+      : HasRepeatParam<`/${Tail}`>
+    : false
+  : false;
 
 // Raw `:name(constraint)?` tokens (everything after `:` up to the next `/`)
 type ExtractParamTokens<TPath extends string> = TPath extends `${string}:${infer Rest}`

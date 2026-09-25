@@ -1020,6 +1020,13 @@ describe("Router remove", function () {
       ["/a/b", "/a{/b}?", "/a/b"],
       ["/f/**:path", "/f/:path+", "/f/x/y"],
       ["/a", "/a/:x*", "/a"],
+      // A group right after `**` is not the rest of its segment: `/a/**{.md}?`
+      // is `/a/**` or `/a/**.md`, not `/a/**/*{.md}?` (same identity once
+      // rewritten, and both register `/a/**/*.md` on one node).
+      ["/a/**/*{.md}?", "/a/**{.md}?", "/a/x/y"],
+      ["/a/**{.md}?", "/a/**/*{.md}?", "/a/x/y.md"],
+      ["/a{/**/*}?", "/a{/**}?", "/a/x/y"],
+      ["/a{/**}?", "/a{/**/*}?", "/a"],
     ] as const) {
       for (const order of [
         [keep, remove],

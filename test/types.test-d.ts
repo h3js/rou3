@@ -103,6 +103,11 @@ describe("types", () => {
       }>();
       // `:x+` before the last segment is a `**`: a `*` after it takes a segment
       expectTypeOf<InferRouteParams<"/a/:x+/b/*">>().toEqualTypeOf<{ x: string; "0": string }>();
+      // ... but a static segment ending in `+` is not one
+      expectTypeOf<InferRouteParams<"/c++/*">>().toEqualTypeOf<{ "0": string | undefined }>();
+      // A `}` right after `**` closes a group: no `*` capture follows
+      expectTypeOf<InferRouteParams<"/a{/**}?">>().toEqualTypeOf<{ _: string }>();
+      expectTypeOf<InferRouteParams<"/a{/**}?/b">>().toEqualTypeOf<{ _: string }>();
     });
 
     it("should infer mixed params", () => {

@@ -85,14 +85,16 @@ export function splitPath(path: string): string[] {
 /**
  * Like `splitPath`, for route patterns: `/a//` and `/a/` canonicalize to `/a`,
  * and a `**` followed by more of its segment is `**` plus a `*` segment
- * (`/**.md` is `/**\/*.md`: any path ending in a `.md` segment).
+ * (`/**.md` is `/**\/*.md`: any path ending in a `.md` segment). A `{` or `}`
+ * right after the `**` is group syntax, not part of the segment (before group
+ * expansion: `/a/**{.md}?` is `/a/**` or `/a/**.md`, never `/a/**\/*`).
  */
 export function splitRoute(path: string): string[] {
   const s = splitPath(path);
   while (s[s.length - 1] === "") s.pop();
   if (path.includes("**")) {
     for (let i = 0; i < s.length; i++) {
-      if (s[i].length > 2 && s[i].startsWith("**") && s[i].charCodeAt(2) !== 58 /* : */) {
+      if (/^\*\*[^:{}]/.test(s[i])) {
         s.splice(i, 1, "**", s[i].slice(1));
       }
     }
