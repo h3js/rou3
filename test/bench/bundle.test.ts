@@ -69,8 +69,11 @@ describe("benchmark", () => {
     // findAllRoutes rank every match from the last segment backwards (the tree
     // order alone let broader routes win). Routers without such routes pay one
     // `hasSuffix` read per lookup.
-    expect(bytes).toBeLessThanOrEqual(8720); // <8.72kb
-    expect(gzipSize).toBeLessThanOrEqual(3480); // <3.48kb
+    // +~45B raw / +~30B gzip: rankFromEnd skips the segments both `**` cover,
+    // so a comparison costs the route, not the path (a 4000-segment path with
+    // 20 nested `**` routes and one suffix route: ~2.8ms -> ~0.1ms).
+    expect(bytes).toBeLessThanOrEqual(8760); // <8.76kb
+    expect(gzipSize).toBeLessThanOrEqual(3500); // <3.50kb
   });
 });
 

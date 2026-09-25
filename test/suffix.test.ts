@@ -351,6 +351,32 @@ describe("segments after `**`: priority", () => {
     }
   });
 
+  it("compiled single-match ranks only where a suffix route can match", () => {
+    // The check before the ranked path tests the method and the regex params
+    // after the `**`: `/**.md` used to send every lookup down the ranked path
+    // (`l>1&&(true)`), and a POST-only route every GET lookup.
+    const probe = (method: string, route: string) => {
+      const router = createRouter<string>();
+      addRoute(router, "GET", "/a/:b", "/a/:b");
+      addRoute(router, method, route, route);
+      const { find } = lookups(router);
+      for (const path of ["/a/b", "/a/b.md", "/x/1", "/a/_payload.json"]) {
+        find(path);
+        find(path, "POST");
+      }
+      return /if\((l>1&&.*?)\)\{let r=\[\],k=\[\]/.exec(compileRouterToString(router))?.[1];
+    };
+    expect(probe("GET", "/**.md")).toMatchInlineSnapshot(`"l>1&&(m==="GET"&&($3.test(s[l-1])))"`);
+    expect(probe("POST", "/**/*")).toMatchInlineSnapshot(`"l>1&&(m==="POST")"`);
+    expect(probe("", "/**/:id(\\d+)")).toMatchInlineSnapshot(`"l>1&&($3.test(s[l-1]))"`);
+    expect(probe("", "/a/**/x/:id(\\d+)")).toMatchInlineSnapshot(
+      `"l>1&&s[1]==="a"&&(l>2&&(l>3&&(s[l-2]==="x"&&($3.test(s[l-1])))))"`,
+    );
+    expect(probe("GET", "/**/_payload.json")).toMatchInlineSnapshot(
+      `"l>1&&(s[l-1]==="_payload.json"&&(m==="GET"))"`,
+    );
+  });
+
   it("agrees with compareRoutes on the scenarios above", () => {
     expect(compareRoutes("/a/:p/**", "/a/**/x")).toBe("superset");
     expect(compareRoutes("/:a/**/p", "/**/b/p")).toBe("superset");

@@ -118,7 +118,10 @@ function compileRouteMatch(ctx: CompilerContext): string {
     const all = compileNode(ctx, ctx.router.root, [], 1, 1);
     ctx.opts = opts;
     ctx.collector = false;
-    match = `if(${compileSuffixProbe(ctx.router.root, 1)}){let r=[],k=[];${all}r=${rankRef(ctx)}(r.reverse(),k.reverse(),l-1);return r[r.length-1]}${match}`;
+    const probe = compileSuffixProbe(ctx, ctx.router.root, 1);
+    if (probe !== "false") {
+      match = `if(${probe}){let r=[],k=[];${all}r=${rankRef(ctx)}(r.reverse(),k.reverse(),l-1);return r[r.length-1]}${match}`;
+    }
   }
   // Empty root node emit an empty bound check
   if (match) {
@@ -229,12 +232,13 @@ function compileStaticMatch(ctx: CompilerContext): string {
   }
   const ref = pushDataSlot(ctx, jitMap ? (jitMap as any) : `{__proto__:null,${mapCode}}`);
   const lookup = `let _n=${ref}[p];`;
+  if (!matchAll) {
+    return `${lookup}if(_n!==void 0){let _d=_n[m];if(_d===void 0)_d=_n[""];if(_d!==void 0)return {data:_d};}`;
+  }
   const push = ctx.rank
     ? `{r.push({data:_a[_i]});k.push(${rankDescriptor(ctx)})}`
     : `r.push({data:_a[_i]});`;
-  return matchAll
-    ? `${lookup}if(_n!==void 0){let _a=_n[m];if(_a===void 0)_a=_n[""];if(_a!==void 0)for(let _i=_a.length-1;_i>=0;_i--)${push}}`
-    : `${lookup}if(_n!==void 0){let _d=_n[m];if(_d===void 0)_d=_n[""];if(_d!==void 0)return {data:_d};}`;
+  return `${lookup}if(_n!==void 0){let _a=_n[m];if(_a===void 0)_a=_n[""];if(_a!==void 0)for(let _i=_a.length-1;_i>=0;_i--)${push}}`;
 }
 
 function compileMethodMatch(
@@ -549,40 +553,63 @@ function compileSuffix(
 /**
  * A cheap check that some route with segments after `**` may match: the
  * static/param structure of the tree down to each suffix trie, and of the
- * trie down to a node with routes (no method, regex or `**:name` checks).
+ * trie down to a node with routes for the method, whose regex params after
+ * the `**` pass (no `**:name` or prefix regex checks).
  */
-function compileSuffixProbe(node: Node<any>, c: number): string {
+function compileSuffixProbe(ctx: CompilerContext, node: Node<any>, c: number): string {
   const terms: string[] = [];
   if (node.wildcard?.suffix) {
-    terms.push(compileTrieProbe(node.wildcard.suffix, c, 0));
+    terms.push(compileTrieProbe(ctx, node.wildcard.suffix, c, 0));
   }
   for (const key in node.static) {
     if (node.static[key].hasSuffix) {
-      terms.push(
-        `l>${c}&&s[${c}]===${JSON.stringify(key)}&&(${compileSuffixProbe(node.static[key], c + 1)})`,
-      );
+      const probe = compileSuffixProbe(ctx, node.static[key], c + 1);
+      terms.push(`l>${c}&&s[${c}]===${JSON.stringify(key)}&&(${probe})`);
     }
   }
   if (node.param?.hasSuffix) {
-    terms.push(`l>${c}&&(${compileSuffixProbe(node.param, c + 1)})`);
+    terms.push(`l>${c}&&(${compileSuffixProbe(ctx, node.param, c + 1)})`);
   }
-  return terms.join("||") || "false";
+  return terms.filter((term) => !term.endsWith("(false)")).join("||") || "false";
 }
 
-function compileTrieProbe(node: Node<any>, c: number, j: number): string {
-  if (node.methods) {
-    return "true";
-  }
+function compileTrieProbe(ctx: CompilerContext, node: Node<any>, c: number, j: number): string {
   const terms: string[] = [];
+  for (const key in node.methods) {
+    const entries = node.methods[key];
+    if (!entries?.length) continue;
+    // A route passes where its regex params after the `**` do: suffix
+    // position `q` (route index `w + 1 + q`) is `s[l-j+q]` at depth `j`.
+    const routes = entries.map((m) => {
+      const w = m.suffix![0];
+      const tests: string[] = [];
+      for (let i = w + 1; i < m.paramsRegexp.length; i++) {
+        if (m.paramsRegexp[i]) {
+          tests.push(`${serializeRegExp(ctx, m.paramsRegexp[i])}.test(s[l-${j + w + 1 - i}])`);
+        }
+      }
+      return tests.join("&&");
+    });
+    const any = routes.includes("") ? "" : routes.join("||");
+    terms.push(key ? `m===${JSON.stringify(key)}${any ? `&&(${any})` : ""}` : any || "true");
+  }
+  const children: string[] = [];
   for (const key in node.static) {
-    terms.push(
-      `s[l-${j + 1}]===${JSON.stringify(key)}&&(${compileTrieProbe(node.static[key], c, j + 1)})`,
-    );
+    const probe = compileTrieProbe(ctx, node.static[key], c, j + 1);
+    if (probe !== "false") {
+      children.push(`s[l-${j + 1}]===${JSON.stringify(key)}&&(${probe})`);
+    }
   }
   if (node.param) {
-    terms.push(compileTrieProbe(node.param, c, j + 1));
+    const probe = compileTrieProbe(ctx, node.param, c, j + 1);
+    if (probe !== "false") {
+      children.push(probe);
+    }
   }
-  return `l>${c + j}&&(${terms.join("||") || "false"})`;
+  if (children.length > 0) {
+    terms.push(`l>${c + j}&&(${children.join("||")})`);
+  }
+  return terms.join("||") || "false";
 }
 
 function hasSuffixTrie(node: Node<any>): boolean {
@@ -604,7 +631,8 @@ function hasSuffixTrie(node: Node<any>): boolean {
 // operations/_suffix.ts), only when a route with segments after `**` is among
 // them. `k` holds one `[** index or -1, suffix length, ...(param index,
 // kind)]` descriptor per match; a kind is 3 literal, 2 regex, 0 param or `**`.
-const RANK = `(r,k,n)=>{if(!k.some((d)=>d[1]>0))return r;const K=(d,p)=>{const e=n-d[1];if(d[0]>=0&&p>=d[0]&&p<e)return 0;for(let i=2;i<d.length;i+=2)if((d[1]&&d[i]>d[0]?d[i]-d[0]-1+e:d[i])===p)return d[i+1];return 3};return r.map((_,i)=>i).sort((a,b)=>{for(let p=n-1;p>=0;p--){const x=K(k[a],p)-K(k[b],p);if(x!==0)return x}return 0}).map((i)=>r[i])}`;
+// Positions both `**` cover (`o` up to `h`) compare equal and are skipped.
+const RANK = `(r,k,n)=>{if(!k.some((d)=>d[1]>0))return r;const K=(d,p)=>{const e=n-d[1];if(d[0]>=0&&p>=d[0]&&p<e)return 0;for(let i=2;i<d.length;i+=2)if((d[1]&&d[i]>d[0]?d[i]-d[0]-1+e:d[i])===p)return d[i+1];return 3};return r.map((_,i)=>i).sort((a,b)=>{const A=k[a],B=k[b],o=Math.max(A[0]<0?n:A[0],B[0]<0?n:B[0]),h=n-Math.max(A[1],B[1]);for(let p=n-1;p>=0;p--){if(p<h&&p>=o){p=o;continue}const x=K(A,p)-K(B,p);if(x!==0)return x}return 0}).map((i)=>r[i])}`;
 
 function rankRef(ctx: CompilerContext): string {
   const rankMap = (ctx.rankMap ??= new Map());

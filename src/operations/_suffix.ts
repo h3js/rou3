@@ -105,23 +105,32 @@ export function rankFromEnd<T>(matches: MethodData<T>[], segments: string[]): Me
   const n = segments.length;
   return matches.sort((a, b) => {
     for (let p = n - 1; p >= 0; p--) {
-      const d = kindAt(a, n, p) - kindAt(b, n, p);
-      if (d !== 0) {
-        return d;
+      const x = kindAt(a, n, p);
+      const y = kindAt(b, n, p);
+      if (x < 0 && y < 0) {
+        // Both `**` cover `p` and every segment down to the later start:
+        // equal, skip them (a comparison costs the segments around the `**`,
+        // not the whole path).
+        p = ~Math.min(x, y);
+      } else if (Math.max(x, 0) !== Math.max(y, 0)) {
+        return Math.max(x, 0) - Math.max(y, 0);
       }
     }
     return 0;
   });
 }
 
-/** 3 literal, 2 regex param, 0 plain param or `**` at path segment `p`. */
+/**
+ * 3 literal, 2 regex param, 0 plain param at path segment `p`, or where the
+ * `**` covers it (ranked as 0), `~start` of the segments it takes.
+ */
 function kindAt(m: MethodData<unknown>, n: number, p: number): number {
   const suffix = m.suffix;
   const end = suffix ? n - suffix[1] : n;
   for (const [index, name] of m.paramsMap || []) {
     if (index < 0) {
-      if (p >= -(index + 1) && p < end) {
-        return 0;
+      if (p >= ~index && p < end) {
+        return index;
       }
     } else if ((suffix && index > suffix[0] ? index - suffix[0] - 1 + end : index) === p) {
       return typeof name === "string" ? 0 : 2;
