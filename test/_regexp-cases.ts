@@ -118,6 +118,23 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/path/suffix", { _: "suffix" }],
     ],
   },
+  // A trailing group after a terminal `**` adds nothing, so it must not be
+  // inlined as an empty `(?:)?`: that hides the catch-all from the ending
+  // analysis, `.*` stays greedy and swallows the stripped trailing slash
+  // (`_: "b/"` on `/a/b/`, where the router reports `"b"`).
+  "/a/**/b{.json}?": {
+    regex: /^\/a(?:\/(?<_>.*?))?\/?$/,
+    match: [
+      ["/a", { _: undefined }, { _: "" }],
+      ["/a/", { _: "" }],
+      ["/a/b", { _: "b" }],
+      ["/a/b/", { _: "b" }],
+      ["/a/b//", { _: "b/" }],
+      ["/a/b.json/", { _: "b.json" }],
+      ["/a/x/y/", { _: "x/y" }],
+    ],
+    noMatch: ["/ab", "/ab/b"],
+  },
   "/base/**:path": {
     regex: /^\/base\/(?:\/|(?<path>.+?)\/?)$/,
     match: [
