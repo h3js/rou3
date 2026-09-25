@@ -1,5 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { afterAll, describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, join } from "node:path";
+import { ripgrep } from "ripgrep";
 import { routeToRegExp } from "../src/index.ts";
 import {
   regexpCases,
@@ -52,15 +56,16 @@ function run(
 function grepLike(
   cmd: string,
   patternArgs: (src: string) => string[],
+  env?: NodeJS.ProcessEnv,
 ): Omit<PcreTool, "name" | "strictDuplicateNames"> {
   return {
     wholeInput: false,
     compile(source) {
-      const r = run(cmd, patternArgs(source), { input: "" });
+      const r = run(cmd, patternArgs(source), { input: "", env });
       return r.ok && r.status !== 2 ? "ok" : "error";
     },
     match(source, input) {
-      const r = run(cmd, patternArgs(source), { input });
+      const r = run(cmd, patternArgs(source), { input, env });
       return r.ok && r.status === 0;
     },
   };
@@ -95,9 +100,23 @@ const php: Omit<PcreTool, "name" | "strictDuplicateNames"> = (() => {
   };
 })();
 
+// The `ripgrep` devDependency puts its WASM `rg` (no PCRE2) on the PATH of
+// package scripts; `rg -P` needs a system build, so look past node_modules.
+const systemEnv = {
+  ...process.env,
+  PATH: (process.env.PATH || "")
+    .split(delimiter)
+    .filter((dir) => !dir.includes("node_modules"))
+    .join(delimiter),
+};
+
 const CANDIDATES: PcreTool[] = [
   { name: "grep -P", strictDuplicateNames: true, ...grepLike("grep", (s) => ["-Pq", "-e", s]) },
-  { name: "rg -P", strictDuplicateNames: true, ...grepLike("rg", (s) => ["-Pq", "-e", s]) },
+  {
+    name: "rg -P",
+    strictDuplicateNames: true,
+    ...grepLike("rg", (s) => ["-Pq", "-e", s], systemEnv),
+  },
   { name: "pcre2grep", strictDuplicateNames: true, ...grepLike("pcre2grep", (s) => ["-q", s]) },
   { name: "pcregrep", strictDuplicateNames: true, ...grepLike("pcregrep", (s) => ["-q", s]) },
   { name: "perl", strictDuplicateNames: false, ...perl },
@@ -167,53 +186,53 @@ describe("routeToRegExp PCRE compatibility", () => {
 
 // RE2-family engines (Go `regexp`, Rust `regex`, RE2) support `(?<name>...)`
 // but no look-around and no duplicate group names. ripgrep's default engine is
-// the Rust `regex` crate, so `rg` without `-P` stands in for the family.
-// `--no-config` keeps a user config from switching on PCRE2.
-const re2: Omit<PcreTool, "name" | "strictDuplicateNames"> = grepLike("rg", (s) => [
-  "--no-config",
-  "-q",
-  "-e",
-  s,
-]);
+// the Rust `regex` crate, so it stands in for the family. The `ripgrep` package
+// is ripgrep compiled to WASM (default engine only, no PCRE2) and runs
+// in-process, so this suite needs no system binary and never skips.
+// `--no-config` keeps a user config from switching engines, and `--text` keeps
+// binary detection from stopping at a NUL.
+const re2Input = join(mkdtempSync(join(tmpdir(), "rou3-re2-")), "input.txt");
 
-const hasRe2 =
-  re2.compile("^(?<a>x)$") === "ok" &&
-  re2.match("^(?<a>x)$", "x") &&
-  !re2.match("^(?<a>x)$", "y") &&
-  // Proves this is the RE2-family engine, not PCRE2.
-  re2.compile("(?<=a)b") === "error";
+/** Run `source` over `lines` (one per input line): exit code and matched lines. */
+async function re2(source: string, lines: readonly string[] = []) {
+  writeFileSync(re2Input, lines.map((line) => `${line}\n`).join(""));
+  const r = await ripgrep(
+    ["--no-config", "--text", "--no-filename", "--no-line-number", "-e", source, re2Input],
+    { buffer: true },
+  );
+  return { code: r.code, stderr: r.stderr, matched: new Set(r.stdout.split("\n").slice(0, -1)) };
+}
 
-describe("routeToRegExp RE2 compatibility (rg, Rust regex)", () => {
-  if (!hasRe2) {
-    // CI installs ripgrep; a silent skip there would drop the whole suite.
-    if (process.env.CI) {
-      it("ripgrep is available in CI", () => {
-        expect.fail("ripgrep (Rust regex engine) not found");
-      });
-    } else {
-      it.skip("ripgrep not found", () => {});
-    }
-    return;
-  }
+describe("routeToRegExp RE2 compatibility (ripgrep, Rust regex)", () => {
+  afterAll(() => rmSync(dirname(re2Input), { recursive: true, force: true }));
+
+  it("runs the RE2-family engine", async () => {
+    expect((await re2("^(?<a>x)$", ["x", "y"])).matched).toEqual(new Set(["x"]));
+    // Proves this is the Rust `regex` engine, not PCRE2.
+    expect((await re2("(?<=a)b")).code).toBe(2);
+  });
+
+  // ripgrep reads its input line by line, so inputs with a `\n` are skipped.
+  const lines = (inputs: readonly string[]) => inputs.filter((input) => !input.includes("\n"));
 
   for (const [route, { match, noMatch = [] }] of Object.entries(regexpCases)) {
     const source = routeToRegExp(route).source;
     if (LOOKBEHIND_ROUTES.has(route) || PCRE2_DUPLICATE_NAME_ROUTES.has(route)) {
-      it(`rejects "${route}"`, () => {
-        expect(re2.compile(source)).toBe("error");
+      it(`rejects "${route}"`, async () => {
+        expect((await re2(source)).code).toBe(2);
       });
       continue;
     }
-    it(`compiles and matches "${route}"`, () => {
-      expect(re2.compile(source), `should compile ${source}`).toBe("ok");
-      // `rg` reads its input line by line.
-      for (const [input] of match) {
-        if (input.includes("\n")) continue;
-        expect(re2.match(source, input), `should match ${JSON.stringify(input)}`).toBe(true);
+    it(`compiles and matches "${route}"`, async () => {
+      const matching = lines(match.map(([input]) => input));
+      const rejected = lines(noMatch);
+      const r = await re2(source, [...matching, ...rejected]);
+      expect(r.code, `should compile ${source}: ${r.stderr}`).not.toBe(2);
+      for (const input of matching) {
+        expect(r.matched.has(input), `should match ${JSON.stringify(input)}`).toBe(true);
       }
-      for (const input of noMatch) {
-        if (input.includes("\n")) continue;
-        expect(re2.match(source, input), `should not match ${JSON.stringify(input)}`).toBe(false);
+      for (const input of rejected) {
+        expect(r.matched.has(input), `should not match ${JSON.stringify(input)}`).toBe(false);
       }
     });
   }
@@ -221,26 +240,21 @@ describe("routeToRegExp RE2 compatibility (rg, Rust regex)", () => {
   // Every sweep regex outside the pinned look-behind / duplicate-name sets
   // (asserted exact in test/regexp.test.ts) compiles in RE2 and matches the
   // same paths as in JS (which the JS sweep ties to `findRoute`); the pinned
-  // ones really are rejected. One `rg` run per pattern, with the paths as
-  // input lines (so none with a `\n`).
-  it("agrees with JS on the sweep corpus", () => {
-    const paths = sweepPaths().filter((path) => !path.includes("\n"));
+  // ones really are rejected. One run per pattern, with the paths as input lines.
+  it("agrees with JS on the sweep corpus", async () => {
+    const paths = lines(sweepPaths());
     const mismatches: string[] = [];
     const compiled: string[] = [];
     for (const pattern of sweepPatterns()) {
       const regex = routeToRegExp(pattern);
       if (SWEEP_LOOKBEHIND_PATTERNS.has(pattern) || SWEEP_DUPLICATE_NAME_PATTERNS.has(pattern)) {
-        if (re2.compile(regex.source) !== "error") compiled.push(pattern);
+        if ((await re2(regex.source)).code !== 2) compiled.push(pattern);
         continue;
       }
-      const r = spawnSync("rg", ["--no-config", "-e", regex.source], {
-        input: paths.join("\n") + "\n",
-        encoding: "utf8",
-      });
-      expect(r.status, `rg failed on ${regex.source}: ${r.stderr}`).not.toBe(2);
-      const matched = new Set(r.stdout.split("\n"));
+      const r = await re2(regex.source, paths);
+      expect(r.code, `rg failed on ${regex.source}: ${r.stderr}`).not.toBe(2);
       for (const path of paths) {
-        if (regex.test(path) !== matched.has(path)) {
+        if (regex.test(path) !== r.matched.has(path)) {
           mismatches.push(`${pattern} ${path}`);
         }
       }
