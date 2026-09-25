@@ -9,6 +9,7 @@ import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcard
 import { expandModifiers, splitRoute } from "./operations/_utils.ts";
 import { canBeEmpty, isOptionalGroups } from "./_regexp-scan.ts";
 import { openOptionals, withTrailingSlash } from "./_trailing-slash.ts";
+import { groupNames, mergeBodies } from "./_regexp-merge.ts";
 
 // Catch-all body. The router splits paths on `/` only, so a catch-all takes
 // any char, line terminators included; `.` would not (JS excludes `\n`, `\r`,
@@ -23,9 +24,14 @@ const LAZY_ANY = "[\\s\\S]*?";
  * The generated source targets a **PCRE-compatible** flavor: named groups use
  * the `(?<name>...)` form and no JS-only constructs are emitted, so the output
  * also compiles in PCRE2 engines (`grep -P`, `rg -P`, `pcre2grep`, PHP `preg_*`)
- * and Perl. Trailing optional groups (`{...}?`, `:name?`) are compiled inline as
- * `(?:...)?` rather than an alternation, so a param is never emitted as a
- * duplicate named group — which PCRE2 rejects unless `PCRE2_DUPNAMES` is set.
+ * and Perl. Each param is declared once: Node 22, PCRE2 (without
+ * `PCRE2_DUPNAMES`) and RE2 reject a named group declared twice, even across
+ * alternatives (#213). A trailing optional group (`{...}?`, `:name?`) compiles
+ * inline as `(?:...)?`. Other optional groups expand like `addRoute`, and the
+ * expansions are merged into one pattern: `/users{/:id}?/posts/:post` compiles
+ * like `/users(?:/…)?/posts/…`, and expansions sharing a param inside one
+ * segment (`/files/:name{.:ext}?`) capture it in one group, with a look-ahead
+ * holding each to its own rest of the segment.
  *
  * The regex matches exactly the paths `findRoute()` matches for a router holding
  * only `route` — including the router's tolerances: one optional trailing slash,
@@ -37,11 +43,17 @@ const LAZY_ANY = "[\\s\\S]*?";
  * Most routes also compile to RE2-compatible output (RE2, Go, Rust `regex`):
  * the trailing-slash rule is encoded without look-behinds, except for the few
  * endings `withTrailingSlash` lists (e.g. a constraint that can end in `/`, or a
- * required segment whose constraint can match empty).
+ * required segment whose constraint can match empty). A param shared inside
+ * one segment needs its look-ahead.
  *
- * Note: multi-group or mid-route optionals that cannot be inlined still fall
- * back to alternation and may contain duplicate named groups (valid in JS/Perl,
- * but requiring `PCRE2_DUPNAMES` for strict PCRE2 engines).
+ * Note: where several expansions match one path, the captures are the first
+ * expansion's, as the router's usually are, unless the merge can't keep that
+ * order: next to an optional param (`/:lang?/docs{/:section}?/:page` on
+ * `/docs/docs/p`), another expansion's may be reported. Shapes no merge fits
+ * still fall back to an alternation repeating a group name, which only engines
+ * supporting duplicate named groups compile: malformed ones (a modifier right
+ * before a group, `/:x?{.json}?`), and a `:x*` before a `*` sharing a param
+ * with the route without the `:x*` (`/a/:r*\/:y?/*`).
  *
  * @throws a `rou3:` error when one expansion of `route` declares the same param
  * name twice (`/files/:path/**:path`, `/a/:x{/b/:x}?`); the resulting duplicate
@@ -66,49 +78,114 @@ export function routeToRegExp(route: string = "/"): RegExp {
     route = `/${route}`;
   }
 
-  // Compile a trailing single optional group (`{...}?`) inline as `(?:...)?`
-  // instead of expanding it into an alternation of full routes. The alternation
-  // form re-emits every param before the group in both branches, producing
-  // duplicate named groups that PCRE2-family engines reject.
-  const inlineOptional = inlineOptionalGroup(route);
-  if (inlineOptional) {
-    return inlineOptional;
+  const alternatives = routeAlternatives(route);
+  if (alternatives.length === 1) {
+    return compile(...alternatives[0]);
   }
 
-  // Modifiers the inline emitter cannot mirror expand exactly like `addRoute`
-  // (groups first, then modifiers).
-  const groupExpanded =
-    expandGroupDelimiters(route) ||
-    (needsModifierExpansion(route) ? expandModifiers(splitRoute(route)) : undefined);
-  if (groupExpanded) {
-    // Expansions can compile to the same regex (`/a/:x+/b{c}?` is `/a/**:x`
-    // either way); keep one copy of each.
-    const sources = [
-      ...new Set(
-        groupExpanded.map((expandedRoute) => routeToRegExp(expandedRoute).source.slice(1, -1)),
-      ),
-    ];
-    if (sources.length === 1) {
-      return new RegExp(`^${sources[0]}$`);
-    }
-    // Note: alternation branches may still contain duplicate named capture
-    // groups (e.g. `(?<id>a)|(?<id>b)`) for multi-group / mid-route optionals
-    // that can't be inlined. This is valid in modern JS engines (Node 22+,
-    // Chrome 125+, Firefox 129+, Safari 17+) per TC39 proposal, but is not
-    // portable to PCRE2 without PCRE2_DUPNAMES.
+  // Expansions can compile to the same regex (`/a/:x+/b{c}?` is `/a/**:x`
+  // either way); keep one copy of each.
+  const unique = new Map<string, Alternative>();
+  for (const alternative of alternatives) {
+    const source = compile(...alternative).source.slice(1, -1);
+    if (!unique.has(source)) unique.set(source, alternative);
+  }
+  const sources = [...unique.keys()];
+  if (sources.length === 1) {
+    return new RegExp(`^${sources[0]}$`);
+  }
+  if (!sharesName(sources)) {
     return new RegExp(`^(?:${sources.join("|")})$`);
   }
-
-  return _routeToRegExp(route);
+  // `routeAlternatives` merged what it could with the captures unchanged. The
+  // rest is merged regardless: the paths stay exact, but where several
+  // expansions match a path, another one's captures may be reported.
+  const merged = mergeExpansions([...unique.values()], true);
+  if (merged) {
+    return compile(...merged);
+  }
+  // Shapes no merge fits (a modifier right before a group: `/:x?{.json}?`;
+  // `/a/:r*/:y?/*`) keep the alternation, which repeats a group name.
+  return new RegExp(`^(?:${sources.join("|")})$`);
 }
 
 /**
- * Build an inline-optional regex for the common `…{…}?` case where a single
- * optional group sits at the end of the route. Returns `undefined` (falling
- * back to alternation expansion) for anything it can't inline safely:
- * multi-group routes, mid-route optionals, or unexpected segment shapes.
+ * A route regex body, `""` for the root, with what its ending needs (see
+ * `ending`).
  */
-function inlineOptionalGroup(route: string): RegExp | undefined {
+type Alternative = [body: string, starStar: boolean, openTail?: string | boolean];
+
+function compile(body: string, starStar: boolean, openTail: string | boolean = false): RegExp {
+  // Root: lookup reaches `/` from `/` only (`//` is an empty segment).
+  return new RegExp(body ? `^${ending(body, starStar, openTail)}` : "^/$");
+}
+
+/**
+ * The bodies `route` matches with: one, or one per expansion when a group or
+ * modifier can't be compiled inline (they expand exactly like `addRoute`:
+ * groups first, then modifiers) and the expansions can't be merged.
+ */
+function routeAlternatives(route: string): Alternative[] {
+  // Compile a trailing single optional group (`{...}?`) inline as `(?:...)?`
+  // instead of expanding it into one body per branch: those would re-emit
+  // every param before the group.
+  const inline = inlineOptionalGroup(route);
+  if (inline) {
+    return [inline];
+  }
+  const expanded =
+    expandGroupDelimiters(route) ||
+    (needsModifierExpansion(route) ? expandModifiers(splitRoute(route)) : undefined);
+  if (!expanded) {
+    const [segments, ownSeparator, starStar, openTail] = routeToRegExpSegments(route);
+    return [[segments.length > 0 ? joinSegments(segments, ownSeparator) : "", starStar, openTail]];
+  }
+  const alternatives = expanded.flatMap((expandedRoute) => routeAlternatives(expandedRoute));
+  // A param the expansions share (`/users{/:id}?/posts/:post`) can't repeat
+  // across alternation branches: Node 22, PCRE2 and RE2 reject a group name
+  // declared twice (#213). Merge them into one body where the captures stay
+  // those of the alternation. Merging level by level keeps the expansions'
+  // structure: `/a{/:b}?{/:c}?` is `/a(?:/b)?` with `(?:/c)?` after it.
+  const merged = sharesName(alternatives.map(([body]) => body))
+    ? mergeExpansions(alternatives, false)
+    : undefined;
+  return merged ? [merged] : alternatives;
+}
+
+function mergeExpansions(alternatives: Alternative[], relaxed: boolean): Alternative | undefined {
+  const body = mergeBodies(
+    alternatives.map(([body]) => body),
+    relaxed,
+  );
+  if (body === undefined) {
+    return;
+  }
+  // A plain `/?$` is exact for the merged body when it is for every
+  // expansion (the paths are their union); it can still nest optionals after
+  // one same catch-all group.
+  const tails = new Set(alternatives.map(([, , openTail]) => openTail || false));
+  const [tail] = tails;
+  const openTail = tails.has(false)
+    ? false
+    : tails.size === 1 && typeof tail === "string" && body.includes(tail)
+      ? tail
+      : true;
+  return [body, alternatives.some(([, starStar]) => starStar), openTail];
+}
+
+/** Whether two of `sources` (deduplicated) declare a same group name. */
+function sharesName(sources: string[]): boolean {
+  const names = [...new Set(sources)].flatMap((source) => [...new Set(groupNames(source))]);
+  return new Set(names).size < names.length;
+}
+
+/**
+ * Build an inline-optional body for the common `…{…}?` case where a single
+ * optional group sits at the end of the route. Returns `undefined` (falling
+ * back to expansion) for anything it can't inline safely: multi-group routes,
+ * mid-route optionals, or unexpected segment shapes.
+ */
+function inlineOptionalGroup(route: string): Alternative | undefined {
   const group = scanFirstGroup(route);
   if (!group) {
     return;
@@ -178,16 +255,14 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
     );
     // `/a{/**}?` also registers `/a`, which wins where `**` would match no
     // segment: its group is skipped there like `:_*`'s.
-    return new RegExp(
-      `^${withTrailingSlash(joinSegments(inlineSegs, fullOwnSep), starStar && !optional)}`,
-    );
+    return [joinSegments(inlineSegs, fullOwnSep), starStar && !optional];
   }
 
   // `body` adds one or more whole segments (e.g. `/foo` -> `/foo/bar`); make
   // the appended segments optional.
   const head = joinSegments(fullSegs.slice(0, baseLen), fullOwnSep);
   const tail = fullSegs.slice(baseLen).join("/");
-  return new RegExp(`^${withTrailingSlash(`${head}(?:/${tail})?`, starStar)}`);
+  return [`${head}(?:/${tail})?`, starStar];
 }
 
 /**
@@ -265,13 +340,6 @@ function segmentKind(segment: string): number {
 /** The `?`/`+`/`*` modifier of a param segment (`:x?`, `pre-:x(\\d+)+`). */
 function paramModifier(segment: string): string | undefined {
   return /:[\w-]+(?:\([^)]*\))?([?+*])$/.exec(segment)?.[1];
-}
-
-function _routeToRegExp(route: string): RegExp {
-  const [segments, ownSeparator, starStar, openTail] = routeToRegExpSegments(route);
-  const body = joinSegments(segments, ownSeparator);
-  // Root: lookup reaches `/` from `/` only (`//` is an empty segment).
-  return new RegExp(segments.length > 0 ? `^${ending(body, starStar, openTail)}` : "^/$");
 }
 
 /**

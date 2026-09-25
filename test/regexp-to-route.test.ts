@@ -1,11 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { addRoute, createRouter, findRoute, regExpToRoute, routeToRegExp } from "../src/index.ts";
-import {
-  regexpCases,
-  PCRE2_DUPLICATE_NAME_ROUTES,
-  sweepPaths,
-  sweepPatterns,
-} from "./_regexp-cases.ts";
+import { regexpCases, IRREVERSIBLE_ROUTES, sweepPaths, sweepPatterns } from "./_regexp-cases.ts";
 
 // The look-behind trailing-slash suffix (as `RegExp#source` spells it).
 const LB = "(?:(?<=\\/)\\/|(?<!\\/)\\/?)$";
@@ -14,10 +9,9 @@ describe("regExpToRoute", () => {
   // Every fixture route -> regex -> route must round-trip (its regex, converted
   // back, produces a route whose regex is identical) and route the same way:
   // equal sources alone let `/path/:rest*` come back as `/path/:rest(.*?)?`.
-  // Alternation-fallback routes (PCRE2_DUPLICATE_NAME_ROUTES) are not
-  // reversible and excluded.
+  // Merged expansions it can't read back (IRREVERSIBLE_ROUTES) are excluded.
   for (const [route, { regex, match, noMatch = [] }] of Object.entries(regexpCases)) {
-    if (PCRE2_DUPLICATE_NAME_ROUTES.has(route)) {
+    if (IRREVERSIBLE_ROUTES.has(route)) {
       continue;
     }
     it(`round-trips "${route}"`, () => {
@@ -31,7 +25,9 @@ describe("regExpToRoute", () => {
   }
 
   // The same over the sweep corpus, plus the listed non-equivalences. Only
-  // alternation output (several expansions OR-ed together) may be rejected.
+  // merged expansions may be rejected: an alternation (between segments, or of
+  // whole expansions), or a param held by look-aheads (their `(?:\/|$)`, the
+  // segment end, reads as a constraint containing `/`).
   it("reverses sweep patterns to equivalent routes", () => {
     const paths = sweepPaths();
     const mismatches: string[] = [];
@@ -41,7 +37,9 @@ describe("regExpToRoute", () => {
       try {
         back = regExpToRoute(routeToRegExp(pattern));
       } catch (error) {
-        expect((error as Error).message, pattern).toMatch(/unsupported non-optional group/);
+        expect((error as Error).message, pattern).toMatch(
+          /unsupported non-optional group|param constraint "[^"]*\(\?=[^"]*" cannot contain "\/"/,
+        );
         continue;
       }
       const diffs = routingDiffs(pattern, back, paths);
@@ -219,9 +217,11 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(/^\/a(?:\/(?<x>[a-z]+))??\/?$/)).toBe("/a/:x([a-z]+)?");
   });
 
-  it("throws on the alternation fallback it cannot reverse", () => {
-    const alt = routeToRegExp("/media/*{.webp}?");
-    expect(() => regExpToRoute(alt)).toThrow();
+  it("throws on merged expansions it cannot reverse", () => {
+    expect(() => regExpToRoute(routeToRegExp("/docs/{v2}?/:page?"))).toThrow(
+      /unsupported non-optional group/,
+    );
+    expect(() => regExpToRoute(routeToRegExp("/media/*{.webp}?"))).toThrow(/cannot contain "\/"/);
   });
 
   it("throws on inline constraints that cannot be expressed as a route", () => {

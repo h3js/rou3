@@ -261,17 +261,22 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/path/a\nb"],
   },
   // An empty segment turns trailing, and is dropped, once the optionals after
-  // it are absent: `/docs/{v2}?/:page?` also registers `/docs`.
+  // it are absent: `/docs/{v2}?/:page?` also registers `/docs`. Its three
+  // expansions (`/docs/v2/:page?`, `/docs//:page`, `/docs`) share `page`, so
+  // they merge into one pattern declaring it once (#213): the two with `page`
+  // after a `v2` or an empty segment, then the rest.
   "/docs/{v2}?/:page?": {
-    regex:
-      /^(?:\/docs\/v2(?:\/(?<page>[^/]*))??\/?|(?:\/docs\/\/(?:(?<page>[^/]+)\/?|\/)|\/docs\/?))$/,
+    regex: /^\/docs(?:\/(?:(?:v2)?\/(?<page>[^/]*)|v2))?(?:(?<=\/)\/|(?<!\/)\/?)$/,
     match: [
       ["/docs", { page: undefined }],
       ["/docs/", { page: undefined }],
       ["/docs/v2", { page: undefined }],
       ["/docs/v2/intro", { page: "intro" }],
+      ["/docs/v2//", { page: "" }],
+      ["/docs//intro", { page: "intro" }],
+      ["/docs///", { page: "" }],
     ],
-    noMatch: ["/docs/intro"],
+    noMatch: ["/docs/intro", "/docs//", "/docs/v2/intro/x"],
   },
   "/path/(png|jpg|gif)": {
     regex: /^\/path\/(?<_0>png|jpg|gif)\/?$/,
@@ -359,16 +364,70 @@ export const regexpCases: Record<string, RegExpCase> = {
   },
   // Mid-segment optional after a greedy open-ended capture (`*` -> `[^/]*`).
   // Inlining as `(?<_0>[^/]*)(?:\.webp)?` would let the greedy capture swallow
-  // `.webp` (capturing `photo.webp` instead of `photo`), so this must fall back
-  // to alternation — which anchors the literal outside the capture and keeps
-  // `_0` = `photo`. The fallback reuses the `_0` named group across branches
-  // (see PCRE2_DUPLICATE_NAME_ROUTES).
+  // `.webp` (capturing `photo.webp` instead of `photo`). The two expansions
+  // (`/media/*.webp`, `/media/*`) share `_0` (#213): it is declared once, and a
+  // look-ahead holds each branch to its own rest of the segment (see
+  // LOOKAHEAD_ROUTES), so `.webp` is left out of the capture where it can be.
   "/media/*{.webp}?": {
-    regex: /^(?:\/media\/(?<_0>[^/]*)\.webp\/?|\/media(?:\/(?<_0>[^/]*))??\/?)$/,
+    regex: /^\/media(?:\/(?<_0>[^/]*(?=\.webp(?:\/|$))|[^/]*(?=\/|$))(?:\.webp)?)??\/?$/,
     match: [
       ["/media/photo.webp", { "0": "photo" }],
       ["/media/photo", { "0": "photo" }],
+      ["/media/.webp", { "0": "" }],
+      ["/media/a.webp.webp", { "0": "a.webp" }],
+      ["/media", { "0": undefined }],
+      ["/media//", { "0": "" }],
     ],
+    noMatch: ["/media/a/b", "/media/a.webp//"],
+  },
+  // #213: expansions sharing a param used to be OR-ed with the param in each
+  // branch, a duplicate group name that Node 22, PCRE2 and RE2 reject.
+  // `:name` and `:name.:ext` share one node, where the router tries the
+  // constrained one first: `name` is the longest prefix leaving an `ext`.
+  "/files/:name{.:ext}?": {
+    regex:
+      /^\/files\/(?<name>[^/]+(?=\.(?:[^/]+)(?:\/|$))|[^/]*(?=\/|$))(?:\.(?<ext>[^/]+))?(?:(?<=\/)\/|(?<!\/)\/?)$/,
+    match: [
+      ["/files/readme", { name: "readme", ext: undefined }],
+      ["/files/readme.md", { name: "readme", ext: "md" }],
+      ["/files/readme.md/", { name: "readme", ext: "md" }],
+      ["/files/archive.tar.gz", { name: "archive.tar", ext: "gz" }],
+      ["/files/.env", { name: ".env", ext: undefined }],
+      ["/files/a.", { name: "a.", ext: undefined }],
+      ["/files//", { name: "", ext: undefined }],
+    ],
+    noMatch: ["/files", "/files/", "/files/a/b", "/files/a.b//"],
+  },
+  // A group before more of the route: the shared tail `/posts/:post` is
+  // factored out of both expansions.
+  "/users{/:id}?/posts/:post": {
+    regex: /^\/users(?:\/(?<id>[^/]*))?\/posts\/(?:(?<post>[^/]+)\/?|\/)$/,
+    match: [
+      ["/users/1/posts/2", { id: "1", post: "2" }],
+      ["/users/posts/2", { id: undefined, post: "2" }],
+      ["/users/posts/posts/2", { id: "posts", post: "2" }],
+      ["/users//posts/2", { id: "", post: "2" }],
+    ],
+    noMatch: ["/users/posts", "/users/1/posts", "/users/1/2/posts/3"],
+  },
+  "/a/:x(\\d+){-:y}?/b": {
+    regex: /^\/a\/(?<x>\d+)(?:-(?<y>[^/]+))?\/b\/?$/,
+    match: [
+      ["/a/1/b", { x: "1", y: undefined }],
+      ["/a/1-z/b", { x: "1", y: "z" }],
+      ["/a/12-z-w/b", { x: "12", y: "z-w" }],
+    ],
+    noMatch: ["/a/1-/b", "/a/x-z/b", "/a/1"],
+  },
+  // Several groups merge level by level: `(?:/…)?` per group.
+  "/blog{/:year}?{/:month}?/:slug": {
+    regex: /^\/blog(?:\/(?<year>[^/]*))?(?:\/(?<month>[^/]*))?\/(?:(?<slug>[^/]+)\/?|\/)$/,
+    match: [
+      ["/blog/hi", { year: undefined, month: undefined, slug: "hi" }],
+      ["/blog/2026/hi", { year: "2026", month: undefined, slug: "hi" }],
+      ["/blog/2026/09/hi", { year: "2026", month: "09", slug: "hi" }],
+    ],
+    noMatch: ["/blog", "/blog/a/b/c/d"],
   },
   // A required param that can be empty, followed by an optional one: `/path/`
   // must not match, but `/path//` (`id: ""`) and `/path//tab` must. The
@@ -831,22 +890,29 @@ export const LOOKBEHIND_ROUTES: ReadonlySet<string> = new Set([
   "/files/:name([^.]+)",
   "/path/:x(\\S+)?",
   "/a/**:r/:y?",
+  // Merged expansions (#213) whose ending the look-behind-free forms don't
+  // cover: an alternation between segments, a capture held by look-aheads.
+  "/docs/{v2}?/:page?",
+  "/files/:name{.:ext}?",
 ]);
 
-// Routes whose generated regex reuses the same named capture group across
-// alternation branches (e.g. `(?<id>…)|(?<id>…)`). Such output is legal in JS
-// (per the TC39 duplicate-named-groups proposal) and in Perl, but PCRE2-family
-// engines reject it unless PCRE2_DUPNAMES is set.
-//
-// A trailing single optional group is normally compiled inline as `(?:...)?`
-// (see inlineOptionalGroup in src/regexp.ts), which avoids duplicate names. But
-// a mid-segment optional after a greedy open-ended capture cannot be inlined
-// safely (the capture would swallow the optional literal), so it falls back to
-// alternation and reuses the capture name across branches. These routes exercise
-// that fallback and are asserted to be rejected by strict PCRE2 engines.
-export const PCRE2_DUPLICATE_NAME_ROUTES: ReadonlySet<string> = new Set([
+// Fixtures whose regex holds a param shared by expansions inside one segment
+// with look-aheads (`/files/:name{.:ext}?` declares `name` once, #213). JS, PCRE
+// and Perl run them; RE2-family engines have no look-ahead.
+export const LOOKAHEAD_ROUTES: ReadonlySet<string> = new Set([
   "/media/*{.webp}?",
+  "/files/:name{.:ext}?",
+]);
+
+// Fixtures `regExpToRoute` can't round-trip: their expansions are merged
+// (#213) into an alternation between segments or a capture held by
+// look-aheads, which it rejects, or into optional groups side by side, which
+// it reads back as nested optionals (an equivalent route, another regex).
+export const IRREVERSIBLE_ROUTES: ReadonlySet<string> = new Set([
   "/docs/{v2}?/:page?",
+  "/media/*{.webp}?",
+  "/files/:name{.:ext}?",
+  "/blog{/:year}?{/:month}?/:slug",
 ]);
 
 // Sweep patterns (see `sweepPatterns()`) whose regex keeps the look-behind
@@ -884,41 +950,59 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
   "/a/**/:y?{/b}?",
   "/a/**/{/b}?",
   "/a/:r*/:y?{/b}?",
-]);
-
-// Sweep patterns whose regex reuses a capture group name across alternation
-// branches (see PCRE2_DUPLICATE_NAME_ROUTES). Pinned like the set above.
-export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
-  // A mid-route optional group expands into one full route per branch.
-  "/{b}?/*",
-  "/{b}?/**",
-  "/{b}?/*.png",
-  "/{b}?/:y",
-  "/{b}?/:y?",
-  "/{b}?/x-:y",
-  "/a/{b}?/*",
-  "/a/{b}?/**",
-  "/a/{b}?/*.png",
-  "/a/{b}?/:y",
-  "/a/{b}?/:y?",
-  "/a/{b}?/x-:y",
-  "/{en}?/:page?",
-  "/docs/{v2}?/:page?",
-  // A mid-segment optional after a greedy capture.
-  "/media/*{.webp}?",
-  // A `:x*` before a `*` that is optional in the route without it.
+  // A `:x*` before a `*` that is optional in the route without it, and a
+  // group right after a bare `**`: their expansions merge (#213) into an
+  // alternation between segments, or into optionals the ending can't rebuild.
   "/a/:r*/b/*",
-  "/:r*/*.png/*",
-  "/a/:r*/:y?/*",
   "/a/:r*/b/*/:y?",
-  // A group right after a bare `**`.
   "/a/**{/b/:c?}?",
   "/a/**{.png}?",
+  // Merged expansions (#213): an optional group in a segment that can be
+  // empty without it (`/{b}?/*` is `/b/*` or `//*`), an alternation between
+  // segments, a capture held by look-aheads.
+  "/{b}?/*",
+  "/{b}?/**",
+  "/{b}?/:y?",
+  "/a/{b}?/*",
+  "/a/{b}?/**",
+  "/a/{b}?/:y?",
+  "/{en}?/:page?",
+  "/docs/{v2}?/:page?",
+  "/files/:name{.:ext}?",
+  "/a/:x{.:y}?{.:z}?",
+  "/:x?/a/:y{.json}?",
+  "/a{.:x}?/:y{.json}?",
+]);
+
+// Sweep patterns whose regex holds a shared param with look-aheads (see
+// LOOKAHEAD_ROUTES). Pinned like the set above.
+export const SWEEP_LOOKAHEAD_PATTERNS: ReadonlySet<string> = new Set([
+  "/media/*{.webp}?",
+  "/files/:name{.:ext}?",
+  "/a/:x{.:y}?{.:z}?",
+  "/:x?/a/:y{.json}?",
+  "/a{.:x}?/:y{.json}?",
+  "/a/*{.png}?{/:y}?",
+]);
+
+// Sweep patterns whose expansions no merge fits, so their regex still repeats
+// a group name across alternation branches (Node 22, PCRE2 and RE2 reject
+// it). A `:x*` before a `*` that is optional in the route without it, where
+// that route shares a param with the `:x*` one it can't be factored out of:
+// `/a/:r*/:y?/*` is `/a/**:r/:y?/*` or `/a/:y?/*`. Pinned like the sets above.
+export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
+  "/:r*/*.png/*",
+  "/a/:r*/:y?/*",
 ]);
 
 /** Whether a regex source uses a look-behind (RE2-family engines have none). */
 export function hasLookbehind(source: string): boolean {
   return /\(\?<[=!]/.test(source);
+}
+
+/** Whether a regex source uses a look-ahead (RE2-family engines have none). */
+export function hasLookahead(source: string): boolean {
+  return /\(\?[=!]/.test(source);
 }
 
 /** Capture group names used more than once in a regex source. */
@@ -1030,6 +1114,15 @@ function allSweepPatterns(): string[] {
     "/a/**{/b/:c?}?",
     "/a/**{.png}?",
     "/a/:r*/:y?{/b}?",
+    // Expansions merged into one pattern (#213): group by group, a param
+    // shared inside a segment, optionals the segment count decides, and a
+    // relaxed merge (listed in KNOWN_CAPTURE_DIFFS).
+    "/a{/:x}?{/:y}?/:z",
+    "/a/:x{.:y}?{.:z}?",
+    "/:x?/a/:y{.json}?",
+    "/a{.:x}?/:y{.json}?",
+    "/a/*{.png}?{/:y}?",
+    "/:x?/a{/:y}?/:z",
     ...Object.keys(regexpCases),
   ]);
   // Optional segments nested in an inline group (`/a{/b/*}?`), including an

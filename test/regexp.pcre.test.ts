@@ -7,9 +7,10 @@ import { ripgrep } from "ripgrep";
 import { routeToRegExp } from "../src/index.ts";
 import {
   regexpCases,
+  LOOKAHEAD_ROUTES,
   LOOKBEHIND_ROUTES,
-  PCRE2_DUPLICATE_NAME_ROUTES,
   SWEEP_DUPLICATE_NAME_PATTERNS,
+  SWEEP_LOOKAHEAD_PATTERNS,
   SWEEP_LOOKBEHIND_PATTERNS,
   sweepPaths,
   sweepPatterns,
@@ -23,9 +24,6 @@ type CompileResult = "ok" | "error";
 
 interface PcreTool {
   name: string;
-  // PCRE2-family engines reject duplicate named groups unless PCRE2_DUPNAMES is
-  // set; Perl accepts them. See PCRE2_DUPLICATE_NAME_ROUTES.
-  strictDuplicateNames: boolean;
   // Whether `match` sees the input whole. The grep-like tools read it line by
   // line, so an input with a `\n` can't be tested there.
   wholeInput: boolean;
@@ -57,7 +55,7 @@ function grepLike(
   cmd: string,
   patternArgs: (src: string) => string[],
   env?: NodeJS.ProcessEnv,
-): Omit<PcreTool, "name" | "strictDuplicateNames"> {
+): Omit<PcreTool, "name"> {
   return {
     wholeInput: false,
     compile(source) {
@@ -71,7 +69,7 @@ function grepLike(
   };
 }
 
-const perl: Omit<PcreTool, "name" | "strictDuplicateNames"> = {
+const perl: Omit<PcreTool, "name"> = {
   wholeInput: true,
   compile(source) {
     const r = run("perl", ["-e", "qr/$ENV{RE}/; 1"], { env: { ...process.env, RE: source } });
@@ -85,7 +83,7 @@ const perl: Omit<PcreTool, "name" | "strictDuplicateNames"> = {
   },
 };
 
-const php: Omit<PcreTool, "name" | "strictDuplicateNames"> = (() => {
+const php: Omit<PcreTool, "name"> = (() => {
   const script =
     "$d=chr(1);$r=@preg_match($d.$argv[1].$d,$argv[2]);echo $r===false?'E':($r?'1':'0');";
   const call = (source: string, input: string) => {
@@ -111,16 +109,12 @@ const systemEnv = {
 };
 
 const CANDIDATES: PcreTool[] = [
-  { name: "grep -P", strictDuplicateNames: true, ...grepLike("grep", (s) => ["-Pq", "-e", s]) },
-  {
-    name: "rg -P",
-    strictDuplicateNames: true,
-    ...grepLike("rg", (s) => ["-Pq", "-e", s], systemEnv),
-  },
-  { name: "pcre2grep", strictDuplicateNames: true, ...grepLike("pcre2grep", (s) => ["-q", s]) },
-  { name: "pcregrep", strictDuplicateNames: true, ...grepLike("pcregrep", (s) => ["-q", s]) },
-  { name: "perl", strictDuplicateNames: false, ...perl },
-  { name: "php", strictDuplicateNames: true, ...php },
+  { name: "grep -P", ...grepLike("grep", (s) => ["-Pq", "-e", s]) },
+  { name: "rg -P", ...grepLike("rg", (s) => ["-Pq", "-e", s], systemEnv) },
+  { name: "pcre2grep", ...grepLike("pcre2grep", (s) => ["-q", s]) },
+  { name: "pcregrep", ...grepLike("pcregrep", (s) => ["-q", s]) },
+  { name: "perl", ...perl },
+  { name: "php", ...php },
 ];
 
 // A tool qualifies only if it is installed AND supports `(?<name>...)` PCRE
@@ -152,16 +146,6 @@ describe("routeToRegExp PCRE compatibility", () => {
     describe(tool.name, () => {
       for (const [route, { match, noMatch = [] }] of Object.entries(regexpCases)) {
         const source = routeToRegExp(route).source;
-        const isDuplicateName = PCRE2_DUPLICATE_NAME_ROUTES.has(route);
-
-        if (isDuplicateName && tool.strictDuplicateNames) {
-          it(`rejects duplicate-name output for "${route}"`, () => {
-            // Documents the one known PCRE2 incompatibility.
-            expect(tool.compile(source)).toBe("error");
-          });
-          continue;
-        }
-
         it(`compiles and matches "${route}"`, () => {
           expect(tool.compile(source), `${tool.name} should compile ${source}`).toBe("ok");
           for (const [input] of match) {
@@ -217,7 +201,7 @@ describe("routeToRegExp RE2 compatibility (ripgrep, Rust regex)", () => {
 
   for (const [route, { match, noMatch = [] }] of Object.entries(regexpCases)) {
     const source = routeToRegExp(route).source;
-    if (LOOKBEHIND_ROUTES.has(route) || PCRE2_DUPLICATE_NAME_ROUTES.has(route)) {
+    if (LOOKBEHIND_ROUTES.has(route) || LOOKAHEAD_ROUTES.has(route)) {
       it(`rejects "${route}"`, async () => {
         expect((await re2(source)).code).toBe(2);
       });
@@ -237,17 +221,22 @@ describe("routeToRegExp RE2 compatibility (ripgrep, Rust regex)", () => {
     });
   }
 
-  // Every sweep regex outside the pinned look-behind / duplicate-name sets
-  // (asserted exact in test/regexp.test.ts) compiles in RE2 and matches the
-  // same paths as in JS (which the JS sweep ties to `findRoute`); the pinned
-  // ones really are rejected. One run per pattern, with the paths as input lines.
+  // Every sweep regex outside the pinned look-behind, look-ahead and
+  // duplicate-name sets (asserted exact in test/regexp.test.ts) compiles in
+  // RE2 and matches the same paths as in JS (which the JS sweep ties to
+  // `findRoute`); the pinned ones really are rejected. One run per pattern,
+  // with the paths as input lines.
   it("agrees with JS on the sweep corpus", async () => {
     const paths = lines(sweepPaths());
     const mismatches: string[] = [];
     const compiled: string[] = [];
     for (const pattern of sweepPatterns()) {
       const regex = routeToRegExp(pattern);
-      if (SWEEP_LOOKBEHIND_PATTERNS.has(pattern) || SWEEP_DUPLICATE_NAME_PATTERNS.has(pattern)) {
+      if (
+        SWEEP_LOOKBEHIND_PATTERNS.has(pattern) ||
+        SWEEP_LOOKAHEAD_PATTERNS.has(pattern) ||
+        SWEEP_DUPLICATE_NAME_PATTERNS.has(pattern)
+      ) {
         if ((await re2(regex.source)).code !== 2) compiled.push(pattern);
         continue;
       }

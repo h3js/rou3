@@ -7,11 +7,13 @@ import { canBeEmpty, canEndInSlash } from "../src/_regexp-scan.ts";
 import {
   type Captures,
   regexpCases as routes,
+  LOOKAHEAD_ROUTES,
   LOOKBEHIND_ROUTES,
-  PCRE2_DUPLICATE_NAME_ROUTES,
   SWEEP_DUPLICATE_NAME_PATTERNS,
+  SWEEP_LOOKAHEAD_PATTERNS,
   SWEEP_LOOKBEHIND_PATTERNS,
   duplicateGroupNames,
+  hasLookahead,
   hasLookbehind,
   TWO_CATCH_ALL_ROUTES,
   sweepPaths,
@@ -304,56 +306,49 @@ describe("routeToRegExp", () => {
     }
   });
 
-  // Trailing single optional groups are compiled inline (`(?:...)?`) rather than
-  // expanded into an alternation of full routes, so a param before the group is
-  // never emitted twice. Duplicate named groups are valid JS but rejected by
-  // PCRE2-family engines (see test/regexp.pcre.test.ts). The only exceptions are
-  // routes that cannot be inlined safely and fall back to alternation, tracked
-  // explicitly in PCRE2_DUPLICATE_NAME_ROUTES.
+  // A named group declared twice is rejected by Node 22, PCRE2 and RE2, even
+  // across alternatives (#213): no fixture may emit one, and only the sweep
+  // patterns in SWEEP_DUPLICATE_NAME_PATTERNS do.
   it("does not emit duplicate named capture groups", () => {
     for (const route of Object.keys(routes)) {
-      if (PCRE2_DUPLICATE_NAME_ROUTES.has(route)) {
-        continue;
-      }
       const duplicates = duplicateGroupNames(routeToRegExp(route).source);
       expect(duplicates, `duplicate named groups for "${route}"`).toEqual([]);
     }
-  });
-
-  // Complements the check above: routes tracked as non-inlinable really do emit
-  // duplicate named groups (guards against the set going silently stale).
-  it("known fallback routes emit duplicate named capture groups", () => {
-    for (const route of PCRE2_DUPLICATE_NAME_ROUTES) {
-      const duplicates = duplicateGroupNames(routeToRegExp(route).source);
-      expect(duplicates, `expected duplicate named groups for "${route}"`).not.toEqual([]);
-    }
+    const duplicates = sweepPatterns().filter(
+      (pattern) => duplicateGroupNames(routeToRegExp(pattern).source).length > 0,
+    );
+    expect(duplicates.sort()).toEqual([...SWEEP_DUPLICATE_NAME_PATTERNS].sort());
   });
 
   // RE2-family engines (Go, Rust `regex`, RE2) have no look-around. Only the
-  // shapes tracked in LOOKBEHIND_ROUTES may still need the look-behind suffix.
-  it("emits no look-behind outside LOOKBEHIND_ROUTES", () => {
+  // shapes tracked in LOOKBEHIND_ROUTES may still need the look-behind suffix,
+  // and only those in LOOKAHEAD_ROUTES a look-ahead.
+  it("emits no look-around outside LOOKBEHIND_ROUTES and LOOKAHEAD_ROUTES", () => {
     for (const route of Object.keys(routes)) {
       const source = routeToRegExp(route).source;
       expect(hasLookbehind(source), `look-behind in "${route}": ${source}`).toBe(
         LOOKBEHIND_ROUTES.has(route),
+      );
+      expect(hasLookahead(source), `look-ahead in "${route}": ${source}`).toBe(
+        LOOKAHEAD_ROUTES.has(route),
       );
     }
   });
 
   // The same, over the whole sweep corpus. The RE2 sweep in
   // test/regexp.pcre.test.ts skips exactly these patterns; pinning them here
-  // (no ripgrep needed) makes a change that moves routes onto the look-behind
-  // suffix, or into a duplicate-name alternation, fail loudly.
+  // (no ripgrep needed) makes a change that moves routes onto a look-around
+  // fail loudly.
   it("pins the sweep patterns RE2 engines reject", () => {
     const lookbehind: string[] = [];
-    const duplicates: string[] = [];
+    const lookahead: string[] = [];
     for (const pattern of sweepPatterns()) {
       const source = routeToRegExp(pattern).source;
       if (hasLookbehind(source)) lookbehind.push(pattern);
-      if (duplicateGroupNames(source).length > 0) duplicates.push(pattern);
+      if (hasLookahead(source)) lookahead.push(pattern);
     }
     expect(lookbehind.sort()).toEqual([...SWEEP_LOOKBEHIND_PATTERNS].sort());
-    expect(duplicates.sort()).toEqual([...SWEEP_DUPLICATE_NAME_PATTERNS].sort());
+    expect(lookahead.sort()).toEqual([...SWEEP_LOOKAHEAD_PATTERNS].sort());
   });
 });
 
@@ -388,6 +383,55 @@ describe("routeToRegExp: more than one `**`", () => {
   });
 });
 
+// A param shared by several expansions of a route (an optional group before
+// more of the route, or after a greedy capture) used to be emitted once per
+// branch of a `^(?:…|…)$` alternation. Node 22 (V8 12.4), PCRE2 and RE2
+// reject a group name declared twice even across alternatives, so
+// `routeToRegExp` threw there (#213).
+describe("routeToRegExp: shared params across expansions (#213)", () => {
+  it.each([
+    "/files/:name{.:ext}?",
+    "/users{/:id}?/posts/:post",
+    "/a/:x(\\d+){-:y}?/b",
+    "/docs/{v2}?/:page?",
+    "/media/*{.webp}?",
+    "/a{/:b}?{/:c}?",
+    "/a/:x*/b{.json}?",
+    "/api{/v:version}?/users{/:id}?/posts/:post{.:ext}?",
+    "/:lang?/docs{/:section}?/:page{.:ext}?",
+    "/files{/:dir}?/:name{.:ext}?",
+    "/files/:name{.:ext}?{/raw}?",
+    "/img/*{.webp}?{/:size}?",
+    "/:a{.:b}?{.:c}?",
+    "/x/:a{.:b}?/:c{.:d}?/:e{.:f}?",
+  ])("declares each group once for %s", (route) => {
+    const regex = routeToRegExp(route);
+    expect(duplicateGroupNames(regex.source)).toEqual([]);
+    const router = createRouter();
+    addRoute(router, "", route, true);
+    for (const path of sweepPaths()) {
+      expect(regex.test(path), path).toBe(findRoute(router, "", path) !== undefined);
+    }
+  });
+
+  // Malformed shapes no merge fits (a modifier right before a group) keep the
+  // alternation, which repeats a group name: only engines that support
+  // duplicate named groups compile it.
+  it("keeps the alternation for shapes no merge fits", () => {
+    let duplicatesCompile = true;
+    try {
+      new RegExp("(?<a>x)|(?<a>y)");
+    } catch {
+      duplicatesCompile = false;
+    }
+    if (duplicatesCompile) {
+      expect(duplicateGroupNames(routeToRegExp("/:x?{.json}?").source)).toEqual(["x"]);
+    } else {
+      expect(() => routeToRegExp("/:x?{.json}?")).toThrow(SyntaxError);
+    }
+  });
+});
+
 // A route expansion that declares a param name twice would emit a duplicate
 // named group. Engines disagree on whether that compiles: V8 (Node 24) accepts
 // it when one copy sits inside an alternative (the `**:name` / `:name+` ending),
@@ -417,10 +461,11 @@ describe("routeToRegExp: duplicate param names", () => {
     expect(() => routeToRegExp(route)).toThrowError(`rou3: duplicate param name "${name}"`);
   });
 
-  // Duplicates are per expansion: the alternation fallback repeats a name once
-  // per branch, and generated unnamed captures (`_N`) never collide.
+  // Duplicates are per expansion: expansions may share a name (it is emitted
+  // once, #213), and generated unnamed captures (`_N`) never collide.
   it.each([
-    ...PCRE2_DUPLICATE_NAME_ROUTES,
+    "/media/*{.webp}?",
+    "/docs/{v2}?/:page?",
     "/media/:name{.webp}?",
     "/a/*/*",
     "/a/(\\d+)/(\\d+)",
@@ -529,6 +574,18 @@ function expansions(pattern: string): string[] {
   return modifiers ? modifiers.flatMap((route) => expansions(route)) : [pattern];
 }
 
+// The relaxed merge (#213): an optional param next to an optional group can't
+// share its params across expansions in their order, so where a segment fits
+// either, the earlier optional takes it and the router gives it to a later
+// param (`/:x?/a{/:y}?/:z` on `/a/a/b`: `x`, the router's `y`).
+const RELAXED_MERGE: CaptureDiff = {
+  reason: "a relaxed merge: an optional param takes a segment the router gives a later one",
+  test: (_pattern, keys, groups, params) =>
+    keys.length === 2 &&
+    keys.every((key) => key in groups !== key in params) &&
+    groups[keys.find((key) => key in groups)!] === params[keys.find((key) => key in params)!],
+};
+
 /** Sweep patterns whose captures differ from the router beyond the accepted gap. */
 const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
   ...[
@@ -599,4 +656,5 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     // The router prefers the constrained `y` (see `_selectMatcher`).
     "/a/:x?/:y(\\d+)?",
   ].map((pattern) => [pattern, OPTIONAL_BEFORE_WILDCARD] as const),
+  ["/:x?/a{/:y}?/:z", RELAXED_MERGE],
 ]);
