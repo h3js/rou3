@@ -1,6 +1,21 @@
 // Shared fixtures for routeToRegExp tests (interpreter + cross-engine PCRE checks).
 
-import { addRoute, createRouter } from "../src/index.ts";
+import { addRoute, createRouter, routeToRegExp } from "../src/index.ts";
+
+/**
+ * Whether this engine compiles a named group repeated across alternatives
+ * (V8 12.5+ / Node 23+). Node 22 does not: the alternation-fallback routes
+ * (PCRE2_DUPLICATE_NAME_ROUTES, SWEEP_DUPLICATE_NAME_PATTERNS) throw there, so
+ * their fixtures and sweep entries are left out.
+ */
+export const DUPLICATE_NAMED_GROUPS: boolean = (() => {
+  try {
+    new RegExp("(?<a>x)|(?<a>y)");
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 /** Captures by param name (`_N` groups as `"N"`), `undefined` when unset. */
 export type Captures = Readonly<Record<string, string | undefined>>;
@@ -263,8 +278,9 @@ export const regexpCases: Record<string, RegExpCase> = {
   // An empty segment turns trailing, and is dropped, once the optionals after
   // it are absent: `/docs/{v2}?/:page?` also registers `/docs`.
   "/docs/{v2}?/:page?": {
-    regex:
-      /^(?:\/docs\/v2(?:\/(?<page>[^/]*))??\/?|(?:\/docs\/\/(?:(?<page>[^/]+)\/?|\/)|\/docs\/?))$/,
+    regex: duplicateNames(
+      String.raw`^(?:\/docs\/v2(?:\/(?<page>[^/]*))??\/?|(?:\/docs\/\/(?:(?<page>[^/]+)\/?|\/)|\/docs\/?))$`,
+    ),
     match: [
       ["/docs", { page: undefined }],
       ["/docs/", { page: undefined }],
@@ -400,7 +416,9 @@ export const regexpCases: Record<string, RegExpCase> = {
   // `_0` = `photo`. The fallback reuses the `_0` named group across branches
   // (see PCRE2_DUPLICATE_NAME_ROUTES).
   "/media/*{.webp}?": {
-    regex: /^(?:\/media\/(?<_0>[^/]*)\.webp\/?|\/media(?:\/(?<_0>[^/]*))??\/?)$/,
+    regex: duplicateNames(
+      String.raw`^(?:\/media\/(?<_0>[^/]*)\.webp\/?|\/media(?:\/(?<_0>[^/]*))??\/?)$`,
+    ),
     match: [
       ["/media/photo.webp", { "0": "photo" }],
       ["/media/photo", { "0": "photo" }],
@@ -891,6 +909,11 @@ export const PCRE2_DUPLICATE_NAME_ROUTES: ReadonlySet<string> = new Set([
   "/docs/{v2}?/:page?",
 ]);
 
+// Their regex can't be compiled here (see DUPLICATE_NAMED_GROUPS).
+if (!DUPLICATE_NAMED_GROUPS) {
+  for (const route of PCRE2_DUPLICATE_NAME_ROUTES) delete regexpCases[route];
+}
+
 // Sweep patterns (see `sweepPatterns()`) whose regex keeps the look-behind
 // suffix. RE2-family engines reject them, so the RE2 sweep skips exactly these
 // (test/regexp.pcre.test.ts); pinned in test/regexp.test.ts so a change that
@@ -1005,7 +1028,40 @@ export function duplicateGroupNames(source: string): string[] {
  * fixtures above, minus the routes `addRoute` rejects (a second `**`).
  */
 export function sweepPatterns(): string[] {
-  return allSweepPatterns().filter((pattern) => routerAccepts(pattern));
+  return allSweepPatterns().filter(
+    (pattern) =>
+      routerAccepts(pattern) && (DUPLICATE_NAMED_GROUPS || !needsDuplicateNames(pattern)),
+  );
+}
+
+/**
+ * The sweep patterns `sweepPatterns()` leaves out because this engine lacks
+ * duplicate named groups (always empty where it has them).
+ */
+export function unsupportedSweepPatterns(): string[] {
+  if (DUPLICATE_NAMED_GROUPS) return [];
+  return allSweepPatterns().filter(
+    (pattern) => routerAccepts(pattern) && needsDuplicateNames(pattern),
+  );
+}
+
+/** `routeToRegExp(pattern)` throws for lack of duplicate named groups. */
+export function needsDuplicateNames(pattern: string): boolean {
+  try {
+    routeToRegExp(pattern);
+    return false;
+  } catch (error) {
+    return /duplicate named groups support/.test((error as Error).message);
+  }
+}
+
+/**
+ * A fixture regex with a named group repeated across alternatives. Where the
+ * engine can't compile it, a never-matching placeholder: those fixtures are
+ * removed below (see DUPLICATE_NAMED_GROUPS).
+ */
+function duplicateNames(source: string): RegExp {
+  return DUPLICATE_NAMED_GROUPS ? new RegExp(source) : /(?!)/;
 }
 
 function allSweepPatterns(): string[] {
@@ -1105,6 +1161,8 @@ function allSweepPatterns(): string[] {
     "/a/**{.png}?",
     "/a/:r*/:y?{/b}?",
     ...Object.keys(regexpCases),
+    // Removed from `regexpCases` without duplicate named groups.
+    ...PCRE2_DUPLICATE_NAME_ROUTES,
   ]);
   // Optional segments nested in an inline group (`/a{/b/*}?`), including an
   // empty-capable group head (`{/:x/*}?`) and optional siblings (`{/b/*/:y?}?`).

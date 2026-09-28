@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { routeToRegExp, createRouter, addRoute, findRoute, routeNodeKeys } from "../src/index.ts";
 import { fromGroupName } from "../src/_group-names.ts";
 import { expandGroupDelimiters } from "../src/_group-delimiters.ts";
@@ -6,6 +6,7 @@ import { expandModifiers, splitRoute } from "../src/operations/_utils.ts";
 import { canBeEmpty, canEndInSlash } from "../src/_regexp-scan.ts";
 import {
   type Captures,
+  DUPLICATE_NAMED_GROUPS,
   regexpCases as routes,
   LOOKAHEAD_ROUTES,
   LOOKBEHIND_ROUTES,
@@ -20,7 +21,13 @@ import {
   UNCLOSED_GROUP_ROUTES,
   sweepPaths,
   sweepPatterns,
+  unsupportedSweepPatterns,
 } from "./_regexp-cases.ts";
+
+// The `rou3:` error `routeToRegExp` throws where the engine lacks duplicate
+// named groups (Node 22).
+const NEEDS_DUPLICATE_NAMES =
+  /^rou3: the regex for ".*" repeats a named group across alternatives, which needs duplicate named groups support/;
 
 /**
  * Regex groups keyed like router params (escaped names decoded, `_N` -> `N`).
@@ -258,7 +265,13 @@ describe("routeToRegExp", () => {
     }
     expect(unexpected).toEqual([]);
     // A listed pattern that no longer differs must be removed from the list.
-    expect([...KNOWN_CAPTURE_DIFFS.keys()].filter((pattern) => !seen.has(pattern))).toEqual([]);
+    // (Patterns this engine can't compile, see DUPLICATE_NAMED_GROUPS, aren't swept.)
+    const unsupported = new Set(unsupportedSweepPatterns());
+    expect(
+      [...KNOWN_CAPTURE_DIFFS.keys()].filter(
+        (pattern) => !seen.has(pattern) && !unsupported.has(pattern),
+      ),
+    ).toEqual([]);
     expect(accepted).toBeGreaterThan(0);
   });
 
@@ -328,6 +341,10 @@ describe("routeToRegExp", () => {
   // duplicate named groups (guards against the set going silently stale).
   it("known fallback routes emit duplicate named capture groups", () => {
     for (const route of PCRE2_DUPLICATE_NAME_ROUTES) {
+      if (!DUPLICATE_NAMED_GROUPS) {
+        expect(() => routeToRegExp(route)).toThrowError(NEEDS_DUPLICATE_NAMES);
+        continue;
+      }
       const duplicates = duplicateGroupNames(routeToRegExp(route).source);
       expect(duplicates, `expected duplicate named groups for "${route}"`).not.toEqual([]);
     }
@@ -364,7 +381,10 @@ describe("routeToRegExp", () => {
     }
     expect(lookbehind.sort()).toEqual([...SWEEP_LOOKBEHIND_PATTERNS].sort());
     expect(lookahead.sort()).toEqual([...SWEEP_LOOKAHEAD_PATTERNS].sort());
-    expect(duplicates.sort()).toEqual([...SWEEP_DUPLICATE_NAME_PATTERNS].sort());
+    // Without duplicate named groups, `sweepPatterns()` leaves exactly these out.
+    expect((DUPLICATE_NAMED_GROUPS ? duplicates : unsupportedSweepPatterns()).sort()).toEqual(
+      [...SWEEP_DUPLICATE_NAME_PATTERNS].sort(),
+    );
   });
 });
 
@@ -465,7 +485,58 @@ describe("routeToRegExp: duplicate param names", () => {
     // `:0` escapes to `__rou3_esc_0`, distinct from the unnamed `*` (`_0`).
     "/w/:0/*",
   ])("accepts %s", (route) => {
+    if (!DUPLICATE_NAMED_GROUPS && PCRE2_DUPLICATE_NAME_ROUTES.has(route)) {
+      expect(() => routeToRegExp(route)).toThrowError(NEEDS_DUPLICATE_NAMES);
+      return;
+    }
     expect(() => routeToRegExp(route)).not.toThrow();
+  });
+});
+
+// The alternation fallback repeats a named group across branches; an engine
+// without duplicate named groups (Node 22 / V8 < 12.5) threw a raw
+// `SyntaxError: ... Duplicate capture group name` from `routeToRegExp`.
+describe("routeToRegExp: engines without duplicate named groups", () => {
+  const fallbackRoutes = ["/media/*{.webp}?", "/a{/:x}?{/:y}?", "/a/:rest*/b/*"];
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // Runs on every engine: a `RegExp` that rejects duplicate names like V8 12.4.
+  it.each(fallbackRoutes)("%s throws a rou3: error (simulated engine)", (route) => {
+    const NativeRegExp = RegExp;
+    const StrictRegExp = new Proxy(NativeRegExp, {
+      construct(target, args) {
+        const source = String(args[0]);
+        if (duplicateGroupNames(source).length > 0) {
+          throw new SyntaxError(
+            `Invalid regular expression: /${source}/: Duplicate capture group name`,
+          );
+        }
+        return Reflect.construct(target, args);
+      },
+    });
+    vi.stubGlobal("RegExp", StrictRegExp);
+    let error: unknown;
+    try {
+      routeToRegExp(route);
+    } catch (error_) {
+      error = error_;
+    }
+    vi.unstubAllGlobals();
+    expect(error).toBeInstanceOf(SyntaxError);
+    expect((error as Error).message).toMatch(NEEDS_DUPLICATE_NAMES);
+    expect((error as Error).message).toContain(`"${route}"`);
+    expect(((error as Error).cause as Error).message).toContain("Duplicate capture group name");
+  });
+
+  it.runIf(!DUPLICATE_NAMED_GROUPS).each(fallbackRoutes)("%s throws a rou3: error", (route) => {
+    expect(() => routeToRegExp(route)).toThrowError(NEEDS_DUPLICATE_NAMES);
+  });
+
+  it.runIf(DUPLICATE_NAMED_GROUPS).each(fallbackRoutes)("%s compiles", (route) => {
+    expect(duplicateGroupNames(routeToRegExp(route).source)).not.toEqual([]);
   });
 });
 
@@ -525,7 +596,10 @@ describe("routeToRegExp: optional group before more of the route (#213)", () => 
     "/a/b/b",
   ];
 
-  it.each([...cases, ...fallbacks])("%s routes like findRoute", (route) => {
+  // The fallbacks need duplicate named groups (see DUPLICATE_NAMED_GROUPS).
+  const swept = DUPLICATE_NAMED_GROUPS ? [...cases, ...fallbacks] : cases;
+
+  it.each(swept)("%s routes like findRoute", (route) => {
     const regex = routeToRegExp(route);
     expect(duplicateGroupNames(regex.source).length > 0).toBe(fallbacks.includes(route));
     const router = createRouter();

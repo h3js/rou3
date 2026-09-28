@@ -43,8 +43,9 @@ const LAZY_ANY = "[\\s\\S]*?";
  *
  * Note: other optionals (several groups, `/media/*{.webp}?`) still fall back to
  * alternation and may contain duplicate named groups (valid in Perl and in JS
- * engines that support them, V8 12.5+; they throw on Node 22 and need
- * `PCRE2_DUPNAMES` for strict PCRE2 engines).
+ * engines that support them, V8 12.5+; they need `PCRE2_DUPNAMES` for strict
+ * PCRE2 engines). On an engine without them (Node 22), `routeToRegExp` throws a
+ * `rou3:` `SyntaxError` for these routes.
  *
  * @throws a `rou3:` error when one expansion of `route` declares the same param
  * name twice (`/files/:path/**:path`, `/a/:x{/b/:x}?`); the resulting duplicate
@@ -103,9 +104,18 @@ function toRegExp(route: string, input: string): RegExp {
     // Note: alternation branches may still contain duplicate named capture
     // groups (e.g. `(?<id>a)|(?<id>b)`) for optionals that can't be inlined.
     // This is valid in JS engines with duplicate named groups (V8 12.5+ /
-    // Node 24+, Firefox 129+, Safari 17+), but throws on Node 22 and is not
-    // portable to PCRE2 without PCRE2_DUPNAMES.
-    return new RegExp(`^(?:${sources.join("|")})$`);
+    // Node 23+, Firefox 129+, Safari 17+), but throws on Node 22 and is not
+    // portable to PCRE2 without PCRE2_DUPNAMES. Each branch compiled on its
+    // own, so a `SyntaxError` here is the engine rejecting duplicate names.
+    try {
+      return new RegExp(`^(?:${sources.join("|")})$`);
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      throw new SyntaxError(
+        `rou3: the regex for "${input}" repeats a named group across alternatives, which needs duplicate named groups support (Node.js 23+, Chrome 125+, Firefox 129+, Safari 17+)`,
+        { cause: error },
+      );
+    }
   }
 
   return _routeToRegExp(route, input);

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { addRoute, createRouter, findRoute, regExpToRoute, routeToRegExp } from "../src/index.ts";
 import {
+  DUPLICATE_NAMED_GROUPS,
   regexpCases,
   LOOKAHEAD_ROUTES,
   PCRE2_DUPLICATE_NAME_ROUTES,
@@ -227,7 +228,10 @@ describe("regExpToRoute", () => {
   });
 
   it("throws on the alternation fallback it cannot reverse", () => {
-    const alt = routeToRegExp("/media/*{.webp}?");
+    // Its source, where the engine can't compile it (see DUPLICATE_NAMED_GROUPS).
+    const alt = DUPLICATE_NAMED_GROUPS
+      ? routeToRegExp("/media/*{.webp}?")
+      : String.raw`^(?:\/media\/(?<_0>[^/]*)\.webp\/?|\/media(?:\/(?<_0>[^/]*))??\/?)$`;
     expect(() => regExpToRoute(alt)).toThrow();
   });
 

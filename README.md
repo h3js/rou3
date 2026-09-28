@@ -413,7 +413,7 @@ routeToRegExp("/users{/:id}?/posts/:post");
 When the group extends the param that ends its segment (`/files/:name{.:ext}?`, `/users/:id([\w.]+){.json}?/edit`), a look-ahead gives the param the value the router gives it (`archive.tar.gz` → `name: "archive.tar"`, `ext: "gz"`); RE2-family engines reject that output.
 
 > [!NOTE]
-> Other optionals (several groups, a group whose segment is followed by an optional one like `/{b}?/*`, a mid-segment group after a greedy capture like `/media/*{.webp}?`, a `:name*` before a `*` like `/a/:rest*/b/*`, a group right after a bare `**` like `/a/**{.png}?`) fall back to an alternation and may contain duplicate named groups. That output is valid in JavaScript engines with duplicate named groups (V8 12.5+ / Node 24+, Firefox 129+, Safari 17+) and Perl, throws on Node 22, and requires `PCRE2_DUPNAMES` on strict PCRE2 engines.
+> Other optionals (several groups, a group whose segment is followed by an optional one like `/{b}?/*`, a mid-segment group after a greedy capture like `/media/*{.webp}?`, a `:name*` before a `*` like `/a/:rest*/b/*`, a group right after a bare `**` like `/a/**{.png}?`) fall back to an alternation and may contain duplicate named groups. That output is valid in JavaScript engines with duplicate named groups (V8 12.5+ / Node 23+, Chrome 125+, Firefox 129+, Safari 17+) and Perl, and requires `PCRE2_DUPNAMES` on strict PCRE2 engines. On older engines (Node 22), `routeToRegExp` throws a `rou3:` `SyntaxError` for these routes.
 
 A route that declares the same param name twice (`/files/:path/**:path`; a bare `**` is the `_` param) throws a `rou3:` error, since engines disagree on whether a duplicate named group compiles.
 
