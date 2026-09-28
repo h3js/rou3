@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.10.0
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.9.2...v0.10.0)
+
+### 🚀 Enhancements
+
+- **regexp:** ⚠️  Emit re2-compatible trailing-slash suffix where possible ([#211](https://github.com/h3js/rou3/pull/211))
+- **router:** ⚠️  Support segments after wildcards ([#216](https://github.com/h3js/rou3/pull/216))
+
+### 🩹 Fixes
+
+- Drop excess `..` segments in path normalization ([6ebebb6](https://github.com/h3js/rou3/commit/6ebebb6))
+- **regexp:** Stop emitting segments after a terminal catch-all ([#204](https://github.com/h3js/rou3/pull/204))
+- **regexp:** Anchor catch-all separator to its prefix ([eea9453](https://github.com/h3js/rou3/commit/eea9453))
+- **remove:** Splice one same-node sibling instead of the whole method bucket ([#202](https://github.com/h3js/rou3/pull/202))
+- **regexp:** Match exactly the paths `findRoute` matches ([6368bf5](https://github.com/h3js/rou3/commit/6368bf5))
+- ⚠️  Ignore at most one trailing slash in lookup ([#210](https://github.com/h3js/rou3/pull/210))
+- **regexp:** Inline an optional group before more of the route ([#217](https://github.com/h3js/rou3/pull/217))
+
+### 🌊 Types
+
+- Allow undefined for trailing wildcard params ([#198](https://github.com/h3js/rou3/pull/198))
+
+### 🏡 Chore
+
+- Update deps ([c6bd30a](https://github.com/h3js/rou3/commit/c6bd30a))
+
+#### ⚠️ Breaking Changes
+
+- **regexp:** ⚠️  Emit re2-compatible trailing-slash suffix where possible ([#211](https://github.com/h3js/rou3/pull/211))
+- **router:** ⚠️  Support segments after wildcards ([#216](https://github.com/h3js/rou3/pull/216))
+- ⚠️  Ignore at most one trailing slash in lookup ([#210](https://github.com/h3js/rou3/pull/210))
+
+### ❤️ Contributors
+
+- Pi0x <x@pi0.io>
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+- Taesu ([@bytaesu](https://github.com/bytaesu))
+- SeaStar Deng ([@DSeaStar](https://github.com/DSeaStar))
+- Daniel Roe ([@danielroe](https://github.com/danielroe))
+
 ## v0.9.2
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.9.1...v0.9.2)
