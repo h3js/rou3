@@ -273,9 +273,37 @@ describe("regExpToRoute", () => {
     expect(() => regExpToRoute(/^\/path\/?$/i)).toThrow(/flag/);
     expect(() => regExpToRoute(/^\/path\/?$/m)).toThrow(/flag/);
     expect(() => regExpToRoute(/^\/path\/?$/s)).toThrow(/flag/);
-    // Flags that don't change matching semantics are accepted.
-    expect(regExpToRoute(/^\/path\/?$/u)).toBe("/path");
+    // `u` / `v` change what a constraint means (`\p{L}` is a letter class
+    // with them, the literal `p{L}` without), and routes compile theirs
+    // without flags.
+    expect(() => regExpToRoute(/^\/a\/(?<x>\p{L}+)\/?$/u)).toThrow(/^rou3: .*flag/);
+    expect(() => regExpToRoute(/^\/a\/(?<x>\p{L}+)\/?$/v)).toThrow(/^rou3: .*flag/);
+    expect(() => regExpToRoute(/^\/path\/?$/u)).toThrow(/^rou3: .*flag/);
+    // Flags that don't change what a fully-anchored regex matches are accepted.
     expect(regExpToRoute(/^\/path\/?$/g)).toBe("/path");
+    expect(regExpToRoute(/^\/path\/?$/y)).toBe("/path");
+    expect(regExpToRoute(/^\/path\/?$/d)).toBe("/path");
+    expect(regExpToRoute(/^\/path\/?$/dgy)).toBe("/path");
+  });
+
+  it("rejects regexes that are not anchored at both ends", () => {
+    // An unanchored regex matches any path containing it; a route matches
+    // whole paths only, so the result would be far narrower than the input.
+    for (const re of [
+      /\/users\/(?<id>\d+)/,
+      /\/users$/,
+      /^\/users/,
+      /\/users\/?/,
+      /^\/a\$/, // an escaped `$` is a literal, not an anchor
+      /^\/a\\\$/,
+    ]) {
+      expect(() => regExpToRoute(re), re.source).toThrow(/^rou3: .*anchored/);
+    }
+    for (const source of ["\\/users\\/?", "^\\/users\\/?", "\\/users\\/?$", ""]) {
+      expect(() => regExpToRoute(source), source).toThrow(/^rou3: .*anchored/);
+    }
+    // An escaped backslash before the `$` leaves it an anchor.
+    expect(regExpToRoute(/^\/a\\$/)).toBe("/a\\\\");
   });
 
   it("supports bare (unnamed) capturing groups", () => {
