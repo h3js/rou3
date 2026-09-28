@@ -927,6 +927,7 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
   // nest in it.
   "/a/:x(\\d*)?/:y?",
   "/a/:x?{/b/c}?",
+  "/a{/:x}?/*",
   // Optional siblings after a required segment that can be empty.
   "/a/:x/:y(\\d+)?/:z?",
   // A constraint whose match can end in `/`.
@@ -950,13 +951,10 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
   "/a/**/:y?{/b}?",
   "/a/**/{/b}?",
   "/a/:r*/:y?{/b}?",
-  // A `:x*` before a `*` that is optional in the route without it, and a
-  // group right after a bare `**`: their expansions merge (#213) into an
-  // alternation between segments, or into optionals the ending can't rebuild.
+  // A `:x*` before a `*` that is optional in the route without it: its
+  // expansions merge (#213) into an alternation between segments.
   "/a/:r*/b/*",
   "/a/:r*/b/*/:y?",
-  "/a/**{/b/:c?}?",
-  "/a/**{.png}?",
   // Merged expansions (#213): an optional group in a segment that can be
   // empty without it (`/{b}?/*` is `/b/*` or `//*`), an alternation between
   // segments, a capture held by look-aheads.
@@ -972,6 +970,8 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
   "/a/:x{.:y}?{.:z}?",
   "/:x?/a/:y{.json}?",
   "/a{.:x}?/:y{.json}?",
+  "/:x{.:y}?",
+  "/a/:x{.png}?",
 ]);
 
 // Sweep patterns whose regex holds a shared param with look-aheads (see
@@ -983,16 +983,30 @@ export const SWEEP_LOOKAHEAD_PATTERNS: ReadonlySet<string> = new Set([
   "/:x?/a/:y{.json}?",
   "/a{.:x}?/:y{.json}?",
   "/a/*{.png}?{/:y}?",
+  "/:x{.:y}?",
+  "/a/:x{.png}?",
 ]);
 
-// Sweep patterns whose expansions no merge fits, so their regex still repeats
-// a group name across alternation branches (Node 22, PCRE2 and RE2 reject
-// it). A `:x*` before a `*` that is optional in the route without it, where
-// that route shares a param with the `:x*` one it can't be factored out of:
-// `/a/:r*/:y?/*` is `/a/**:r/:y?/*` or `/a/:y?/*`. Pinned like the sets above.
+// Sweep patterns whose expansions no merge fits with the alternation's
+// captures, so their regex still repeats a group name across alternation
+// branches (Node 22, PCRE2 and RE2 reject it). Pinned like the sets above.
 export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
+  // A `:x*` before a `*` that is optional in the route without it, sharing a
+  // param with that route (`/a/:r*/:y?/*` is `/a/**:r/:y?/*` or `/a/:y?/*`).
   "/:r*/*.png/*",
   "/a/:r*/:y?/*",
+  // A catch-all before a group: it can match in several ways, so it can't
+  // be factored out of the expansions without taking the group's part.
+  "/a/**{/b/:c?}?",
+  "/a/**{.png}?",
+  "/a/**:r{/b}?",
+  "/a/:p+{/:n(\\d+)}?",
+  // Two params held by look-aheads in one segment (see LOOKAHEAD_ROUTES):
+  // on a path that doesn't match, each one retries the others.
+  "/a/:x{.:y}?{.:z}?",
+  // An optional param before a group of the same segment count: which one a
+  // segment goes to depends on the order of the expansions.
+  "/:x?/a{/:y}?/:z",
 ]);
 
 /** Whether a regex source uses a look-behind (RE2-family engines have none). */
@@ -1123,6 +1137,16 @@ function allSweepPatterns(): string[] {
     "/a{.:x}?/:y{.json}?",
     "/a/*{.png}?{/:y}?",
     "/:x?/a{/:y}?/:z",
+    // A catch-all or a constraint before a group: it can match in several
+    // ways, so a merge must not take the group's part into it.
+    "/a/**:r{/b}?",
+    "/a/:p+{/:n(\\d+)}?",
+    "/a/:x([a-z0-9-]+){-:n(\\d+)}?",
+    "/a/:x([a-z]+){b}?",
+    "/:x{.:y}?",
+    "/a/:x{.png}?",
+    // An optional group before a `*`: the ending applies to the merged body.
+    "/a{/:x}?/*",
     ...Object.keys(regexpCases),
   ]);
   // Optional segments nested in an inline group (`/a{/b/*}?`), including an
@@ -1176,6 +1200,12 @@ export function sweepPaths(): string[] {
     }
   };
   walk("", 3);
+  // Names with several dots, and values a constraint and a group can split
+  // in several ways (`a-1` for `:x([a-z0-9-]+){-:n(\d+)}?`, `ab` for
+  // `:x([a-z]+){b}?`).
+  for (const path of ["/x.b.png", "/a/x.b.png", "/a/x.b.png/b", "/a/a-1", "/a/ab", "/a/a/ab"]) {
+    paths.add(path).add(`${path}/`).add(`${path}//`);
+  }
   // The router splits on `/` only, so line terminators are ordinary chars:
   // alone, at either end of a segment, mid-path and last.
   for (const lt of ["\n", "\r", "\u2028", "\u2029"]) {

@@ -6,30 +6,31 @@ import { ATOM } from "./_regexp-scan.ts";
 // `/users{/:id}?/posts/:post` can't just be OR-ed: `post` is in both.
 //
 // A body is handled as its top-level items (a group, class, escape or char,
-// with its quantifier). Every step keeps the matched language. A strict merge
-// also keeps the order in which a backtracking engine tries the alternatives,
-// so the captures stay those of the plain alternation (the first expansion
-// wins where several match a path):
+// with its quantifier). Every step keeps the matched language, and the order
+// in which a backtracking engine tries the alternatives, so the captures stay
+// those of the plain alternation (the first expansion wins where several
+// match a path):
 // - A common tail is factored out: `(?:a|b)T` tries what `aT|bT` does.
-// - So is a common head, up to a quantified item: without one, the head has
-//   a single way to match, so `H(?:a|b)` tries what `Ha|Hb` does. The
-//   exceptions are optional groups whose choice the input decides anyway
-//   (`countsChoice`). A head is also cut before an open-ended capture whose
-//   segment goes on past it: the capture would swallow what differs
-//   (`mergeCapture` takes it instead).
+// - So is a common head of items with one way to match (`oneParse`), so that
+//   `H(?:a|b)` tries what `Ha|Hb` does. A quantifier or an alternation stops
+//   it (`/docs/**{.md}?`: `[\s\S]*` would take the `.md`), unless the item is
+//   a whole segment (it ends at the next `/`) or an optional group whose
+//   choice the input decides anyway (`countsChoice`).
 // - An optional or alternation item holding a shared name is split into its
 //   alternatives, when nothing quantified precedes it.
 // - Alternatives are only moved past ones no input can match along with them
 //   (`disjoint`).
-// A relaxed merge drops these order rules: the path set stays exact, but where
-// several expansions match one path, another one's captures may be reported.
+// A merge longer than its limit gives up: every look-ahead copies a rest, and
+// merging merged bodies again copied those, until the heap ran out. The caller
+// sets it to 3× the unmerged expansions.
 
 /**
  * `bodies` (in preference order) merged into one body with no named group
- * declared twice, or `undefined` when no merge is known for their shape.
+ * declared twice and at most `limit` long, or `undefined` when no merge is
+ * known for their shape.
  */
-export function mergeBodies(bodies: string[], relaxed = false): string | undefined {
-  const state: State = { steps: 0, origin: new Map(), relaxed };
+export function mergeBodies(bodies: string[], limit: number): string | undefined {
+  const state: State = { steps: 0, origin: new Map(), limit };
   const alternatives = bodies.map((body, i) => {
     const alternative = splitItems(body);
     state.origin.set(alternative, i);
@@ -50,7 +51,8 @@ interface State {
   steps: number;
   /** The body an alternative comes from: parts of one body pair up with other bodies first. */
   origin: Map<Alternative, number>;
-  relaxed: boolean;
+  /** The largest alternative a merge may build (see the top of the file). */
+  limit: number;
 }
 
 const MAX_STEPS = 256;
@@ -66,12 +68,17 @@ function mergeAlternatives(
   after: number | undefined,
   state: State,
 ): Alternative | undefined {
-  if (++state.steps > MAX_STEPS) return;
+  if (
+    ++state.steps > MAX_STEPS ||
+    alternatives.some((alternative) => alternative.join("").length > state.limit)
+  ) {
+    return;
+  }
   alternatives = dedupe(alternatives);
   if (alternatives.length === 1) {
     return alternatives[0];
   }
-  const [head, mids, tail] = factor(alternatives, after, state);
+  const [head, mids, tail] = factor(alternatives, rest, after, state);
   // The tail up to its first segment boundary, then `rest` if there is none.
   const cut = tail.findIndex((item) => boundary(item));
   const segment = cut === -1 ? tail : tail.slice(0, cut);
@@ -81,7 +88,8 @@ function mergeAlternatives(
       ? rest && [...segment, ...rest]
       : segment;
   const merged = mergeMids(mids, midsRest, add(segmentCount(tail), after), state);
-  return merged && [...head, ...merged, ...tail];
+  const result = merged && [...head, ...merged, ...tail];
+  return result && result.join("").length <= state.limit ? result : undefined;
 }
 
 /** Merge alternatives with no common head or tail. */
@@ -142,13 +150,17 @@ function mergeCapture(
     !groupA ||
     !groupB ||
     groupA[1] !== groupB[1] ||
+    // One look-ahead capture per segment: on a path that doesn't match, each
+    // one retries the others (`/a/:name{.:hash}?{.:ext}?` took 7.4 s on a
+    // 2 KB path, the alternation 0.5 s).
+    [...a, ...b, ...rest].some((item) => item.includes("(?=")) ||
     !restA.every((item) => slashFree(item)) ||
     !restB.every((item) => slashFree(item))
   ) {
     return;
   }
   const merged = mergeAlternatives([restA, restB], rest, after, state);
-  if (!merged) return;
+  if (!merged || merged.some((item) => item.includes("(?="))) return;
   const until = (pattern: string, own: Alternative) => {
     const ahead = unnamed([...own, ...rest].join(""));
     return `${wrap(pattern)}(?=${ahead ? `${ahead}(?:/|$)` : "/|$"})`;
@@ -174,7 +186,7 @@ function expandShared(mids: Alternative[], state: State): Alternative[] | undefi
       ) {
         best = [i, k];
       }
-      if (!state.relaxed && quantified(item)) break;
+      if (quantified(item)) break;
     }
   }
   if (!best) return;
@@ -201,30 +213,27 @@ function expandShared(mids: Alternative[], state: State): Alternative[] | undefi
  */
 function factor(
   alternatives: Alternative[],
+  rest: Alternative | undefined,
   after: number | undefined,
   state: State,
 ): [Alternative, Alternative[], Alternative] {
   const first = alternatives[0];
   const min = Math.min(...alternatives.map((alternative) => alternative.length));
+  const same = (i: number) => alternatives.every((alternative) => alternative[i] === first[i]);
   let h = 0;
-  while (
-    h < min &&
-    alternatives.every((alternative) => alternative[h] === first[h]) &&
-    (state.relaxed || !quantified(first[h]) || countsChoice(alternatives, h, after))
-  ) {
-    h++;
-  }
-  // An open-ended capture whose segment goes on past the head would take
-  // what differs after it (`/media/*{.webp}?` capturing `photo.webp`).
-  const open = alternatives.some(
-    (alternative) => h < alternative.length && !boundary(alternative[h]),
-  )
-    ? first.slice(0, h).findLastIndex((item) => boundary(item))
-    : h;
-  for (let i = open + 1; i < h; i++) {
-    if (/(?:\[\^\/\]|\[\\s\\S\]|\.)[*+]\)$/.test(first[i])) {
-      h = i;
+  for (;;) {
+    while (h < min && same(h) && oneParse(alternatives, h, rest, after)) {
+      h++;
     }
+    // A common segment that can't match a `/` and ends in one everywhere
+    // ends there however it splits (`(?<a>[^/]+)\.(?<b>[^/]+)/`), so what
+    // follows can't tell its parses apart: the first one is taken either way.
+    let end = h;
+    while (end < min && same(end) && first[end] !== "/" && slashFree(first[end])) {
+      end++;
+    }
+    if (end === h || end >= min || !same(end) || first[end] !== "/") break;
+    h = end + 1;
   }
   let t = 0;
   while (
@@ -247,6 +256,42 @@ function factor(
     state.origin.set(mids[i], state.origin.get(alternatives[i])!);
   }
   return [first.slice(0, headEnd), mids, first.slice(tailStart)];
+}
+
+/**
+ * Whether the item at `h`, common to all alternatives, has one way to match
+ * a given input: it has no quantifier or alternation, or it is a whole
+ * segment (it can't match a `/` and a segment end follows it everywhere), or
+ * a capture of a char run followed everywhere by a char it can't match
+ * (`/a/:x(\d+){-:y}?/b`: `\d+` before `-` or `/`), or an optional group the
+ * path's segment count decides (`countsChoice`). `rest`: what follows the
+ * alternatives (see `mergeAlternatives`).
+ */
+function oneParse(
+  alternatives: Alternative[],
+  h: number,
+  rest: Alternative | undefined,
+  after: number | undefined,
+): boolean {
+  const item = alternatives[0][h];
+  if (!(item.match(ATOM) || []).some((atom) => /^(?:[*+?|]|\{\d)/.test(atom))) {
+    return true;
+  }
+  const next = alternatives.map((alternative) => {
+    const following = h + 1 < alternative.length ? alternative[h + 1] : rest?.[0];
+    // The end of the segment (a `/` or the end of the input).
+    if (following === undefined) return rest && "/";
+    const char = /^(?:\\([^\dA-Za-z])|([^\\^$.|?*+()[\]{}]))$/.exec(following);
+    return char ? char[1] || char[2] : undefined;
+  });
+  if (!quantified(item) && slashFree(item) && next.every((char) => char === "/")) {
+    return true;
+  }
+  const run = /^\(\?<\w+>(\\[^]|\[(?:\\[^]|[^\\\]])*\]|[^\\[(])[*+]\)$/.exec(item);
+  if (run && next.every((char) => char !== undefined && !new RegExp(`^${run[1]}$`).test(char))) {
+    return true;
+  }
+  return countsChoice(alternatives, h, after);
 }
 
 /**
@@ -303,7 +348,7 @@ function sharedPairs(
     for (let i = 0; i < j; i++) {
       if (!sharesName(mids[i], mids[j])) continue;
       shared = true;
-      if (!state.relaxed && !mids.slice(i + 1, j).every((mid) => disjoint(mid, mids[j], after))) {
+      if (!mids.slice(i + 1, j).every((mid) => disjoint(mid, mids[j], after))) {
         continue;
       }
       const own = state.origin.get(mids[i]) === state.origin.get(mids[j]);

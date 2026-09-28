@@ -398,11 +398,9 @@ describe("routeToRegExp: shared params across expansions (#213)", () => {
     "/a{/:b}?{/:c}?",
     "/a/:x*/b{.json}?",
     "/api{/v:version}?/users{/:id}?/posts/:post{.:ext}?",
-    "/:lang?/docs{/:section}?/:page{.:ext}?",
     "/files{/:dir}?/:name{.:ext}?",
     "/files/:name{.:ext}?{/raw}?",
     "/img/*{.webp}?{/:size}?",
-    "/:a{.:b}?{.:c}?",
     "/x/:a{.:b}?/:c{.:d}?/:e{.:f}?",
   ])("declares each group once for %s", (route) => {
     const regex = routeToRegExp(route);
@@ -414,20 +412,75 @@ describe("routeToRegExp: shared params across expansions (#213)", () => {
     }
   });
 
-  // Malformed shapes no merge fits (a modifier right before a group) keep the
+  // A merge keeps the captures of the alternation, i.e. the router's here:
+  // a catch-all or a constraint before a group can match in several ways, so
+  // factoring it out of the expansions would let it take the group's part.
+  it.each([
+    ["/files/**:path{/raw}?", "/files/a/b/raw"],
+    ["/api/:path+{/:id(\\d+)}?", "/api/a/b/1"],
+    ["/docs/**{.md}?", "/docs/a/b.md"],
+    ["/a/**{.png}?", "/a/a/x.png"],
+    ["/a/**{/b/:c?}?", "/a/a/b/1"],
+    ["/posts/:slug([a-z0-9-]+){-:id(\\d+)}?/edit", "/posts/my-post-12/edit"],
+    ["/a/:x([a-z]+){s}?/b", "/a/cats/b"],
+    ["/a/:x(ab|a){b}?c", "/a/abc"],
+    ["/api{/v2}?{/:id}?/edit", "/api/v2/edit"],
+    ["/:x/:y?{/raw}?/:z", "/a/raw/b"],
+    ["/:lang?/docs{/:section}?/:page", "/docs/docs/p"],
+  ])("captures like findRoute: %s on %s", (route, path) => {
+    const router = createRouter();
+    addRoute(router, "", route, true);
+    const found = findRoute(router, "", path);
+    expect(found, "router").toBeDefined();
+    const regex = compileOrSkip(route);
+    if (!regex) return;
+    const match = path.match(regex);
+    expect(match, "regex").not.toBeNull();
+    expect(definedCaptures(normalizeGroups(match!.groups))).toEqual(definedCaptures(found!.params));
+  });
+
+  // Merging must stay small: every look-ahead copies the rest of its
+  // segment, and merging again copied those into more look-aheads (with
+  // several groups in one segment, the output grew until the heap ran out:
+  // `/:lang?/*{.min}?{.:ext}?`). A merge that would outgrow the plain
+  // alternation gives up.
+  it.each([
+    "/:lang?/*{.min}?{.:ext}?",
+    "/docs/:lang?/*{.min}?{.:ext}?",
+    "/:q?/*{.json}?{.:x}?",
+    "/a/*{.:x}?{-:y}?",
+    "/img/*{.:format}?{-:size}?",
+    "/a/:v{.:x}?{.:y}?{.:z}?{.:w}?{.:u}?{.:t}?",
+  ])("stays within the size of the alternation for %s", (route) => {
+    const alternation = new Set(expansions(route).map((r) => routeToRegExp(r).source.slice(1, -1)));
+    const bound = [...alternation].join("|").length + 8;
+    let source: string;
+    try {
+      source = routeToRegExp(route).source;
+    } catch (error) {
+      if (duplicatesCompile || !(error instanceof SyntaxError)) throw error;
+      return;
+    }
+    expect(source.length).toBeLessThanOrEqual(2 * bound);
+  });
+
+  // Shapes no merge fits with the alternation's captures keep the
   // alternation, which repeats a group name: only engines that support
   // duplicate named groups compile it.
-  it("keeps the alternation for shapes no merge fits", () => {
-    let duplicatesCompile = true;
-    try {
-      new RegExp("(?<a>x)|(?<a>y)");
-    } catch {
-      duplicatesCompile = false;
-    }
+  it.each([
+    // A modifier right before a group (malformed).
+    ["/:x?{.json}?", ["x"]],
+    // A catch-all before a group.
+    ["/docs/**{.md}?", ["_"]],
+    // Two look-ahead captures in one segment.
+    ["/a/:name{.:hash}?{.:ext}?", ["name", "name", "hash", "ext"]],
+    // An optional param next to a group of the same segment count.
+    ["/:lang?/docs{/:section}?/:page", ["lang", "page"]],
+  ])("keeps the alternation for %s", (route, names) => {
     if (duplicatesCompile) {
-      expect(duplicateGroupNames(routeToRegExp("/:x?{.json}?").source)).toEqual(["x"]);
+      expect(duplicateGroupNames(routeToRegExp(route).source).sort()).toEqual(names.sort());
     } else {
-      expect(() => routeToRegExp("/:x?{.json}?")).toThrow(SyntaxError);
+      expect(() => routeToRegExp(route)).toThrow(SyntaxError);
     }
   });
 });
@@ -543,6 +596,21 @@ const OPTIONAL_BEFORE_WILDCARD: CaptureDiff = {
     Object.values(groups)[0] === Object.values(params)[0],
 };
 
+// Pre-existing: a trailing group compiles inline after a constrained param
+// (`(?<x>[a-z]+)(?:b)?`), so a constraint that can match the group's start
+// takes it, where the router prefers the expansion with the group (`/a/ab`:
+// `x: "ab"`, the router's `x: "a"`). Holding the param with a look-ahead, as
+// merged expansions do, would make these routes RE2-incompatible.
+const INLINE_AFTER_CONSTRAINT: CaptureDiff = {
+  reason: "a constrained param takes the start of the inline group after it",
+  test: (_pattern, keys, groups, params) =>
+    keys.every(
+      (key) =>
+        !(key in groups) ||
+        (key in params && groups[key].startsWith(params[key]) && groups[key] !== params[key]),
+    ),
+};
+
 // Several optional segments after a catch-all (or a `:x*` before a `*`):
 // the router ranks the routes the pattern registers from the end of the
 // path, per path, while the regex's catch-all is lazy or greedy as a whole
@@ -567,24 +635,34 @@ const OTHER_EXPANSION: CaptureDiff = {
 };
 
 /** The routes `addRoute` registers for `pattern` (groups, then modifiers). */
+/** Whether this engine compiles a group name declared twice (Node 23+). */
+const duplicatesCompile = (() => {
+  try {
+    new RegExp("(?<a>x)|(?<a>y)");
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+/**
+ * `routeToRegExp(route)`, or `undefined` where it repeats a group name (a
+ * shape no merge fits) and this engine rejects that.
+ */
+function compileOrSkip(route: string): RegExp | undefined {
+  try {
+    return routeToRegExp(route);
+  } catch (error) {
+    if (duplicatesCompile || !(error instanceof SyntaxError)) throw error;
+  }
+}
+
 function expansions(pattern: string): string[] {
   const groups = expandGroupDelimiters(pattern);
   if (groups) return groups.flatMap((route) => expansions(route));
   const modifiers = expandModifiers(splitRoute(pattern));
   return modifiers ? modifiers.flatMap((route) => expansions(route)) : [pattern];
 }
-
-// The relaxed merge (#213): an optional param next to an optional group can't
-// share its params across expansions in their order, so where a segment fits
-// either, the earlier optional takes it and the router gives it to a later
-// param (`/:x?/a{/:y}?/:z` on `/a/a/b`: `x`, the router's `y`).
-const RELAXED_MERGE: CaptureDiff = {
-  reason: "a relaxed merge: an optional param takes a segment the router gives a later one",
-  test: (_pattern, keys, groups, params) =>
-    keys.length === 2 &&
-    keys.every((key) => key in groups !== key in params) &&
-    groups[keys.find((key) => key in groups)!] === params[keys.find((key) => key in params)!],
-};
 
 /** Sweep patterns whose captures differ from the router beyond the accepted gap. */
 const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
@@ -655,6 +733,11 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/a/:x(\\d+)?/*",
     // The router prefers the constrained `y` (see `_selectMatcher`).
     "/a/:x?/:y(\\d+)?",
+    // Merged (#213): the ending applies once to the merged body, not per
+    // expansion, so on `/a//` `x` takes the empty segment as it does here.
+    "/a{/:x}?/*",
   ].map((pattern) => [pattern, OPTIONAL_BEFORE_WILDCARD] as const),
-  ["/:x?/a{/:y}?/:z", RELAXED_MERGE],
+  ...["/a/:x([a-z0-9-]+){-:n(\\d+)}?", "/a/:x([a-z]+){b}?"].map(
+    (pattern) => [pattern, INLINE_AFTER_CONSTRAINT] as const,
+  ),
 ]);

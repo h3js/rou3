@@ -46,14 +46,15 @@ const LAZY_ANY = "[\\s\\S]*?";
  * required segment whose constraint can match empty). A param shared inside
  * one segment needs its look-ahead.
  *
- * Note: where several expansions match one path, the captures are the first
- * expansion's, as the router's usually are, unless the merge can't keep that
- * order: next to an optional param (`/:lang?/docs{/:section}?/:page` on
- * `/docs/docs/p`), another expansion's may be reported. Shapes no merge fits
- * still fall back to an alternation repeating a group name, which only engines
- * supporting duplicate named groups compile: malformed ones (a modifier right
- * before a group, `/:x?{.json}?`), and a `:x*` before a `*` sharing a param
- * with the route without the `:x*` (`/a/:r*\/:y?/*`).
+ * Note: a merge keeps the captures of the alternation (where several
+ * expansions match one path, the first one's, as the router's usually are).
+ * Shapes no merge fits that way still fall back to the alternation, which
+ * repeats a group name and only compiles in engines supporting duplicate
+ * named groups (it throws on Node 22): several groups in one segment
+ * (`/a/:name{.:hash}?{.:ext}?`), a catch-all before a group (`/docs/**{.md}?`),
+ * a param whole in one expansion and followed by a group in another
+ * (`/api/:resource{/:id}?{.:format}?`), an optional param next to a group
+ * (`/:lang?/docs{/:section}?/:page`), and malformed ones (`/:x?{.json}?`).
  *
  * @throws a `rou3:` error when one expansion of `route` declares the same param
  * name twice (`/files/:path/**:path`, `/a/:x{/b/:x}?`); the resulting duplicate
@@ -97,10 +98,8 @@ export function routeToRegExp(route: string = "/"): RegExp {
   if (!sharesName(sources)) {
     return new RegExp(`^(?:${sources.join("|")})$`);
   }
-  // `routeAlternatives` merged what it could with the captures unchanged. The
-  // rest is merged regardless: the paths stay exact, but where several
-  // expansions match a path, another one's captures may be reported.
-  const merged = mergeExpansions([...unique.values()], true);
+  // Expansions that compile alike are gone: they may merge now.
+  const merged = mergeExpansions([...unique.values()]);
   if (merged) {
     return compile(...merged);
   }
@@ -124,8 +123,10 @@ function compile(body: string, starStar: boolean, openTail: string | boolean = f
  * The bodies `route` matches with: one, or one per expansion when a group or
  * modifier can't be compiled inline (they expand exactly like `addRoute`:
  * groups first, then modifiers) and the expansions can't be merged.
+ * `sizes`: the total length of the unmerged bodies behind a merged one, which
+ * bounds how large merging may make it (see `mergeBodies`).
  */
-function routeAlternatives(route: string): Alternative[] {
+function routeAlternatives(route: string, sizes = new Map<string, number>()): Alternative[] {
   // Compile a trailing single optional group (`{...}?`) inline as `(?:...)?`
   // instead of expanding it into one body per branch: those would re-emit
   // every param before the group.
@@ -140,26 +141,32 @@ function routeAlternatives(route: string): Alternative[] {
     const [segments, ownSeparator, starStar, openTail] = routeToRegExpSegments(route);
     return [[segments.length > 0 ? joinSegments(segments, ownSeparator) : "", starStar, openTail]];
   }
-  const alternatives = expanded.flatMap((expandedRoute) => routeAlternatives(expandedRoute));
+  const alternatives = expanded.flatMap((expandedRoute) => routeAlternatives(expandedRoute, sizes));
   // A param the expansions share (`/users{/:id}?/posts/:post`) can't repeat
   // across alternation branches: Node 22, PCRE2 and RE2 reject a group name
   // declared twice (#213). Merge them into one body where the captures stay
   // those of the alternation. Merging level by level keeps the expansions'
   // structure: `/a{/:b}?{/:c}?` is `/a(?:/b)?` with `(?:/c)?` after it.
   const merged = sharesName(alternatives.map(([body]) => body))
-    ? mergeExpansions(alternatives, false)
+    ? mergeExpansions(alternatives, sizes)
     : undefined;
   return merged ? [merged] : alternatives;
 }
 
-function mergeExpansions(alternatives: Alternative[], relaxed: boolean): Alternative | undefined {
+function mergeExpansions(
+  alternatives: Alternative[],
+  sizes = new Map<string, number>(),
+): Alternative | undefined {
+  let size = 0;
+  for (const [body] of alternatives) size += sizes.get(body) ?? body.length;
   const body = mergeBodies(
     alternatives.map(([body]) => body),
-    relaxed,
+    3 * size,
   );
   if (body === undefined) {
     return;
   }
+  sizes.set(body, size);
   // A plain `/?$` is exact for the merged body when it is for every
   // expansion (the paths are their union); it can still nest optionals after
   // one same catch-all group.
@@ -241,7 +248,7 @@ function inlineOptionalGroup(route: string): Alternative | undefined {
     // `(?:tail)?` lets that capture swallow the optional literal instead of
     // leaving it out — changing the captured value (`/media/*{.webp}?` would
     // capture the whole `photo.webp` instead of `photo`). Fall back to
-    // alternation, which anchors the literal outside the capture in one branch.
+    // expansion, which merges into a capture held to each expansion's rest.
     if (/(?:\[\^\/\]|\[\\s\\S\]|\.)[*+]\)?$/.test(prefix)) {
       return;
     }
