@@ -10,6 +10,7 @@ import {
   LOOKBEHIND_ROUTES,
   PCRE2_DUPLICATE_NAME_ROUTES,
   SWEEP_DUPLICATE_NAME_PATTERNS,
+  SWEEP_LOOKAHEAD_PATTERNS,
   SWEEP_LOOKBEHIND_PATTERNS,
   sweepPaths,
   sweepPatterns,
@@ -237,7 +238,7 @@ describe("routeToRegExp RE2 compatibility (ripgrep, Rust regex)", () => {
     });
   }
 
-  // Every sweep regex outside the pinned look-behind / duplicate-name sets
+  // Every sweep regex outside the pinned look-around / duplicate-name sets
   // (asserted exact in test/regexp.test.ts) compiles in RE2 and matches the
   // same paths as in JS (which the JS sweep ties to `findRoute`); the pinned
   // ones really are rejected. One run per pattern, with the paths as input lines.
@@ -247,7 +248,11 @@ describe("routeToRegExp RE2 compatibility (ripgrep, Rust regex)", () => {
     const compiled: string[] = [];
     for (const pattern of sweepPatterns()) {
       const regex = routeToRegExp(pattern);
-      if (SWEEP_LOOKBEHIND_PATTERNS.has(pattern) || SWEEP_DUPLICATE_NAME_PATTERNS.has(pattern)) {
+      if (
+        SWEEP_LOOKBEHIND_PATTERNS.has(pattern) ||
+        SWEEP_LOOKAHEAD_PATTERNS.has(pattern) ||
+        SWEEP_DUPLICATE_NAME_PATTERNS.has(pattern)
+      ) {
         if ((await re2(regex.source)).code !== 2) compiled.push(pattern);
         continue;
       }

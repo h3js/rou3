@@ -22,9 +22,11 @@ const ANY = "[\\s\\S]*";
  * The generated source targets a **PCRE-compatible** flavor: named groups use
  * the `(?<name>...)` form and no JS-only constructs are emitted, so the output
  * also compiles in PCRE2 engines (`grep -P`, `rg -P`, `pcre2grep`, PHP `preg_*`)
- * and Perl. Trailing optional groups (`{...}?`, `:name?`) are compiled inline as
+ * and Perl. Optional segments (`:name?`) and a single optional group ending a
+ * segment (`{...}?`, also before more of the route) are compiled inline as
  * `(?:...)?` rather than an alternation, so a param is never emitted as a
- * duplicate named group — which PCRE2 rejects unless `PCRE2_DUPNAMES` is set.
+ * duplicate named group — which PCRE2 rejects unless `PCRE2_DUPNAMES` is set,
+ * and V8 before 12.5 (Node 22) rejects outright.
  *
  * The regex matches exactly the paths `findRoute()` matches for a router holding
  * only `route` — including the router's tolerances: one optional trailing slash,
@@ -38,9 +40,10 @@ const ANY = "[\\s\\S]*";
  * endings `withTrailingSlash` lists (e.g. a constraint that can end in `/`, or a
  * required segment whose constraint can match empty).
  *
- * Note: multi-group or mid-route optionals that cannot be inlined still fall
- * back to alternation and may contain duplicate named groups (valid in JS/Perl,
- * but requiring `PCRE2_DUPNAMES` for strict PCRE2 engines).
+ * Note: other optionals (several groups, `/media/*{.webp}?`) still fall back to
+ * alternation and may contain duplicate named groups (valid in Perl and in JS
+ * engines that support them, V8 12.5+; they throw on Node 22 and need
+ * `PCRE2_DUPNAMES` for strict PCRE2 engines).
  *
  * @throws a `rou3:` error when one expansion of `route` declares the same param
  * name twice (`/files/:path/**:path`, `/a/:x{/b/:x}?`); the resulting duplicate
@@ -55,7 +58,7 @@ export function routeToRegExp(route: string = "/"): RegExp {
     route = `/${route}`;
   }
 
-  // Compile a trailing single optional group (`{...}?`) inline as `(?:...)?`
+  // Compile a single optional group (`{...}?`) inline as `(?:...)?`
   // instead of expanding it into an alternation of full routes. The alternation
   // form re-emits every param before the group in both branches, producing
   // duplicate named groups that PCRE2-family engines reject.
@@ -81,9 +84,9 @@ export function routeToRegExp(route: string = "/"): RegExp {
       return new RegExp(`^${sources[0]}$`);
     }
     // Note: alternation branches may still contain duplicate named capture
-    // groups (e.g. `(?<id>a)|(?<id>b)`) for multi-group / mid-route optionals
-    // that can't be inlined. This is valid in modern JS engines (Node 22+,
-    // Chrome 125+, Firefox 129+, Safari 17+) per TC39 proposal, but is not
+    // groups (e.g. `(?<id>a)|(?<id>b)`) for optionals that can't be inlined.
+    // This is valid in JS engines with duplicate named groups (V8 12.5+ /
+    // Node 24+, Firefox 129+, Safari 17+), but throws on Node 22 and is not
     // portable to PCRE2 without PCRE2_DUPNAMES.
     return new RegExp(`^(?:${sources.join("|")})$`);
   }
@@ -92,10 +95,11 @@ export function routeToRegExp(route: string = "/"): RegExp {
 }
 
 /**
- * Build an inline-optional regex for the common `…{…}?` case where a single
- * optional group sits at the end of the route. Returns `undefined` (falling
- * back to alternation expansion) for anything it can't inline safely:
- * multi-group routes, mid-route optionals, or unexpected segment shapes.
+ * Build an inline-optional regex for a route with a single `{…}?` group that
+ * ends a segment (`/book{s}?`, `/foo{/bar}?/:id`). Returns `undefined`
+ * (falling back to alternation expansion) for anything it can't inline
+ * safely: multi-group routes, a group inside a segment, or unexpected segment
+ * shapes.
  */
 function inlineOptionalGroup(route: string): RegExp | undefined {
   const group = scanFirstGroup(route);
@@ -105,59 +109,68 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
   const [pre, body, suf, mod] = group;
   if (
     mod !== "?" ||
-    suf !== "" ||
     body === "" ||
-    // Only a single group is handled inline; bail if `pre`/`body` nest another.
+    (suf !== "" && suf.charCodeAt(0) !== 47) /* '/' */ ||
+    // Only a single group is handled inline; bail if another one is left.
     scanFirstGroup(pre) ||
     scanFirstGroup(body) ||
-    needsModifierExpansion(pre) ||
-    needsModifierExpansion(pre + body)
+    scanFirstGroup(suf) ||
+    needsModifierExpansion(pre + suf) ||
+    needsModifierExpansion(pre + body + suf)
   ) {
     return;
   }
 
-  const [baseSegs, baseOwnSep] = routeToRegExpSegments(pre);
-  const [fullSegs, fullOwnSep, starStar] = routeToRegExpSegments(pre + body);
+  const [baseSegs, baseOwnSep] = routeToRegExpSegments(pre + suf);
+  const [fullSegs, fullOwnSep, starStar] = routeToRegExpSegments(pre + body + suf);
   const baseLen = baseSegs.length;
-  if (baseLen === 0 || fullSegs.length < baseLen || baseOwnSep !== fullOwnSep) {
+  const fullLen = fullSegs.length;
+  if (baseLen === 0 || fullLen < baseLen || baseOwnSep !== fullOwnSep) {
     return;
   }
 
-  // Leading segments shared by base and full must be identical. In the
-  // mid-segment case only the final base segment grows, so it is excluded here.
-  const midSegment = fullSegs.length === baseLen;
-  const sharedLen = midSegment ? baseLen - 1 : baseLen;
-  for (let i = 0; i < sharedLen; i++) {
-    if (fullSegs[i] !== baseSegs[i]) {
-      return;
-    }
+  // Segments shared by base and full: a head of `shared` and a tail of `tail`.
+  let shared = 0;
+  while (shared < baseLen && fullSegs[shared] === baseSegs[shared]) shared++;
+  let tail = 0;
+  while (tail < baseLen - shared && fullSegs[fullLen - 1 - tail] === baseSegs[baseLen - 1 - tail]) {
+    tail++;
   }
+  // With more of the route after the group, the head must span the same path
+  // segments whichever branch matches, so that factoring it out keeps the
+  // alternation's captures. The tail is order-safe.
+  const fixedHead = () => baseSegs.slice(0, shared).every((s) => isFixedSegment(s));
 
-  if (midSegment) {
-    // `body` extends the final segment (e.g. `book` -> `books`); make the
-    // appended tail optional.
-    const prefix = baseSegs[baseLen - 1];
-    const last = fullSegs[baseLen - 1];
-    if (!last.startsWith(prefix)) {
-      return;
-    }
+  if (fullLen === baseLen && shared + tail >= baseLen - 1) {
+    // `body` extends one segment (e.g. `book` -> `books`); make the appended
+    // part optional.
+    const i = Math.min(shared, baseLen - 1);
+    const prefix = baseSegs[i];
+    const last = fullSegs[i];
+    const k = prefix.length;
+    let merged: string | undefined;
+    let optional = false;
     // If the base segment ends in a greedy, open-ended capture (`[^/]*` from a
     // `*` wildcard / unconstrained param, or `.*`/`.+`/`[\s\S]*`), appending
     // `(?:tail)?` lets that capture swallow the optional literal instead of
     // leaving it out — changing the captured value (`/media/*{.webp}?` would
-    // capture the whole `photo.webp` instead of `photo`). Fall back to
-    // alternation, which anchors the literal outside the capture in one branch.
-    if (/(?:\[\^\/\]|\[\\s\\S\]|\.)[*+]\)?$/.test(prefix)) {
-      return;
+    // capture the whole `photo.webp` instead of `photo`).
+    if (last.startsWith(prefix) && !/(?:\[\^\/\]|\[\\s\\S\]|\.)[*+]\)?$/.test(prefix)) {
+      if (tail > 0 && !fixedHead()) {
+        return;
+      }
+      // The group may add nothing (`/a/**/b{.json}?`: `**` is terminal), or
+      // only segments that are optional already (`/a{/:x*}?` is `/a/:x*`).
+      optional = tail === 0 && k < last.length && isOptionalGroups(last.slice(k));
+      merged = k === last.length || optional ? last : `${prefix}(?:${last.slice(k)})?`;
+    } else {
+      merged = lookaheadSegment(prefix, last);
+      if (!merged || !fixedHead()) {
+        return;
+      }
     }
-    const k = prefix.length;
-    const inlineSegs = fullSegs.slice(0, baseLen - 1);
-    // The group may add nothing (`/a/**/b{.json}?`: `**` is terminal), or
-    // only segments that are optional already (`/a{/:x*}?` is `/a/:x*`).
-    const optional = k < last.length && isOptionalGroups(last.slice(k));
-    inlineSegs.push(
-      k === last.length || optional ? last : `${last.slice(0, k)}(?:${last.slice(k)})?`,
-    );
+    const inlineSegs = baseSegs.slice();
+    inlineSegs[i] = merged;
     // `/a{/**}?` also registers `/a`, which wins where `**` would match no
     // segment: its group is skipped there like `:_*`'s.
     return new RegExp(
@@ -167,9 +180,53 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
 
   // `body` adds one or more whole segments (e.g. `/foo` -> `/foo/bar`); make
   // the appended segments optional.
-  const head = joinSegments(fullSegs.slice(0, baseLen), fullOwnSep);
-  const tail = fullSegs.slice(baseLen).join("/");
-  return new RegExp(`^${withTrailingSlash(`${head}(?:/${tail})?`, starStar)}`);
+  if (shared + tail !== baseLen || (tail > 0 && !fixedHead())) {
+    return;
+  }
+  const head =
+    shared > 0 ? joinSegments(fullSegs.slice(0, shared), fullOwnSep) : fullOwnSep ? undefined : "";
+  if (head === undefined) {
+    return;
+  }
+  const added = fullSegs.slice(shared, fullLen - tail).join("/");
+  const rest = tail > 0 ? `/${baseSegs.slice(baseLen - tail).join("/")}` : "";
+  return new RegExp(`^${withTrailingSlash(`${head}(?:/${added})?${rest}`, starStar)}`);
+}
+
+/**
+ * Merge a segment ending in a whole-value capture (`(?<name>[^/]*)`, from
+ * `:name` / `*`) with the same segment extended by the group
+ * (`(?<name>[^/]+)\.(?<ext>[^/]+)`). The capture takes the extended form's
+ * value where that one matches, held by a look-ahead to the rest of its
+ * segment (`archive.tar.gz` gives `name: "archive.tar"`, as the router), and
+ * the whole value otherwise. The static text before the capture must be shared.
+ */
+function lookaheadSegment(base: string, full: string): string | undefined {
+  const match = /^([^(]*\(\?<\w+>)(\[\^\/\][*+])\)$/.exec(base);
+  if (!match || !full.startsWith(match[1])) {
+    return;
+  }
+  const [, head, baseBody] = match;
+  const capture = /^(\[\^\/\][*+])\)(.+)$/.exec(full.slice(head.length));
+  if (!capture) {
+    return;
+  }
+  const [, fullBody, rest] = capture;
+  // The look-ahead repeats `rest` without its capture names.
+  const ahead = rest.replace(/\(\?<\w+>/g, "(?:");
+  return `${head}${fullBody}(?=${ahead}(?:/|$))|${baseBody})(?:${rest})?`;
+}
+
+/**
+ * Whether a segment regex always spans exactly one path segment: no optional
+ * `(?:/…)?` part, and nothing that can match `/` (conservatively, any `.`,
+ * class other than `[^/]`, or escape that is not a plain literal or `\d\w\s`).
+ */
+function isFixedSegment(segment: string): boolean {
+  const atoms = segment
+    .replace(/\\([\s\S])/g, (_, c) => (/[SDWpPux0-9ck]/.test(c) ? "." : ""))
+    .replaceAll("[^/]", "");
+  return !/[./[]|\(\?:/.test(atoms);
 }
 
 /**

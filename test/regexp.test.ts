@@ -5,11 +5,14 @@ import { canBeEmpty, canEndInSlash } from "../src/_regexp-scan.ts";
 import {
   type Captures,
   regexpCases as routes,
+  LOOKAHEAD_ROUTES,
   LOOKBEHIND_ROUTES,
   PCRE2_DUPLICATE_NAME_ROUTES,
   SWEEP_DUPLICATE_NAME_PATTERNS,
+  SWEEP_LOOKAHEAD_PATTERNS,
   SWEEP_LOOKBEHIND_PATTERNS,
   duplicateGroupNames,
+  hasLookahead,
   hasLookbehind,
   sweepPaths,
   sweepPatterns,
@@ -334,6 +337,9 @@ describe("routeToRegExp", () => {
       expect(hasLookbehind(source), `look-behind in "${route}": ${source}`).toBe(
         LOOKBEHIND_ROUTES.has(route),
       );
+      expect(hasLookahead(source), `look-ahead in "${route}": ${source}`).toBe(
+        LOOKAHEAD_ROUTES.has(route),
+      );
     }
   });
 
@@ -343,13 +349,16 @@ describe("routeToRegExp", () => {
   // suffix, or into a duplicate-name alternation, fail loudly.
   it("pins the sweep patterns RE2 engines reject", () => {
     const lookbehind: string[] = [];
+    const lookahead: string[] = [];
     const duplicates: string[] = [];
     for (const pattern of sweepPatterns()) {
       const source = routeToRegExp(pattern).source;
       if (hasLookbehind(source)) lookbehind.push(pattern);
+      if (hasLookahead(source)) lookahead.push(pattern);
       if (duplicateGroupNames(source).length > 0) duplicates.push(pattern);
     }
     expect(lookbehind.sort()).toEqual([...SWEEP_LOOKBEHIND_PATTERNS].sort());
+    expect(lookahead.sort()).toEqual([...SWEEP_LOOKAHEAD_PATTERNS].sort());
     expect(duplicates.sort()).toEqual([...SWEEP_DUPLICATE_NAME_PATTERNS].sort());
   });
 });
@@ -418,6 +427,64 @@ describe("routeToRegExp: duplicate param names", () => {
     "/w/:0/*",
   ])("accepts %s", (route) => {
     expect(() => routeToRegExp(route)).not.toThrow();
+  });
+});
+
+// A single optional group followed by more of the route used to fall back to
+// an alternation that declared every shared param once per branch, which
+// throws on engines without duplicate named groups (Node 22 / V8 12.4,
+// PCRE2, RE2).
+describe("routeToRegExp: optional group before more of the route (#213)", () => {
+  const cases = [
+    "/files/:name{.:ext}?",
+    "/users{/:id}?/posts/:post",
+    "/a/:x(\\d+){-:y}?/b",
+    "/api/:v{/beta}?/:id",
+    "/a/:x/{b}?/:y",
+    "/:lang{.:region}?/:page",
+  ];
+  const paths = [
+    ...sweepPaths(),
+    "/files/a.b",
+    "/files/archive.tar.gz",
+    "/files/.b",
+    "/files/a.",
+    "/files/a.b/",
+    "/users/posts/1",
+    "/users/7/posts/1",
+    "/users/posts/posts/1",
+    "/users/7/posts/",
+    "/a/12-3/b",
+    "/a/12/b",
+    "/a/12-/b",
+    "/api/v1/beta/7",
+    "/api/v1/7",
+    "/api/v1/beta",
+    "/a/1/b/2",
+    "/a/1//2",
+    "/en.us/home",
+    "/en/home",
+  ];
+
+  it.each(cases)("%s declares each param once and routes like findRoute", (route) => {
+    const regex = routeToRegExp(route);
+    expect(duplicateGroupNames(regex.source)).toEqual([]);
+    const router = createRouter();
+    addRoute(router, "", route, true);
+    for (const path of paths) {
+      const found = findRoute(router, "", path);
+      const match = path.match(regex);
+      expect(!!match, `${path}: ${regex}`).toBe(!!found);
+      if (found && match) {
+        const groups = definedCaptures(normalizeGroups(match.groups));
+        const params = definedCaptures(found.params);
+        const keys = [...new Set([...Object.keys(groups), ...Object.keys(params)])].filter(
+          (key) =>
+            groups[key] !== params[key] && !isRequiredSegmentGap(router, path, key, groups, params),
+        );
+        expect(keys, `${path}: regex ${fmt(groups)}, router ${fmt(params)}`).toEqual([]);
+      }
+    }
   });
 });
 
@@ -528,6 +595,8 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/a{/:x/**}?",
     "/a{/b/:x/**}?",
     "/:x/:y?/**",
+    "/:x{.:e}?/**",
+    "/a/:x{.:e}?/**",
   ].map((pattern) => [pattern, ZERO_SEGMENT_CATCH_ALL] as const),
   ...[
     "/:x?/*",

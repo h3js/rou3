@@ -355,15 +355,19 @@ Most routes compile without look-behind, so the output also works in RE2-family 
 
 Fixed-length look-behinds work in JavaScript, PCRE and Perl. RE2-family engines also reject the duplicate-name alternations in the note below (they have no `DUPNAMES` option) and constraints that use syntax they lack.
 
-The output is **PCRE-compatible**: it uses `(?<name>...)` named groups and avoids JS-only constructs, so the generated `.source` also compiles in PCRE2 engines (`grep -P`, `rg -P`, `pcre2grep`, PHP `preg_*`) and Perl — not just JavaScript. In particular, trailing optional groups are compiled inline as `(?:...)?` instead of an alternation, so a param is never emitted twice as a duplicate named group (which PCRE2 rejects unless `PCRE2_DUPNAMES` is set):
+The output is **PCRE-compatible**: it uses `(?<name>...)` named groups and avoids JS-only constructs, so the generated `.source` also compiles in PCRE2 engines (`grep -P`, `rg -P`, `pcre2grep`, PHP `preg_*`) and Perl — not just JavaScript. In particular, a single optional group that ends a segment is compiled inline as `(?:...)?` instead of an alternation, also when more of the route follows it, so a param is never emitted twice as a duplicate named group (which PCRE2 rejects unless `PCRE2_DUPNAMES` is set, and V8 before 12.5, i.e. Node 22, rejects outright):
 
 ```js
 routeToRegExp("/blog/:id(\\d+){-:title}?");
 // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
+routeToRegExp("/users{/:id}?/posts/:post");
+// /^\/users(?:\/(?<id>[^/]*))?\/posts\/(?:(?<post>[^/]+)\/?|\/)$/
 ```
 
+When the group extends a whole-value param in its own segment (`/files/:name{.:ext}?`), a look-ahead gives the param the value the router gives it (`archive.tar.gz` → `name: "archive.tar"`, `ext: "gz"`); RE2-family engines reject that output.
+
 > [!NOTE]
-> Multi-group or mid-route optionals that cannot be inlined fall back to an alternation and may contain duplicate named groups. That output is valid in JavaScript (per the TC39 duplicate-named-groups proposal) and Perl, but requires `PCRE2_DUPNAMES` on strict PCRE2 engines.
+> Other optionals (several groups, a group whose segment is followed by an optional one like `/{b}?/*`, a mid-segment group after a greedy capture like `/media/*{.webp}?`) fall back to an alternation and may contain duplicate named groups. That output is valid in JavaScript engines with duplicate named groups (V8 12.5+ / Node 24+, Firefox 129+, Safari 17+) and Perl, throws on Node 22, and requires `PCRE2_DUPNAMES` on strict PCRE2 engines.
 
 A route that declares the same param name twice (`/files/:path/**:path`; a bare `**` is the `_` param) throws a `rou3:` error, since engines disagree on whether a duplicate named group compiles.
 
