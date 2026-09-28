@@ -88,7 +88,7 @@ export function compileRouter<T>(
 /**
  * Compile the router instance into a compact runnable code.
  *
- * **IMPORTANT:** Route data must be serializable to JSON (i.e., no functions or classes) or implement the `toJSON()` method to render custom code or you can pass custom `serialize` function in options.
+ * **IMPORTANT:** Route data is emitted with `JSON.stringify` (`toJSON()` applies at every depth, as in JSON). Data containing a function, symbol or bigint throws: pass `opts.serialize` to emit each route's data as a JavaScript expression of your own instead.
  *
  * @example
  * import { createRouter, addRoute } from "rou3";
@@ -274,7 +274,7 @@ function compileStaticMatch(ctx: CompilerContext): string {
           // findRoute resolves duplicates to the first-registered entry
           jitMethods[method] = matchAll ? matchers.map((m) => m.data) : matchers[0].data;
         } else {
-          const refs = matchers.map((m) => serializeData(ctx, m.data));
+          const refs = matchers.map((m) => serializeData(ctx, m));
           methodsCode += `${JSON.stringify(method)}:${matchAll ? `[${refs.join(",")}]` : refs[0]},`;
         }
       }
@@ -356,7 +356,7 @@ function compileFinalMatch(
   params: string[],
   suffixGuard?: string,
 ): { code: string; weight: number } {
-  let ret = `{data:${serializeData(ctx, data.data)}`;
+  let ret = `{data:${serializeData(ctx, data)}`;
 
   const conditions: string[] = [];
   // A `**:name` before the suffix must take a segment (weighs one point, as
@@ -796,15 +796,10 @@ function scanRegExpGroups(source: string): { names: string[]; whole: boolean } |
   };
 }
 
-function serializeData(ctx: CompilerContext, value: any): string {
+function serializeData(ctx: CompilerContext, entry: MethodData<any>): string {
+  let value = entry.data;
   if (ctx.compileToString) {
-    if (ctx.opts?.serialize) {
-      value = ctx.opts.serialize(value);
-    } else if (typeof value?.toJSON === "function") {
-      value = value.toJSON();
-    } else {
-      value = JSON.stringify(value);
-    }
+    value = ctx.opts.serialize ? ctx.opts.serialize(value) : toJSONCode(value, entry.route);
   }
   // Dedupe via a Map instead of `indexOf` (O(N²) across routes)
   const dataMap = (ctx.dataMap ??= new Map());
@@ -814,6 +809,47 @@ function serializeData(ctx: CompilerContext, value: any): string {
     dataMap.set(value, index);
   }
   return dataRef(ctx, index);
+}
+
+/**
+ * Default AOT data serializer: standard `JSON.stringify` (`toJSON()` applies
+ * at every depth), which is also a valid JS expression. Throws instead of
+ * emitting something that silently differs from the data: a function, symbol
+ * or bigint anywhere (dropped, `undefined` or a raw `TypeError`). Other
+ * objects follow JSON (a `Map` becomes `{}`). Compile time only.
+ */
+function toJSONCode(value: unknown, route: string): string {
+  let code: string | undefined;
+  try {
+    code = JSON.stringify(value, assertJSONValue);
+  } catch (error) {
+    code = undefined;
+    if (error !== NOT_JSON) {
+      throw notJSONError(route, error); // e.g. a circular reference
+    }
+  }
+  if (code === undefined) {
+    throw notJSONError(route);
+  }
+  return code;
+}
+
+const NOT_JSON = /* @__PURE__ */ Symbol("rou3:not-json");
+
+// `JSON.stringify` replacer: sees every value after its `toJSON()`
+function assertJSONValue(_key: string, value: unknown): unknown {
+  const type = typeof value;
+  if (type === "function" || type === "symbol" || type === "bigint") {
+    throw NOT_JSON;
+  }
+  return value;
+}
+
+function notJSONError(route: string, cause?: unknown): Error {
+  return new Error(
+    `rou3: route data for ${JSON.stringify(route)} is not JSON-serializable, pass opts.serialize to emit it as code`,
+    cause === undefined ? undefined : { cause },
+  );
 }
 
 // Data slots hold RegExp objects too (JIT: the object itself, AOT: its
