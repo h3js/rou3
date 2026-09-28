@@ -364,7 +364,7 @@ routeToRegExp("/users{/:id}?/posts/:post");
 // /^\/users(?:\/(?<id>[^/]*))?\/posts\/(?:(?<post>[^/]+)\/?|\/)$/
 ```
 
-When the group extends a whole-value param in its own segment (`/files/:name{.:ext}?`), a look-ahead gives the param the value the router gives it (`archive.tar.gz` → `name: "archive.tar"`, `ext: "gz"`); RE2-family engines reject that output.
+When the group extends the param that ends its segment (`/files/:name{.:ext}?`, `/users/:id([\w.]+){.json}?/edit`), a look-ahead gives the param the value the router gives it (`archive.tar.gz` → `name: "archive.tar"`, `ext: "gz"`); RE2-family engines reject that output.
 
 > [!NOTE]
 > Other optionals (several groups, a group whose segment is followed by an optional one like `/{b}?/*`, a mid-segment group after a greedy capture like `/media/*{.webp}?`) fall back to an alternation and may contain duplicate named groups. That output is valid in JavaScript engines with duplicate named groups (V8 12.5+ / Node 24+, Firefox 129+, Safari 17+) and Perl, throws on Node 22, and requires `PCRE2_DUPNAMES` on strict PCRE2 engines.

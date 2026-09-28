@@ -150,24 +150,34 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
     const k = prefix.length;
     let merged: string | undefined;
     let optional = false;
-    // If the base segment ends in a greedy, open-ended capture (`[^/]*` from a
-    // `*` wildcard / unconstrained param, or `.*`/`.+`/`[\s\S]*`), appending
-    // `(?:tail)?` lets that capture swallow the optional literal instead of
-    // leaving it out — changing the captured value (`/media/*{.webp}?` would
-    // capture the whole `photo.webp` instead of `photo`).
-    if (last.startsWith(prefix) && !/(?:\[\^\/\]|\[\\s\\S\]|\.)[*+]\)?$/.test(prefix)) {
-      if (tail > 0 && !fixedHead()) {
-        return;
-      }
-      // The group may add nothing (`/a/**/b{.json}?`: `**` is terminal), or
-      // only segments that are optional already (`/a{/:x*}?` is `/a/:x*`).
-      optional = tail === 0 && k < last.length && isOptionalGroups(last.slice(k));
-      merged = k === last.length || optional ? last : `${prefix}(?:${last.slice(k)})?`;
+    let lookahead = false;
+    if (last === prefix) {
+      // The group adds nothing (`/a/**/b{.json}?`: `**` is terminal).
+      merged = last;
+    } else if (tail === 0 && last.startsWith(prefix) && isOptionalGroups(last.slice(k))) {
+      // Only segments that are optional already (`/a{/:x*}?` is `/a/:x*`).
+      optional = true;
+      merged = last;
     } else {
-      merged = lookaheadSegment(prefix, last);
-      if (!merged || !fixedHead()) {
-        return;
+      const capture = mergeCapture(prefix, last);
+      if (capture) {
+        [merged, lookahead] = capture;
+      } else if (
+        last.startsWith(prefix) &&
+        // Past a capture elsewhere in the segment, the appended part could be
+        // taken by it (`/f/:x.a{.a}?/m`): only trailing groups keep the old
+        // inline form there.
+        (suf === "" || !hasGroup(prefix)) &&
+        // A greedy, open-ended capture (`[^/]*` from a `*` wildcard /
+        // unconstrained param, or `.*`/`.+`/`[\s\S]*`) would swallow the
+        // optional literal instead of leaving it out (`/media/*{.webp}?`).
+        !/(?:\[\^\/\]|\[\\s\\S\]|\.)[*+]\)?$/.test(prefix)
+      ) {
+        merged = `${prefix}(?:${last.slice(k)})?`;
       }
+    }
+    if (!merged || ((suf !== "" || lookahead) && !fixedHead())) {
+      return;
     }
     const inlineSegs = baseSegs.slice();
     inlineSegs[i] = merged;
@@ -180,7 +190,7 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
 
   // `body` adds one or more whole segments (e.g. `/foo` -> `/foo/bar`); make
   // the appended segments optional.
-  if (shared + tail !== baseLen || (tail > 0 && !fixedHead())) {
+  if (shared + tail !== baseLen || (suf !== "" && !fixedHead())) {
     return;
   }
   const head =
@@ -194,27 +204,53 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
 }
 
 /**
- * Merge a segment ending in a whole-value capture (`(?<name>[^/]*)`, from
- * `:name` / `*`) with the same segment extended by the group
- * (`(?<name>[^/]+)\.(?<ext>[^/]+)`). The capture takes the extended form's
- * value where that one matches, held by a look-ahead to the rest of its
- * segment (`archive.tar.gz` gives `name: "archive.tar"`, as the router), and
- * the whole value otherwise. The static text before the capture must be shared.
+ * Merge a segment ending in its only capture (`(?<name>[^/]*)` from `:name` /
+ * `*`, or a constraint `(?<name>C)`, after static text) with the same segment
+ * extended by the group (`(?<name>[^/]+)\.(?<ext>[^/]+)`). The capture must
+ * take the extended form's value where that one matches, and the whole value
+ * otherwise, as the router (`archive.tar.gz` gives `name: "archive.tar"`).
+ * That needs a look-ahead to the rest of the segment, unless the capture is a
+ * `\d` / `\w` run and the group starts with a char it can't match
+ * (`/blog/:id(\d+){-:title}?`). Returns `[merged, lookahead]`.
  */
-function lookaheadSegment(base: string, full: string): string | undefined {
-  const match = /^([^(]*\(\?<\w+>)(\[\^\/\][*+])\)$/.exec(base);
+function mergeCapture(base: string, full: string): [string, boolean] | undefined {
+  const match = /^([^(]*\(\?<\w+>)([\s\S]*)\)$/.exec(base);
   if (!match || !full.startsWith(match[1])) {
     return;
   }
-  const [, head, baseBody] = match;
-  const capture = /^(\[\^\/\][*+])\)(.+)$/.exec(full.slice(head.length));
-  if (!capture) {
+  const [, head, body] = match;
+  // The final `)` must close the capture: no other group in its body.
+  if (/[()]/.test(body.replace(/\\[\s\S]/g, ""))) {
     return;
   }
-  const [, fullBody, rest] = capture;
-  // The look-ahead repeats `rest` without its capture names.
+  let fullBody = body;
+  let rest = full.slice(head.length + body.length + 1);
+  if (!full.startsWith(`${head}${body})`)) {
+    // A whole `:name` is `[^/]*`, `:name` in a mixed segment `[^/]+`.
+    const capture = /^(\[\^\/\][*+])\)([\s\S]+)$/.exec(full.slice(head.length));
+    if (!capture || !/^\[\^\/\][*+]$/.test(body)) {
+      return;
+    }
+    [, fullBody, rest] = capture;
+  }
+  if (!rest) {
+    return;
+  }
+  const first = rest.charCodeAt(0) === 92 /* \ */ ? rest[1] : rest[0];
+  if (/^\\[dw][*+]?$/.test(body) && !/[\w([|.?*+{^$]/.test(first)) {
+    return [`${base}(?:${rest})?`, false];
+  }
+  const wrap = (re: string) => (re.includes("|") ? `(?:${re})` : re);
+  // The look-ahead repeats `rest` without its capture names. The whole value
+  // must reach the end of the segment (`(?![^/])`), which also keeps it from
+  // retrying shorter matches.
   const ahead = rest.replace(/\(\?<\w+>/g, "(?:");
-  return `${head}${fullBody}(?=${ahead}(?:/|$))|${baseBody})(?:${rest})?`;
+  return [`${head}${wrap(fullBody)}(?=${ahead}(?:/|$))|${wrap(body)}(?![^/]))(?:${rest})?`, true];
+}
+
+/** Whether a regex fragment holds a group (escaped parens aside). */
+function hasGroup(re: string): boolean {
+  return re.replace(/\\[\s\S]/g, "").includes("(");
 }
 
 /**

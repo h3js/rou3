@@ -330,8 +330,9 @@ describe("routeToRegExp", () => {
   });
 
   // RE2-family engines (Go, Rust `regex`, RE2) have no look-around. Only the
-  // shapes tracked in LOOKBEHIND_ROUTES may still need the look-behind suffix.
-  it("emits no look-behind outside LOOKBEHIND_ROUTES", () => {
+  // shapes tracked in LOOKBEHIND_ROUTES may still need the look-behind suffix,
+  // and only those in LOOKAHEAD_ROUTES hold a param with a look-ahead.
+  it("emits look-arounds only in LOOKBEHIND_ROUTES / LOOKAHEAD_ROUTES", () => {
     for (const route of Object.keys(routes)) {
       const source = routeToRegExp(route).source;
       expect(hasLookbehind(source), `look-behind in "${route}": ${source}`).toBe(
@@ -442,7 +443,16 @@ describe("routeToRegExp: optional group before more of the route (#213)", () => 
     "/api/:v{/beta}?/:id",
     "/a/:x/{b}?/:y",
     "/:lang{.:region}?/:page",
+    // A capture that can take the group's text keeps the alternation's value.
+    "/users/:id([\\w.]+){.json}?/edit",
+    "/a/:x([a-z-]+){-:y}?/b",
+    "/a/:x(\\w+){s}?/b",
+    "/a/:x(\\d+){1}?/b",
+    "/a/:x(png|jpg){g}?/b",
   ];
+  // These keep the alternation: a capture earlier in the segment could take
+  // the group's text, or the head can span a varying number of segments.
+  const fallbacks = ["/f/:x.a{.a}?/m", "/:h?/:x{/:id}?/", "/:h?{/b}?/b", "/:h?/*{/b}?/b"];
   const paths = [
     ...sweepPaths(),
     "/files/a.b",
@@ -464,11 +474,22 @@ describe("routeToRegExp: optional group before more of the route (#213)", () => 
     "/a/1//2",
     "/en.us/home",
     "/en/home",
+    "/users/a.json/edit",
+    "/users/a.b.json/edit",
+    "/a/ab-c/b",
+    "/a/posts/b",
+    "/a/121/b",
+    "/a/pngg/b",
+    "/a/jpgg/b",
+    "/f/1.a.a/m",
+    "/a/1.2/posts",
+    "/b/b",
+    "/a/b/b",
   ];
 
-  it.each(cases)("%s declares each param once and routes like findRoute", (route) => {
+  it.each([...cases, ...fallbacks])("%s routes like findRoute", (route) => {
     const regex = routeToRegExp(route);
-    expect(duplicateGroupNames(regex.source)).toEqual([]);
+    expect(duplicateGroupNames(regex.source).length > 0).toBe(fallbacks.includes(route));
     const router = createRouter();
     addRoute(router, "", route, true);
     for (const path of paths) {

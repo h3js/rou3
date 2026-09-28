@@ -386,7 +386,7 @@ export const regexpCases: Record<string, RegExpCase> = {
   // it the extended route's value where that one matches, as the router.
   "/files/:name{.:ext}?": {
     regex:
-      /^\/files\/(?<name>[^/]+(?=\.(?:[^/]+)(?:\/|$))|[^/]*)(?:\.(?<ext>[^/]+))?(?:(?<=\/)\/|(?<!\/)\/?)$/,
+      /^\/files\/(?<name>[^/]+(?=\.(?:[^/]+)(?:\/|$))|[^/]*(?![^/]))(?:\.(?<ext>[^/]+))?(?:(?<=\/)\/|(?<!\/)\/?)$/,
     match: [
       ["/files/a", { name: "a", ext: undefined }],
       ["/files/a.b", { name: "a", ext: "b" }],
@@ -743,7 +743,7 @@ export const LOOKBEHIND_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 // Fixtures whose regex holds a param with a look-ahead (a param extended by an
-// optional group in its own segment, see `lookaheadSegment` in src/regexp.ts).
+// optional group in its own segment, see `mergeCapture` in src/regexp.ts).
 // RE2-family engines reject them and `regExpToRoute` can't read them back.
 export const LOOKAHEAD_ROUTES: ReadonlySet<string> = new Set(["/files/:name{.:ext}?"]);
 
