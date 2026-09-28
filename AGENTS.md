@@ -37,6 +37,7 @@ test/
   router.test.ts      # Core router tests
   find.test.ts        # Route matching tests (interpreter vs compiled)
   find-all.test.ts    # Multi-match tests
+  compiler.test.ts    # rou3/compiler API: AOT data serialization, options, params parity
   suffix.test.ts      # Segments after `**` (matching, ranking, compiled parity, subset-safety sweep)
   method-agnostic.test.ts # `""` routes vs method-scoped ones on a shared node (repros + pair sweep, all matchers)
   overlap.test.ts     # Pattern-overlap tests (routesOverlap / compareRoutes / findOverlappingRoutes)
@@ -70,8 +71,10 @@ routeToRegExp(route) -> RegExp
 regExpToRoute(regexp) -> string
 
 // rou3/compiler
-compileRouter<T>(router, opts?) -> (method, path) => MatchedRoute<T> | undefined
-compileRouterToString(router, functionName?, opts?) -> string
+compileRouter<T>(router, opts?: CompileRouterOptions<T>) -> CompiledMatch<T> | CompiledMatchAll<T> (overloads on `matchAll`)
+compileRouterToString<T>(router, opts?: CompileRouterToStringOptions<T>) -> string
+// deprecated: compileRouterToString(router, functionName, opts?); type RouterCompilerOptions<T>
+//   (= CompileRouterToStringOptions<T>)
 ```
 
 ## Core Algorithm
@@ -141,6 +144,14 @@ Results are ordered **least → most specific**, and the interpreter (`findAllRo
 A1/A2 (same-node) are fixable by recording a per-pattern breadth rank at `addRoute` time and feeding it into the sibling weight; **A3 is not** — cross-node order is fixed by traversal, so a partial fix would not close the gap. A full fix means globally re-sorting the result set against a partial order (`compareRoutes`) after collection: a behavior + perf change, i.e. a major-version design change. Do not touch the weight functions expecting them to help.
 
 ### Compiler
+
+**Public API contract** (pinned in `test/compiler.test.ts` and `types.test-d.ts`):
+
+- `compileRouter` is typed by overloads: `{ matchAll: true }` → `CompiledMatchAll<T>`, none / `{ matchAll?: false }` → `CompiledMatch<T>`, a widened `CompileRouterOptions<T>` → the union (the old conditional return type was wrong with an explicit `T`, widened options or `matchAll: boolean`). `CompileRouterOptions<T>` keeps `serialize` (ignored by the JIT, which keeps data by reference) so one options object fits both compilers.
+- `compileRouterToString(router, { functionName?, matchAll?, normalize?, serialize? })`. A string (or `undefined`) second argument is the deprecated `(router, functionName, opts?)` overload (nitro, nuxt and h3 call `(router, undefined, opts)`); the implementation names it `legacyOpts`, so the automd heading reads `(router, opts?, legacyOpts?)`. The implementation keeps its own copy of the JSDoc: automd reads only that one (overload JSDoc is what editors show). `functionName` is emitted as is (not validated: it comes from build code).
+- **AOT data** defaults to `JSON.stringify` (`toJSON()` at every depth). `toJSONCode()` throws `rou3: route data for "<route>" is not JSON-serializable, pass opts.serialize…` (route = `MethodData.route`) for a function / symbol / bigint anywhere (a `JSON.stringify` replacer), a circular value, or an `undefined` result. Other objects follow plain JSON (class instances keep their own enumerable fields, a `Map` becomes `{}`). It used to emit a top-level `toJSON()` result as **raw code** (a `Date` became a `SyntaxError`); no known consumer relied on it. `opts.serialize` is the raw-code hook (always called, also for `null` data).
+- **Snapshots:** both compilers read the tree once; routes added/removed later need a recompile. AOT output is self-contained, needs ES2018, has no `eval`, and its exact code is **not** stable across versions (documented in the JSDoc/README).
+- **Known divergence (open decision):** compiled `params` is a plain `{…}` literal (`params.constructor === Object`), the interpreter's a `NullProtoObj`. A null-prototype constructor (`new C(s[1])`, one per params shape or a shared one + assignments) measured ~15-30% slower per param lookup on Node 24 (the constructor call is often not inlined in the large matcher), `{__proto__:null,…}` ~6.5×. Pinned by one `it.fails` in `compiler.test.ts` "null-prototype params".
 
 `compileRouter()` generates an optimized function via `new Function()`:
 

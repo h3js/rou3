@@ -42,7 +42,9 @@ export type RouterCompilerOptions<T = any> = CompileRouterToStringOptions<T>;
 /**
  * Compiles the router instance into a faster route-matching function.
  *
- * **IMPORTANT:** `compileRouter` requires eval support with `new Function()` in the runtime for JIT compilation.
+ * **IMPORTANT:** `compileRouter` requires eval support with `new Function()` in the runtime for JIT compilation (not allowed under a CSP without `unsafe-eval`: use `compileRouterToString` at build time there).
+ *
+ * The compiled function is a **snapshot** of the router: routes added or removed afterwards are not seen, compile again after changing it. Route data is kept by reference. It returns what `findRoute` returns (with `matchAll: true`, what `findAllRoutes` returns), except that `params` is a plain object where `findRoute`'s has a null prototype.
  *
  * @example
  * import { createRouter, addRoute } from "rou3";
@@ -67,6 +69,24 @@ export function compileRouter<T>(
   router: RouterContext<T>,
   opts?: CompileRouterOptions<T>,
 ): CompiledMatch<T> | CompiledMatchAll<T>;
+/**
+ * Compiles the router instance into a faster route-matching function.
+ *
+ * **IMPORTANT:** `compileRouter` requires eval support with `new Function()` in the runtime for JIT compilation (not allowed under a CSP without `unsafe-eval`: use `compileRouterToString` at build time there).
+ *
+ * The compiled function is a **snapshot** of the router: routes added or removed afterwards are not seen, compile again after changing it. Route data is kept by reference. It returns what `findRoute` returns (with `matchAll: true`, what `findAllRoutes` returns), except that `params` is a plain object where `findRoute`'s has a null prototype.
+ *
+ * @example
+ * import { createRouter, addRoute } from "rou3";
+ * import { compileRouter } from "rou3/compiler";
+ * const router = createRouter();
+ * // [add some routes]
+ * const findRoute = compileRouter(router);
+ * const matchAll = compileRouter(router, { matchAll: true });
+ * findRoute("GET", "/path/foo/bar");
+ *
+ * @param router - The router context to compile.
+ */
 export function compileRouter<T>(
   router: RouterContext<T>,
   opts?: CompileRouterOptions<T>,
@@ -86,7 +106,11 @@ export function compileRouter<T>(
 }
 
 /**
- * Compile the router instance into a compact runnable code.
+ * Compile the router instance into a compact runnable code (ahead of time, e.g. into a build output).
+ *
+ * The output is a self-contained JavaScript expression (or a `const <functionName>=…;` statement): no imports, no runtime dependency on rou3, and no `eval` / `new Function()`, so it runs under a strict CSP. It needs ES2018 (named capture groups, object spread). Like `compileRouter`, it is a **snapshot** of the router at compile time.
+ *
+ * **IMPORTANT:** The exact generated code is **not** stable across rou3 versions: generate it at build time with the installed rou3, don't commit, patch or parse it.
  *
  * **IMPORTANT:** Route data is emitted with `JSON.stringify` (`toJSON()` applies at every depth, as in JSON). Data containing a function, symbol or bigint throws: pass `opts.serialize` to emit each route's data as a JavaScript expression of your own instead.
  *
@@ -97,6 +121,9 @@ export function compileRouter<T>(
  * // [add some routes with serializable data]
  * const compilerCode = compileRouterToString(router, { functionName: "findRoute" });
  * // "const findRoute=(m, p) => {}"
+ *
+ * // Route data as code (e.g. handler imports)
+ * compileRouterToString(router, { serialize: (data) => `{handler:${data.importName}}` });
  */
 export function compileRouterToString<T>(
   router: RouterContext<T>,
@@ -111,13 +138,35 @@ export function compileRouterToString<T>(
   functionName: string | undefined,
   opts?: CompileRouterToStringOptions<T>,
 ): string;
+/**
+ * Compile the router instance into a compact runnable code (ahead of time, e.g. into a build output).
+ *
+ * The output is a self-contained JavaScript expression (or a `const <functionName>=…;` statement): no imports, no runtime dependency on rou3, and no `eval` / `new Function()`, so it runs under a strict CSP. It needs ES2018 (named capture groups, object spread). Like `compileRouter`, it is a **snapshot** of the router at compile time.
+ *
+ * **IMPORTANT:** The exact generated code is **not** stable across rou3 versions: generate it at build time with the installed rou3, don't commit, patch or parse it.
+ *
+ * **IMPORTANT:** Route data is emitted with `JSON.stringify` (`toJSON()` applies at every depth, as in JSON). Data containing a function, symbol or bigint throws: pass `opts.serialize` to emit each route's data as a JavaScript expression of your own instead.
+ *
+ * @example
+ * import { createRouter, addRoute } from "rou3";
+ * import { compileRouterToString } from "rou3/compiler";
+ * const router = createRouter();
+ * // [add some routes with serializable data]
+ * const compilerCode = compileRouterToString(router, { functionName: "findRoute" });
+ * // "const findRoute=(m, p) => {}"
+ *
+ * // Route data as code (e.g. handler imports)
+ * compileRouterToString(router, { serialize: (data) => `{handler:${data.importName}}` });
+ */
 export function compileRouterToString<T>(
   router: RouterContext<T>,
-  nameOrOpts?: string | CompileRouterToStringOptions<T>,
+  opts?: CompileRouterToStringOptions<T> | string,
   legacyOpts?: CompileRouterToStringOptions<T>,
 ): string {
-  const opts = (typeof nameOrOpts === "object" && nameOrOpts) || legacyOpts || {};
-  const functionName = typeof nameOrOpts === "string" ? nameOrOpts : opts.functionName;
+  const functionName = typeof opts === "string" ? opts : opts?.functionName;
+  if (typeof opts !== "object" || !opts) {
+    opts = legacyOpts || {};
+  }
   const ctx: CompilerContext = {
     opts,
     router,
