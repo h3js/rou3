@@ -281,6 +281,52 @@ describe("findOverlappingRoutes", () => {
     ]);
   });
 
+  // Dedupe is by registration (the identity `removeRoute` splices by) and
+  // data, not by data reference alone.
+  it("reports a route with optional/group syntax once, whatever its data", () => {
+    const router = createRouter<string>();
+    addRoute(router, "", "/a/:x?", "A");
+    addRoute(router, "", "/b{/c}?{/d}?");
+    expect(findOverlappingRoutes(router, "", "/**").map((m) => m.data)).toEqual(["A", null]);
+  });
+
+  it("reports distinct routes that share one data reference separately", () => {
+    const router = createRouter<{ h: number }>();
+    const shared = { h: 1 };
+    addRoute(router, "", "/a", shared);
+    addRoute(router, "", "/b", shared);
+    addRoute(router, "GET", "/c", shared);
+    addRoute(router, "", "/d/:x?", shared);
+    const matches = findOverlappingRoutes(router, "GET", "/**");
+    expect(matches).toHaveLength(4);
+    expect(matches.every((m) => m.data === shared)).toBe(true);
+  });
+
+  it("reports one pattern registered for a method and method-agnostic separately", () => {
+    // Both buckets are reported (#223); `removeRoute` tells the two apart, so
+    // sharing a pattern and one data reference must not merge them.
+    const router = createRouter<{ h: number }>();
+    const shared = { h: 1 };
+    addRoute(router, "", "/a", shared);
+    addRoute(router, "GET", "/a", shared);
+    addRoute(router, "", "/b/:x?", shared);
+    addRoute(router, "GET", "/b/:x?", shared);
+    expect(findOverlappingRoutes(router, "GET", "/**")).toHaveLength(4);
+    expect(findOverlappingRoutes(router, "", "/**")).toHaveLength(2);
+  });
+
+  it("reports one route once per data value", () => {
+    // Registering the same route again (same identity for `removeRoute`)
+    // with the same data adds nothing a caller could tell apart.
+    const router = createRouter<string>();
+    addRoute(router, "", "/a", "A");
+    addRoute(router, "", "/a/", "A");
+    addRoute(router, "", "/a", "B");
+    addRoute(router, "", "/b/:x?", "C");
+    addRoute(router, "", "/b/:x?", "C");
+    expect(findOverlappingRoutes(router, "", "/**").map((m) => m.data)).toEqual(["A", "B", "C"]);
+  });
+
   it("named wildcard scope requires at least one segment (matches findAllRoutes)", () => {
     const router = createRouter<string>();
     addRoute(router, "GET", "/a/**:rest", "wc");
