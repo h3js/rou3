@@ -1,6 +1,14 @@
 import { describe, expectTypeOf, it } from "vitest";
-import { routeNodeKeys } from "../src/index.ts";
+import { createRouter, routeNodeKeys } from "../src/index.ts";
 import type { InferRouteParams, MatchedRoute } from "../src/index.ts";
+import { compileRouter, compileRouterToString } from "../src/compiler.ts";
+import type {
+  CompiledMatch,
+  CompiledMatchAll,
+  CompileRouterOptions,
+  CompileRouterToStringOptions,
+  RouterCompilerOptions,
+} from "../src/compiler.ts";
 
 describe("types", () => {
   describe("routeNodeKeys", () => {
@@ -145,6 +153,79 @@ describe("types", () => {
       type Params = InferRouteParams<"/test/:id/static">;
       type Expected = { id: string };
       expectTypeOf<Params>().toEqualTypeOf<Expected>();
+    });
+  });
+
+  describe("compiler", () => {
+    type Data = { handler: string };
+    const router = createRouter<Data>();
+
+    it("types compileRouter by its matchAll option", () => {
+      expectTypeOf(compileRouter(router)).toEqualTypeOf<CompiledMatch<Data>>();
+      expectTypeOf(compileRouter(router, {})).toEqualTypeOf<CompiledMatch<Data>>();
+      expectTypeOf(compileRouter(router, { matchAll: false })).toEqualTypeOf<CompiledMatch<Data>>();
+      expectTypeOf(compileRouter(router, { matchAll: true })).toEqualTypeOf<
+        CompiledMatchAll<Data>
+      >();
+      expectTypeOf(compileRouter(router, { normalize: true, matchAll: true })).toEqualTypeOf<
+        CompiledMatchAll<Data>
+      >();
+      expectTypeOf<CompiledMatch<Data>>().toEqualTypeOf<
+        (method: string, path: string) => MatchedRoute<Data> | undefined
+      >();
+      expectTypeOf<CompiledMatchAll<Data>>().toEqualTypeOf<
+        (method: string, path: string) => MatchedRoute<Data>[]
+      >();
+    });
+
+    it("types compileRouter with an explicit data type", () => {
+      expectTypeOf(compileRouter<Data>(router, { matchAll: true })).toEqualTypeOf<
+        CompiledMatchAll<Data>
+      >();
+      expectTypeOf(compileRouter<Data>(router)).toEqualTypeOf<CompiledMatch<Data>>();
+    });
+
+    it("types compileRouter with widened options as either result", () => {
+      const opts = { matchAll: true };
+      expectTypeOf(compileRouter(router, opts)).toEqualTypeOf<
+        CompiledMatch<Data> | CompiledMatchAll<Data>
+      >();
+      const flag = Math.random() > 0.5;
+      expectTypeOf(compileRouter(router, { matchAll: flag })).toEqualTypeOf<
+        CompiledMatch<Data> | CompiledMatchAll<Data>
+      >();
+      const general: CompileRouterOptions<Data> = {};
+      expectTypeOf(compileRouter(router, general)).toEqualTypeOf<
+        CompiledMatch<Data> | CompiledMatchAll<Data>
+      >();
+      const exact = { matchAll: true } as const;
+      expectTypeOf(compileRouter(router, exact)).toEqualTypeOf<CompiledMatchAll<Data>>();
+    });
+
+    it("types compileRouterToString options with the data type", () => {
+      expectTypeOf(
+        compileRouterToString(router, {
+          functionName: "findRoute",
+          matchAll: true,
+          normalize: true,
+          serialize: (data) => {
+            expectTypeOf(data).toEqualTypeOf<Data>();
+            return data.handler;
+          },
+        }),
+      ).toEqualTypeOf<string>();
+      expectTypeOf<CompileRouterToStringOptions<Data>["serialize"]>().toEqualTypeOf<
+        ((data: Data) => string) | undefined
+      >();
+    });
+
+    it("keeps the deprecated positional function name and option type", () => {
+      expectTypeOf(compileRouterToString(router, "findRoute")).toEqualTypeOf<string>();
+      const opts: RouterCompilerOptions<Data> = { matchAll: true, serialize: (d) => d.handler };
+      expectTypeOf(compileRouterToString(router, undefined, opts)).toEqualTypeOf<string>();
+      expectTypeOf<RouterCompilerOptions<Data>>().toEqualTypeOf<
+        CompileRouterToStringOptions<Data>
+      >();
     });
   });
 });

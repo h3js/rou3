@@ -2,25 +2,35 @@ import { ESCAPED_GROUP_PREFIX, fromGroupName, UNNAMED_GROUP_PREFIX } from "./_gr
 import { NullProtoObj } from "./object.ts";
 import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 
+/** A compiled single-match lookup (`compileRouter(router)`), like `findRoute`. */
+export type CompiledMatch<T = unknown> = (
+  method: string,
+  path: string,
+) => MatchedRoute<T> | undefined;
+
+/** A compiled multi-match lookup (`matchAll: true`), like `findAllRoutes`. */
+export type CompiledMatchAll<T = unknown> = (method: string, path: string) => MatchedRoute<T>[];
+
 /** Options of {@link compileRouter}. */
-export interface CompileRouterOptions {
+export interface CompileRouterOptions<T = any> {
   /** Return every matching route (least to most specific) instead of the best one. */
   matchAll?: boolean;
   /** Resolve `.` and `..` segments of the path before matching. */
   normalize?: boolean;
+  /**
+   * Render one route's data as a JavaScript expression (raw code, emitted
+   * as is). Defaults to `JSON.stringify`. Only used by
+   * {@link compileRouterToString}: `compileRouter` keeps data by reference.
+   */
+  serialize?: (data: T) => string;
 }
 
 /** Options of {@link compileRouterToString}. */
-export interface CompileRouterToStringOptions<T = any> extends CompileRouterOptions {
+export interface CompileRouterToStringOptions<T = any> extends CompileRouterOptions<T> {
   /**
    * Emit `const <functionName>=<matcher>;` instead of a bare expression.
    */
   functionName?: string;
-  /**
-   * Render one route's data as a JavaScript expression (raw code, emitted
-   * as is). Defaults to `JSON.stringify`.
-   */
-  serialize?: (data: T) => string;
 }
 
 /**
@@ -45,13 +55,22 @@ export type RouterCompilerOptions<T = any> = CompileRouterToStringOptions<T>;
  *
  * @param router - The router context to compile.
  */
-export function compileRouter<T, O extends RouterCompilerOptions<T> = RouterCompilerOptions<T>>(
+export function compileRouter<T>(
   router: RouterContext<T>,
-  opts?: O,
-): (
-  method: string,
-  path: string,
-) => O["matchAll"] extends true ? MatchedRoute<T>[] : MatchedRoute<T> | undefined {
+  opts: CompileRouterOptions<T> & { matchAll: true },
+): CompiledMatchAll<T>;
+export function compileRouter<T>(
+  router: RouterContext<T>,
+  opts?: CompileRouterOptions<T> & { matchAll?: false },
+): CompiledMatch<T>;
+export function compileRouter<T>(
+  router: RouterContext<T>,
+  opts?: CompileRouterOptions<T>,
+): CompiledMatch<T> | CompiledMatchAll<T>;
+export function compileRouter<T>(
+  router: RouterContext<T>,
+  opts?: CompileRouterOptions<T>,
+): CompiledMatch<T> | CompiledMatchAll<T> {
   const ctx: CompilerContext = { opts: opts || {}, router, data: [] };
   const compiled = compileRouteMatch(ctx);
   if (ctx.data.length < DATA_ARGS_MAX) {
