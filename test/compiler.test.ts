@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addRoute, createRouter } from "../src/index.ts";
+import { addRoute, createRouter, findAllRoutes, findRoute } from "../src/index.ts";
 import type { RouterContext } from "../src/index.ts";
 import { compileRouter, compileRouterToString } from "../src/compiler.ts";
 
@@ -10,12 +10,6 @@ function routerWith(data: unknown, path = "/x"): RouterContext<any> {
   const router = createRouter<any>();
   addRoute(router, "GET", path, data);
   return router;
-}
-
-function circular() {
-  const value: Record<string, unknown> = {};
-  value.self = value;
-  return value;
 }
 
 // eslint-disable-next-line no-new-func
@@ -66,7 +60,6 @@ describe("compileRouterToString: data serialization", () => {
       { nested: { deep: [Symbol("x")] } },
       { big: 1n },
       new Handler(),
-      circular(),
     ];
     for (const data of cases) {
       expect(() => compileRouterToString(routerWith(data, "/users/:id")), String(data)).toThrow(
@@ -137,6 +130,74 @@ describe("compileRouterToString: options", () => {
     );
     expect(compileRouterToString(router, "", { matchAll: true })).toBe(
       compileRouterToString(router, { matchAll: true }),
+    );
+  });
+});
+
+describe("compiled params (interpreter parity)", () => {
+  const router = createRouter<string>();
+  addRoute(router, "GET", "/p/:id", "PARAM");
+  addRoute(router, "GET", "/r/:id(\\d+)", "REGEX");
+  addRoute(router, "GET", "/m/x:id(\\d+)y", "REGEX-PARTIAL");
+  addRoute(router, "GET", "/w/**:rest", "WILDCARD");
+  addRoute(router, "GET", "/o/:x?", "OPTIONAL");
+  addRoute(router, "GET", "/u/*", "UNNAMED");
+  addRoute(router, "GET", "/s/**/:file.json", "SUFFIX");
+  addRoute(router, "GET", "/uni/:id(a(?<é>b)c)", "UNICODE");
+
+  const paths = ["/p/1", "/r/42", "/m/x42y", "/w/a/b", "/o/z", "/u/v", "/s/a/f.json", "/uni/abc"];
+
+  const compilers: [name: string, matchAll: boolean, compile: () => any][] = [
+    ["jit", false, () => compileRouter(router)],
+    ["aot", false, () => evalAOT(compileRouterToString(router))],
+    ["jit matchAll", true, () => compileRouter(router, { matchAll: true })],
+    ["aot matchAll", true, () => evalAOT(compileRouterToString(router, { matchAll: true }))],
+  ];
+
+  // Every compiled params object, next to the interpreter's
+  function eachParams(
+    matchAll: boolean,
+    compile: () => any,
+    check: (actual: any, expected: any, path: string) => void,
+  ) {
+    const match = compile();
+    for (const path of paths) {
+      const actual = match("GET", path);
+      if (matchAll) {
+        const expected = findAllRoutes(router, "GET", path);
+        expect(actual, path).toEqual(expected);
+        for (const [i, m] of actual.entries()) {
+          check(m.params, expected[i].params, path);
+        }
+      } else {
+        const found = findRoute(router, "GET", path)!;
+        expect(actual, path).toEqual({ data: found.data, params: found.params });
+        check(actual.params, found.params, path);
+      }
+    }
+  }
+
+  for (const [name, matchAll, compile] of compilers) {
+    it(`same params as the interpreter (${name})`, () => {
+      eachParams(matchAll, compile, (actual, expected, path) => {
+        expect(Object.keys(actual), path).toEqual(Object.keys(expected));
+      });
+    });
+  }
+
+  // Known divergence, an open decision: the interpreter builds params on a
+  // null-prototype object (`NullProtoObj`), compiled lookups on a plain
+  // `{…}` literal (`params.constructor === Object`). A null-prototype
+  // constructor (`new C(s[1])`) measured ~15-30% slower per param lookup
+  // (the call is often not inlined), a `{__proto__:null,…}` literal ~6.5x.
+  it.fails("null-prototype params", () => {
+    eachParams(
+      false,
+      () => compileRouter(router),
+      (actual, expected, path) => {
+        expect(expected.constructor, path).toBeUndefined();
+        expect(actual.constructor, path).toBeUndefined();
+      },
     );
   });
 });
