@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import { addRoute, createRouter, findRoute, regExpToRoute, routeToRegExp } from "../src/index.ts";
 import {
   regexpCases,
+  LOOKAHEAD_ROUTES,
   PCRE2_DUPLICATE_NAME_ROUTES,
+  SWEEP_LOOKAHEAD_PATTERNS,
   sweepPaths,
   sweepPatterns,
 } from "./_regexp-cases.ts";
@@ -14,10 +16,10 @@ describe("regExpToRoute", () => {
   // Every fixture route -> regex -> route must round-trip (its regex, converted
   // back, produces a route whose regex is identical) and route the same way:
   // equal sources alone let `/path/:rest*` come back as `/path/:rest(.*?)?`.
-  // Alternation-fallback routes (PCRE2_DUPLICATE_NAME_ROUTES) are not
-  // reversible and excluded.
+  // Alternation-fallback routes (PCRE2_DUPLICATE_NAME_ROUTES) and look-ahead
+  // held params (LOOKAHEAD_ROUTES) are not reversible and excluded.
   for (const [route, { regex, match, noMatch = [] }] of Object.entries(regexpCases)) {
-    if (PCRE2_DUPLICATE_NAME_ROUTES.has(route)) {
+    if (PCRE2_DUPLICATE_NAME_ROUTES.has(route) || LOOKAHEAD_ROUTES.has(route)) {
       continue;
     }
     it(`round-trips "${route}"`, () => {
@@ -31,7 +33,8 @@ describe("regExpToRoute", () => {
   }
 
   // The same over the sweep corpus, plus the listed non-equivalences. Only
-  // alternation output (several expansions OR-ed together) may be rejected.
+  // alternation output (several expansions OR-ed together) and look-ahead held
+  // params may be rejected.
   it("reverses sweep patterns to equivalent routes", () => {
     const paths = sweepPaths();
     const mismatches: string[] = [];
@@ -41,7 +44,11 @@ describe("regExpToRoute", () => {
       try {
         back = regExpToRoute(routeToRegExp(pattern));
       } catch (error) {
-        expect((error as Error).message, pattern).toMatch(/unsupported non-optional group/);
+        expect((error as Error).message, pattern).toMatch(
+          SWEEP_LOOKAHEAD_PATTERNS.has(pattern)
+            ? /cannot contain "\/"/
+            : /unsupported non-optional group/,
+        );
         continue;
       }
       const diffs = routingDiffs(pattern, back, paths);

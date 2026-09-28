@@ -7,11 +7,14 @@ import { canBeEmpty, canEndInSlash } from "../src/_regexp-scan.ts";
 import {
   type Captures,
   regexpCases as routes,
+  LOOKAHEAD_ROUTES,
   LOOKBEHIND_ROUTES,
   PCRE2_DUPLICATE_NAME_ROUTES,
   SWEEP_DUPLICATE_NAME_PATTERNS,
+  SWEEP_LOOKAHEAD_PATTERNS,
   SWEEP_LOOKBEHIND_PATTERNS,
   duplicateGroupNames,
+  hasLookahead,
   hasLookbehind,
   TWO_CATCH_ALL_ROUTES,
   sweepPaths,
@@ -330,12 +333,16 @@ describe("routeToRegExp", () => {
   });
 
   // RE2-family engines (Go, Rust `regex`, RE2) have no look-around. Only the
-  // shapes tracked in LOOKBEHIND_ROUTES may still need the look-behind suffix.
-  it("emits no look-behind outside LOOKBEHIND_ROUTES", () => {
+  // shapes tracked in LOOKBEHIND_ROUTES may still need the look-behind suffix,
+  // and only those in LOOKAHEAD_ROUTES hold a param with a look-ahead.
+  it("emits look-arounds only in LOOKBEHIND_ROUTES / LOOKAHEAD_ROUTES", () => {
     for (const route of Object.keys(routes)) {
       const source = routeToRegExp(route).source;
       expect(hasLookbehind(source), `look-behind in "${route}": ${source}`).toBe(
         LOOKBEHIND_ROUTES.has(route),
+      );
+      expect(hasLookahead(source), `look-ahead in "${route}": ${source}`).toBe(
+        LOOKAHEAD_ROUTES.has(route),
       );
     }
   });
@@ -346,13 +353,16 @@ describe("routeToRegExp", () => {
   // suffix, or into a duplicate-name alternation, fail loudly.
   it("pins the sweep patterns RE2 engines reject", () => {
     const lookbehind: string[] = [];
+    const lookahead: string[] = [];
     const duplicates: string[] = [];
     for (const pattern of sweepPatterns()) {
       const source = routeToRegExp(pattern).source;
       if (hasLookbehind(source)) lookbehind.push(pattern);
+      if (hasLookahead(source)) lookahead.push(pattern);
       if (duplicateGroupNames(source).length > 0) duplicates.push(pattern);
     }
     expect(lookbehind.sort()).toEqual([...SWEEP_LOOKBEHIND_PATTERNS].sort());
+    expect(lookahead.sort()).toEqual([...SWEEP_LOOKAHEAD_PATTERNS].sort());
     expect(duplicates.sort()).toEqual([...SWEEP_DUPLICATE_NAME_PATTERNS].sort());
   });
 });
@@ -429,6 +439,84 @@ describe("routeToRegExp: duplicate param names", () => {
     "/w/:0/*",
   ])("accepts %s", (route) => {
     expect(() => routeToRegExp(route)).not.toThrow();
+  });
+});
+
+// A single optional group followed by more of the route used to fall back to
+// an alternation that declared every shared param once per branch, which
+// throws on engines without duplicate named groups (Node 22 / V8 12.4,
+// PCRE2, RE2).
+describe("routeToRegExp: optional group before more of the route (#213)", () => {
+  const cases = [
+    "/files/:name{.:ext}?",
+    "/users{/:id}?/posts/:post",
+    "/a/:x(\\d+){-:y}?/b",
+    "/api/:v{/beta}?/:id",
+    "/a/:x/{b}?/:y",
+    "/:lang{.:region}?/:page",
+    // A capture that can take the group's text keeps the alternation's value.
+    "/users/:id([\\w.]+){.json}?/edit",
+    "/a/:x([a-z-]+){-:y}?/b",
+    "/a/:x(\\w+){s}?/b",
+    "/a/:x(\\d+){1}?/b",
+    "/a/:x(png|jpg){g}?/b",
+  ];
+  // These keep the alternation: a capture earlier in the segment could take
+  // the group's text, or the head can span a varying number of segments.
+  const fallbacks = ["/f/:x.a{.a}?/m", "/:h?/:x{/:id}?/", "/:h?{/b}?/b", "/:h?/*{/b}?/b"];
+  const paths = [
+    ...sweepPaths(),
+    "/files/a.b",
+    "/files/archive.tar.gz",
+    "/files/.b",
+    "/files/a.",
+    "/files/a.b/",
+    "/users/posts/1",
+    "/users/7/posts/1",
+    "/users/posts/posts/1",
+    "/users/7/posts/",
+    "/a/12-3/b",
+    "/a/12/b",
+    "/a/12-/b",
+    "/api/v1/beta/7",
+    "/api/v1/7",
+    "/api/v1/beta",
+    "/a/1/b/2",
+    "/a/1//2",
+    "/en.us/home",
+    "/en/home",
+    "/users/a.json/edit",
+    "/users/a.b.json/edit",
+    "/a/ab-c/b",
+    "/a/posts/b",
+    "/a/121/b",
+    "/a/pngg/b",
+    "/a/jpgg/b",
+    "/f/1.a.a/m",
+    "/a/1.2/posts",
+    "/b/b",
+    "/a/b/b",
+  ];
+
+  it.each([...cases, ...fallbacks])("%s routes like findRoute", (route) => {
+    const regex = routeToRegExp(route);
+    expect(duplicateGroupNames(regex.source).length > 0).toBe(fallbacks.includes(route));
+    const router = createRouter();
+    addRoute(router, "", route, true);
+    for (const path of paths) {
+      const found = findRoute(router, "", path);
+      const match = path.match(regex);
+      expect(!!match, `${path}: ${regex}`).toBe(!!found);
+      if (found && match) {
+        const groups = definedCaptures(normalizeGroups(match.groups));
+        const params = definedCaptures(found.params);
+        const keys = [...new Set([...Object.keys(groups), ...Object.keys(params)])].filter(
+          (key) =>
+            groups[key] !== params[key] && !isRequiredSegmentGap(router, path, key, groups, params),
+        );
+        expect(keys, `${path}: regex ${fmt(groups)}, router ${fmt(params)}`).toEqual([]);
+      }
+    }
   });
 });
 
@@ -552,6 +640,8 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/a{/:x/**}?",
     "/a{/b/:x/**}?",
     "/:x/:y?/**",
+    "/:x{.:e}?/**",
+    "/a/:x{.:e}?/**",
     // Segments after `**`: its group is unset where it matches no segment
     // (with a prefix before it; at the root the leading slash doubles as the
     // separator and `_` is `""`).

@@ -316,6 +316,42 @@ export const regexpCases: Record<string, RegExpCase> = {
     regex: /^\/foo(?:\/bar)?\/?$/,
     match: [["/foo"], ["/foo/bar"]],
   },
+  // An optional group before more of the route is inlined too, instead of an
+  // alternation declaring every shared param twice (#213).
+  "/users{/:id}?/posts/:post": {
+    regex: /^\/users(?:\/(?<id>[^/]*))?\/posts\/(?:(?<post>[^/]+)\/?|\/)$/,
+    match: [
+      ["/users/posts/1", { id: undefined, post: "1" }],
+      ["/users/7/posts/1", { id: "7", post: "1" }],
+      ["/users/posts/posts/1", { id: "posts", post: "1" }],
+      ["/users/7/posts/1/", { id: "7", post: "1" }],
+    ],
+    noMatch: ["/users/posts", "/users/7/posts", "/users/7/8/posts/1"],
+  },
+  "/a/:x(\\d+){-:y}?/b": {
+    regex: /^\/a\/(?<x>\d+)(?:-(?<y>[^/]+))?\/b\/?$/,
+    match: [
+      ["/a/12/b", { x: "12", y: undefined }],
+      ["/a/12-c/b", { x: "12", y: "c" }],
+    ],
+    noMatch: ["/a/12-/b", "/a/c/b", "/a/12"],
+  },
+  // A shared param extended by the group in its own segment: a look-ahead gives
+  // it the extended route's value where that one matches, as the router.
+  "/files/:name{.:ext}?": {
+    regex:
+      /^\/files\/(?<name>[^/]+(?=\.(?:[^/]+)(?:\/|$))|[^/]*(?![^/]))(?:\.(?<ext>[^/]+))?(?:(?<=\/)\/|(?<!\/)\/?)$/,
+    match: [
+      ["/files/a", { name: "a", ext: undefined }],
+      ["/files/a.b", { name: "a", ext: "b" }],
+      ["/files/archive.tar.gz", { name: "archive.tar", ext: "gz" }],
+      ["/files/.b", { name: ".b", ext: undefined }],
+      ["/files/a.", { name: "a.", ext: undefined }],
+      ["/files/a.b/", { name: "a", ext: "b" }],
+      ["/files//", { name: "", ext: undefined }],
+    ],
+    noMatch: ["/files", "/files/a/b", "/files/a.b//"],
+  },
   // Param names accept `[\w-]+`, but a capture group name must be an identifier
   // (no `-`, no leading digit) in JS and PCRE alike. Such names are emitted in a
   // reserved, injective escaped form (`_` -> `__`, `-` -> `_h`) and decoded back
@@ -830,8 +866,14 @@ export const LOOKBEHIND_ROUTES: ReadonlySet<string> = new Set([
   "/path/:id(\\d*)",
   "/files/:name([^.]+)",
   "/path/:x(\\S+)?",
+  "/files/:name{.:ext}?",
   "/a/**:r/:y?",
 ]);
+
+// Fixtures whose regex holds a param with a look-ahead (a param extended by an
+// optional group in its own segment, see `mergeCapture` in src/regexp.ts).
+// RE2-family engines reject them and `regExpToRoute` can't read them back.
+export const LOOKAHEAD_ROUTES: ReadonlySet<string> = new Set(["/files/:name{.:ext}?"]);
 
 // Routes whose generated regex reuses the same named capture group across
 // alternation branches (e.g. `(?<id>…)|(?<id>…)`). Such output is legal in JS
@@ -866,6 +908,10 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
   // A constraint whose match can end in `/`.
   "/files/:name([^.]+)",
   "/path/:x(\\S+)?",
+  // A look-ahead-held param as the last segment (see SWEEP_LOOKAHEAD_PATTERNS).
+  "/files/:name{.:ext}?",
+  "/:x{.:e}?",
+  "/a/:x{.:e}?",
   // A required catch-all (`**:r`, `:x+`) right before an optional segment:
   // where that segment is absent the catch-all takes a single one, and
   // telling a trailing slash from it needs the look-behind.
@@ -886,24 +932,45 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
   "/a/:r*/:y?{/b}?",
 ]);
 
+// Sweep patterns whose regex holds a param with a look-ahead (see
+// LOOKAHEAD_ROUTES). Pinned like the set above.
+export const SWEEP_LOOKAHEAD_PATTERNS: ReadonlySet<string> = new Set([
+  "/files/:name{.:ext}?",
+  "/:x{.:e}?",
+  "/a/:x{.:e}?",
+  "/:x{.:e}?/a",
+  "/a/:x{.:e}?/a",
+  "/:x{.:e}?/:y",
+  "/a/:x{.:e}?/:y",
+  "/:x{.:e}?/*.png",
+  "/a/:x{.:e}?/*.png",
+  "/:x{.:e}?/x-:y",
+  "/a/:x{.:e}?/x-:y",
+]);
+
 // Sweep patterns whose regex reuses a capture group name across alternation
 // branches (see PCRE2_DUPLICATE_NAME_ROUTES). Pinned like the set above.
 export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
-  // A mid-route optional group expands into one full route per branch.
+  // A group whose segment then folds in a trailing optional (`*`, `:y?`,
+  // `**`): the two expansions don't line up segment by segment.
   "/{b}?/*",
   "/{b}?/**",
-  "/{b}?/*.png",
-  "/{b}?/:y",
   "/{b}?/:y?",
-  "/{b}?/x-:y",
   "/a/{b}?/*",
   "/a/{b}?/**",
-  "/a/{b}?/*.png",
-  "/a/{b}?/:y",
   "/a/{b}?/:y?",
-  "/a/{b}?/x-:y",
+  "/:x{.:e}?/*",
+  "/:x{.:e}?/**",
+  "/:x{.:e}?/:y?",
+  "/a/:x{.:e}?/*",
+  "/a/:x{.:e}?/**",
+  "/a/:x{.:e}?/:y?",
+  // An empty segment followed only by optional ones expands like the router.
   "/{en}?/:page?",
   "/docs/{v2}?/:page?",
+  // Two groups.
+  "/:x{.:e}?/b{.json}?",
+  "/a/:x{.:e}?/b{.json}?",
   // A mid-segment optional after a greedy capture.
   "/media/*{.webp}?",
   // A `:x*` before a `*` that is optional in the route without it.
@@ -915,6 +982,11 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   "/a/**{/b/:c?}?",
   "/a/**{.png}?",
 ]);
+
+/** Whether a regex source uses a look-ahead (RE2-family engines have none). */
+export function hasLookahead(source: string): boolean {
+  return /\(\?[=!]/.test(source);
+}
 
 /** Whether a regex source uses a look-behind (RE2-family engines have none). */
 export function hasLookbehind(source: string): boolean {
@@ -952,6 +1024,8 @@ function allSweepPatterns(): string[] {
     ":x*",
     ":x(\\d+)",
     ":x(\\d+)?",
+    // A param extended by an optional group in its own segment (#213).
+    ":x{.:e}?",
   ];
   const tails = ["", "a", ":y", "*", ":y?", "**", "*.png", "x-:y", "b{.json}?"];
   const patterns = new Set([
