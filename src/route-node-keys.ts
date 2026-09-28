@@ -40,6 +40,7 @@ import type { Node } from "./types.ts";
  * routeNodeKeys("/users/:id"); // ["/users/*"]
  * routeNodeKeys("/users/*"); // ["/users/*"]  (same node -> same bucket)
  * routeNodeKeys("/admin/**:rest"); // ["/admin/**"]
+ * routeNodeKeys("/**:path/_payload.json"); // ["/**\/_payload.json"]
  * routeNodeKeys("/a/:x?"); // ["/a", "/a/*"]
  */
 export function routeNodeKeys(pattern: string): string[] {
@@ -77,6 +78,18 @@ function _collectKeys(node: Node, prefix: string, keys: string[]): void {
   }
   if (node.param) _collectKeys(node.param, prefix + "/*", keys);
   if (node.wildcard) _collectKeys(node.wildcard, prefix + "/**", keys);
+  // A wildcard's suffix trie holds the segments after `**`, last one first
+  if (node.suffix) _collectSuffixKeys(node.suffix, prefix, "", keys);
+}
+
+function _collectSuffixKeys(node: Node, prefix: string, suffix: string, keys: string[]): void {
+  if (node.methods) keys.push(prefix + suffix);
+  if (node.static) {
+    for (const key in node.static) {
+      _collectSuffixKeys(node.static[key], prefix, "/" + _escapeKey(key) + suffix, keys);
+    }
+  }
+  if (node.param) _collectSuffixKeys(node.param, prefix, "/*" + suffix, keys);
 }
 
 /**

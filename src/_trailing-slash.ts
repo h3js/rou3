@@ -73,10 +73,16 @@ function tails(body: string): readonly [any: string, some: string] {
  * `tails()` in all these endings, so it never captures the slash lookup
  * strips.
  *
+ * The part before the last segment doesn't matter to either ending: a
+ * `**` with segments after it (`/**\/:file`) takes the rest of the path
+ * there, and `routeToRegExp` ends a lazy one followed by optional segments
+ * only with a plain `/?$` itself.
+ *
  * Anything else keeps the look-behind suffix:
  * - A part other than a trailing catch-all whose match can end in `/` (a
- *   constraint like `.+`, `[^.]+` or `\S+`): the rewritten endings would let
- *   it take the stripped slash.
+ *   constraint like `.+`, `[^.]+` or `\S+`, or a required catch-all before
+ *   an optional segment: `/a/**:r/:y?`): the rewritten endings would let it
+ *   take the stripped slash.
  * - A constraint that can match empty in a required last segment
  *   (`/a/:x(\d*)`). A closed ending needs its non-empty part, and deriving
  *   that from an arbitrary regex is not implemented (it would need a
@@ -104,6 +110,15 @@ export function withTrailingSlash(body: string, starStar = false): string {
   }
   const closed = closedEnding(body, starStar);
   return closed === undefined ? body + LOOKBEHIND_SUFFIX : `${closed}$`;
+}
+
+/**
+ * Optional groups (`(?:/…)?`, side by side or nested) rebuilt for a plain
+ * `/?` after them as in `openEnding`, or `undefined` where that isn't exact.
+ * For the optional segments after a lazy catch-all (see `routeToRegExp`).
+ */
+export function openOptionals(fragment: string): string | undefined {
+  return openEnding(fragment, false);
 }
 
 /**

@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { routeToRegExp, createRouter, addRoute, findRoute } from "../src/index.ts";
 import { fromGroupName } from "../src/_group-names.ts";
+import { expandGroupDelimiters } from "../src/_group-delimiters.ts";
+import { expandModifiers, splitRoute } from "../src/operations/_utils.ts";
 import { canBeEmpty, canEndInSlash } from "../src/_regexp-scan.ts";
 import {
   type Captures,
@@ -14,6 +16,7 @@ import {
   duplicateGroupNames,
   hasLookahead,
   hasLookbehind,
+  TWO_CATCH_ALL_ROUTES,
   sweepPaths,
   sweepPatterns,
 } from "./_regexp-cases.ts";
@@ -242,7 +245,7 @@ describe("routeToRegExp", () => {
         const rest = keys.filter((key) => !isRequiredSegmentGap(router, path, key, groups, params));
         if (rest.length === 0) {
           accepted++;
-        } else if (known?.test(pattern, rest, groups, params)) {
+        } else if (known?.test(pattern, rest, groups, params, path)) {
           seen.add(pattern);
         } else {
           unexpected.push(
@@ -385,6 +388,16 @@ describe("regex-body scans", () => {
   });
 });
 
+// `addRoute` allows one `**` per route (a `:x+` / `:x*` before the last
+// segment is one); `routeToRegExp` rejects the others with the same error.
+describe("routeToRegExp: more than one `**`", () => {
+  it.each(TWO_CATCH_ALL_ROUTES)("%s throws like addRoute", (route) => {
+    const message = /^rou3: a route can have only one `\*\*`/;
+    expect(() => addRoute(createRouter(), "", route)).toThrow(message);
+    expect(() => routeToRegExp(route)).toThrow(message);
+  });
+});
+
 // A route expansion that declares a param name twice would emit a duplicate
 // named group. Engines disagree on whether that compiles: V8 (Node 24) accepts
 // it when one copy sits inside an alternative (the `**:name` / `:name+` ending),
@@ -419,8 +432,6 @@ describe("routeToRegExp: duplicate param names", () => {
   it.each([
     ...PCRE2_DUPLICATE_NAME_ROUTES,
     "/media/:name{.webp}?",
-    // Expands to `/a/**:x` | `/a/:x`: one `x` per branch.
-    "/a/:x*/:x",
     "/a/*/*",
     "/a/(\\d+)/(\\d+)",
     "/a/*/b/*.png/(\\d+)",
@@ -519,8 +530,10 @@ function fmt(captures: Record<string, string>): string {
  * for `/a/:x/:y?`), its group is unset and the router reports `""`. `key` is
  * that group iff for some empty segment of `path`, the route can end right
  * after it, with `key` taking it: cut there and filled in (`/a/z`), the path
- * is routed with `key: "z"`. (`**` has its own, listed, zero-segment
- * difference.)
+ * is routed with `key: "z"`. After a `**`, segments count from the end of the
+ * path, so cutting it moves `key`: there it is filled in and the rest kept
+ * (`/**\/:x/:y?` on `/a///`: `/a/z//` gives `x: "z"`). (`**` has its own,
+ * listed, zero-segment difference.)
  */
 function isRequiredSegmentGap(
   router: ReturnType<typeof createRouter>,
@@ -537,7 +550,8 @@ function isRequiredSegmentGap(
     (segment, i) =>
       i > 0 &&
       segment === "" &&
-      findRoute(router, "", `${segments.slice(0, i).join("/")}/z`)?.params?.[key] === "z",
+      (findRoute(router, "", `${segments.slice(0, i).join("/")}/z`)?.params?.[key] === "z" ||
+        findRoute(router, "", segments.with(i, "z").join("/"))?.params?.[key] === "z"),
   );
 }
 
@@ -549,6 +563,7 @@ interface CaptureDiff {
     keys: string[],
     groups: Record<string, string>,
     params: Record<string, string>,
+    path: string,
   ): boolean;
 }
 
@@ -571,32 +586,42 @@ const OPTIONAL_BEFORE_WILDCARD: CaptureDiff = {
     Object.values(groups)[0] === Object.values(params)[0],
 };
 
-// Pre-existing: alternation branches run in expansion order, so the `**:x`
-// branch wins where the router picks a more specific expansion (`/:x*/:y` on
-// `/a` gives `y`).
-const REPEAT_EXPANSION: CaptureDiff = {
-  reason: "a `:x*` route: the regex captures `x` where the router matches another expansion",
-  test: (pattern, _keys, groups, params) => {
-    const name = /:([\w-]+)\*/.exec(pattern)?.[1];
-    return (
-      name !== undefined && name in groups && Object.keys(groups).length === 1 && !(name in params)
-    );
-  },
+// Several optional segments after a catch-all (or a `:x*` before a `*`):
+// the router ranks the routes the pattern registers from the end of the
+// path, per path, while the regex's catch-all is lazy or greedy as a whole
+// (see `lazyCatchAll` in src/regexp.ts) and a `:x*` expansion tries its
+// branches in order. Exact captures would need an alternation of every
+// route, with duplicate group names (which PCRE2 and RE2 reject). The regex
+// still takes one of those routes: its captures are the params that route
+// gives the path (a group unset where it gives `""`).
+const OTHER_EXPANSION: CaptureDiff = {
+  reason: "the regex takes another of the routes the pattern registers than the router picks",
+  test: (pattern, _keys, groups, _params, path) =>
+    expansions(pattern).some((route) => {
+      const router = createRouter();
+      addRoute(router, "", route, true);
+      const found = findRoute(router, "", path);
+      if (!found) return false;
+      const params = definedCaptures(found.params);
+      return Object.keys({ ...groups, ...params }).every(
+        (key) => groups[key] === params[key] || (!(key in groups) && params[key] === ""),
+      );
+    }),
 };
+
+/** The routes `addRoute` registers for `pattern` (groups, then modifiers). */
+function expansions(pattern: string): string[] {
+  const groups = expandGroupDelimiters(pattern);
+  if (groups) return groups.flatMap((route) => expansions(route));
+  const modifiers = expandModifiers(splitRoute(pattern));
+  return modifiers ? modifiers.flatMap((route) => expansions(route)) : [pattern];
+}
 
 /** Sweep patterns whose captures differ from the router beyond the accepted gap. */
 const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
   ...[
     "/a/**",
     "/a/a/**",
-    "/a/**/a",
-    "/a/**/:y",
-    "/a/**/*",
-    "/a/**/:y?",
-    "/a/**/**",
-    "/a/**/*.png",
-    "/a/**/x-:y",
-    "/a/**/b{.json}?",
     "//**",
     "/a//**",
     "/{b}?/**",
@@ -607,7 +632,6 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/a/*/**",
     "/:x?/**",
     "/a/:x?/**",
-    "/a/:x*/**",
     "/:x(\\d+)/**",
     "/a/:x(\\d+)/**",
     "/:x(\\d+)?/**",
@@ -618,7 +642,45 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/:x/:y?/**",
     "/:x{.:e}?/**",
     "/a/:x{.:e}?/**",
+    // Segments after `**`: its group is unset where it matches no segment
+    // (with a prefix before it; at the root the leading slash doubles as the
+    // separator and `_` is `""`).
+    "/a/**/a",
+    "/a/**/:y",
+    "/a/**/*",
+    "/a/**/*.png",
+    "/a/**.png",
+    "/a/**/b{.json}?",
+    "/a/**/:y?",
+    "/a/**/:page?",
+    "/a/**/:n(\\d+)?",
+    "/**/:y?",
+    "/:x/**/a",
+    "/:x(\\d+)/**/:y",
+    "/a//**/b",
+    "/a/**//b",
+    "/a/:x?/**/b",
+    "/**/:x/:y?",
+    "/a/**/:y(\\d+)?",
+    "/**/:y{/c}?",
+    "/a/**/:y{/c}?",
+    "/a/:p/**/:n(\\d+)?",
+    "/*/**/:n(\\d+)?",
+    "/a//**/:n(\\d+)?",
   ].map((pattern) => [pattern, ZERO_SEGMENT_CATCH_ALL] as const),
+  ...[
+    "/**/:y?/:z?",
+    "/a/**/:y?/:z?",
+    "/a/**/:n(\\d+)?/:y?",
+    "/a/**/:y?/:n(\\d+)?",
+    "/a/**/:y?/:n(a|b)?",
+    "/a/**/:y?{/b}?",
+    "/a/**/{/b}?",
+    "/a/**{/b/:c?}?",
+    "/a/**{.png}?",
+    "/a/:r*/:y?/*",
+    "/a/:r*/:y?{/b}?",
+  ].map((pattern) => [pattern, OTHER_EXPANSION] as const),
   ...[
     "/:x?/*",
     "/a/:x?/*",
@@ -627,18 +689,4 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     // The router prefers the constrained `y` (see `_selectMatcher`).
     "/a/:x?/:y(\\d+)?",
   ].map((pattern) => [pattern, OPTIONAL_BEFORE_WILDCARD] as const),
-  ...[
-    "/:x*/a",
-    "/a/:x*/a",
-    "/:x*/:y",
-    "/a/:x*/:y",
-    "/:x*/*",
-    "/a/:x*/*",
-    "/:x*/:y?",
-    "/a/:x*/:y?",
-    "/:x*/*.png",
-    "/a/:x*/*.png",
-    "/:x*/b{.json}?",
-    "/a/:x*/b{.json}?",
-  ].map((pattern) => [pattern, REPEAT_EXPANSION] as const),
 ]);

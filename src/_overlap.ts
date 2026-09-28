@@ -1,6 +1,6 @@
 import { createRouter } from "./context.ts";
 import { addRoute } from "./operations/add.ts";
-import { mergeShapes } from "./_subsume.ts";
+import { matcherAt, maxLength, mergeShapes, minLength, stableLength } from "./_subsume.ts";
 import type { MethodData, Node } from "./types.ts";
 
 /**
@@ -10,11 +10,16 @@ import type { MethodData, Node } from "./types.ts";
  * segment values, so it only constrains the total number of segments:
  * trailing bare `*` -> `[0, 1]`, `**` -> `[0, Infinity]`,
  * `**:name` -> `[1, Infinity]`, no variable tail -> `[0, 0]`.
+ *
+ * Segments after a `**` form the `suffix`: fixed matchers aligned to the end
+ * of the path, after the tail (`/**\/_payload.json` -> `[] [0, Infinity]
+ * ["_payload.json"]`). Never empty when set.
  */
 export interface RouteShape {
   fixed: (string | RegExp | undefined)[];
   tailMin: number;
   tailMax: number;
+  suffix?: (string | RegExp | undefined)[];
 }
 
 /**
@@ -76,6 +81,20 @@ export function shapeOf(edges: Edge[], entry: MethodData): RouteShape {
  * so the value check is independent of the chosen length.
  */
 export function shapesOverlap(a: RouteShape, b: RouteShape): boolean {
+  if (a.suffix || b.suffix) {
+    // Try every common length up to the one that stands for all longer ones
+    const lo = Math.max(minLength(a), minLength(b));
+    const hi = Math.min(maxLength(a), maxLength(b));
+    const last = Math.min(hi, Math.max(lo, stableLength(a, b)));
+    for (let n = lo; n <= last; n++) {
+      let overlaps = true;
+      for (let i = 0; i < n && overlaps; i++) {
+        overlaps = _segmentsCanOverlap(matcherAt(a, n, i), matcherAt(b, n, i));
+      }
+      if (overlaps) return true;
+    }
+    return false;
+  }
   const fa = a.fixed.length;
   const fb = b.fixed.length;
   const common = fa < fb ? fa : fb;
@@ -133,32 +152,59 @@ function _collectShapes(node: Node, edges: Edge[], shapes: RouteShape[]): void {
     _collectShapes(node.wildcard, edges, shapes);
     edges.pop();
   }
+  if (node.suffix) {
+    visitSuffixTrie(node.suffix, [], (trieNode, after) => {
+      for (const entry of trieNode.methods![""] || []) {
+        shapes.push(_computeShape(edges.concat(after), entry));
+      }
+    });
+  }
+}
+
+/**
+ * Visit the nodes with routes of a wildcard's `suffix` trie (the segments
+ * after `**`, last one first), with their edges after the `**` in route
+ * order: least -> most specific (shallower first, then param, then static).
+ */
+export function visitSuffixTrie<T>(
+  node: Node<T>,
+  after: Edge[],
+  visit: (node: Node<T>, after: Edge[]) => void,
+): void {
+  if (node.methods) visit(node, after);
+  if (node.param) visitSuffixTrie(node.param, [0, ...after], visit);
+  if (node.static) {
+    for (const key in node.static) visitSuffixTrie(node.static[key], [key, ...after], visit);
+  }
 }
 
 function _computeShape(edges: Edge[], entry: MethodData): RouteShape {
   const fixed: RouteShape["fixed"] = [];
+  let suffix: RouteShape["fixed"] | undefined;
   let tailMin = 0;
   let tailMax = 0;
   const pMap = entry.paramsMap;
   for (let d = 0; d < edges.length; d++) {
     const edge = edges[d];
+    const into = suffix || fixed;
     if (typeof edge === "string") {
-      fixed.push(edge);
+      into.push(edge);
     } else if (edge === 1) {
-      // Wildcard is always terminal and its paramsMap entry is always last
-      // (`**` is optional, `**:name` requires one segment).
-      tailMin = pMap![pMap!.length - 1][2] ? 0 : 1;
+      // `**` is optional, `**:name` requires one segment. Segments after it
+      // are the suffix, aligned to the end of the path.
+      tailMin = pMap!.find((e) => e[0] === -(d + 1))![2] ? 0 : 1;
       tailMax = Number.POSITIVE_INFINITY;
+      if (d < edges.length - 1) suffix = [];
     } else if (pMap) {
       // Param: classified by this entry's paramsMap entry at this segment index.
       const p = pMap.find((e) => e[0] === d)!;
       if (p[1] instanceof RegExp) {
-        fixed.push(p[1]);
+        into.push(p[1]);
       } else if (p[2] /* bare `*` */ && d === edges.length - 1) {
         // A trailing bare `*` matches zero-or-one segment; elsewhere exactly one.
         tailMax = 1;
       } else {
-        fixed.push(undefined);
+        into.push(undefined);
       }
     }
   }
@@ -172,6 +218,14 @@ function _computeShape(edges: Edge[], entry: MethodData): RouteShape {
     tailMin += fixed.length - f;
     tailMax += fixed.length - f;
     fixed.length = f;
+  }
+  if (suffix) {
+    // Likewise for leading any-value matchers of the suffix (`/**\/:x/y` is
+    // `/**:x/y`); a suffix of them only (`/**\/:x`) is just a longer tail.
+    let s = 0;
+    while (s < suffix.length && suffix[s] === undefined) s++;
+    tailMin += s;
+    if (s < suffix.length) return { fixed, tailMin, tailMax, suffix: suffix.slice(s) };
   }
   return { fixed, tailMin, tailMax };
 }

@@ -29,8 +29,14 @@ describe("routeNodeKeys", () => {
       ["/admin/**", ["/admin/**"]],
       ["/admin/**:rest", ["/admin/**"]],
       ["/admin/:x+", ["/admin/**"]],
-      // `**` is terminal: the add loop breaks at the first one.
-      ["/admin/**/anything", ["/admin/**"]],
+      // Segments after `**` (its suffix trie): the `**` name is in the entry.
+      ["/admin/**/anything", ["/admin/**/anything"]],
+      ["/admin/**:rest/anything", ["/admin/**/anything"]],
+      ["/admin/:x+/anything", ["/admin/**/anything"]],
+      ["/**/_payload.json", ["/**/_payload.json"]],
+      ["/**/:file/og.png", ["/**/*/og.png"]],
+      ["/**/*.png", ["/**/*"]],
+      ["/a/**/\\*", ["/a/**/\\*"]],
 
       // Escaped literals are static keys, never markers.
       ["/a/\\*", ["/a/\\*"]],
@@ -284,6 +290,21 @@ const EXTRA_PATTERNS = [
   "/a/\\*\\*",
   "/:x/:y",
   "/a/:x/:y?",
+  // Segments after `**` (suffix tries)
+  "/**/a",
+  "/**/b",
+  "/**:r/a",
+  "/**/:x",
+  "/**/:x(\\d+)",
+  "/**/*.png",
+  "/**/a/b",
+  "/**/:x/b",
+  "/a/**/b",
+  "/a/**:r/b",
+  "/a/:x+/b",
+  "/a/:x*/b",
+  "/:x/**/b",
+  "/a/**/\\*",
 ];
 
 const PATHS = [
@@ -303,6 +324,10 @@ const PATHS = [
   "/b/42/c",
   "/books",
   "/x/a/b",
+  "/x/y/a",
+  "/x/a/b/b",
+  "/b/x/b",
+  "/a/b/*",
 ];
 
 /** Segment alphabet at depth <= 2, each with each tail, plus hand-picked extras. */
@@ -346,6 +371,7 @@ function sharesNode(a: string, b: string): boolean {
     }
     if (node.param) stack.push(node.param);
     if (node.wildcard) stack.push(node.wildcard);
+    if (node.suffix) stack.push(node.suffix);
   }
   return false;
 }
@@ -373,14 +399,16 @@ function classifySegment(segment: string): string | undefined {
   return "static:" + staticKeys[0];
 }
 
-/** The encoded form `routeNodeKeys` gives that segment inside a `/x/…/y` frame. */
-function encodeVia(segment: string, node: string): string | undefined {
+/**
+ * The encoded form `routeNodeKeys` gives that segment inside a `/x/…/y` frame.
+ * `undefined` when it spans more than one tree level (`**a` is `**` + `*a`).
+ */
+function encodeVia(segment: string, _node: string): string | undefined {
   const keys = routeNodeKeys("/x/" + segment + "/y");
   if (keys.length !== 1) return undefined;
   const key = keys[0];
-  // A wildcard node is terminal, so the `/y` frame is not part of its key.
-  if (node === "wildcard") return key === "/x/**" ? "**" : undefined;
-  return key.startsWith("/x/") && key.endsWith("/y") ? key.slice(3, -2) : undefined;
+  const encoded = key.startsWith("/x/") && key.endsWith("/y") ? key.slice(3, -2) : undefined;
+  return encoded?.includes("/") ? undefined : encoded;
 }
 
 function captureError(fn: () => unknown): string | undefined {

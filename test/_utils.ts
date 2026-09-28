@@ -17,20 +17,28 @@ export function createRouter<T extends Record<string, string> = Record<string, s
   return router;
 }
 
+/**
+ * A wildcard's suffix trie (the segments after `**`, last one first) prints
+ * as a `<suffix>` child of the `**` node.
+ */
 export function formatTree(
   node: Node<{ path?: string }>,
   depth = 0,
   result = [] as string[],
   prefix = "",
+  suffix = false,
 ): string | string[] {
   result.push(
     // prettier-ignore
-    `${prefix}${depth === 0 ? "" : "├── "}${node.key ? `/${node.key}` : (depth === 0 ? "<root>" : "<empty>")}${_formatMethods(node)}`,
+    `${prefix}${depth === 0 ? "" : "├── "}${suffix ? "<suffix>" : node.key ? `/${node.key}` : (depth === 0 ? "<root>" : "<empty>")}${_formatMethods(node)}`,
   );
 
-  const childrenArray = [...Object.values(node.static || []), node.param, node.wildcard].filter(
-    Boolean,
-  ) as Node<{ path?: string }>[];
+  const childrenArray = [
+    ...Object.values(node.static || []),
+    node.param,
+    node.wildcard,
+    node.suffix,
+  ].filter(Boolean) as Node<{ path?: string }>[];
   for (const [index, child] of childrenArray.entries()) {
     const lastChild = index === childrenArray.length - 1;
     formatTree(
@@ -38,6 +46,7 @@ export function formatTree(
       depth + 1,
       result,
       (depth === 0 ? "" : prefix + (depth > 0 ? "│   " : "    ")) + (lastChild ? "    " : "    "),
+      child === node.suffix,
     );
   }
 
