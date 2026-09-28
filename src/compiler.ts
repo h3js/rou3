@@ -2,11 +2,32 @@ import { ESCAPED_GROUP_PREFIX, fromGroupName, UNNAMED_GROUP_PREFIX } from "./_gr
 import { NullProtoObj } from "./object.ts";
 import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 
-export interface RouterCompilerOptions<T = any> {
+/** Options of {@link compileRouter}. */
+export interface CompileRouterOptions {
+  /** Return every matching route (least to most specific) instead of the best one. */
   matchAll?: boolean;
+  /** Resolve `.` and `..` segments of the path before matching. */
   normalize?: boolean;
+}
+
+/** Options of {@link compileRouterToString}. */
+export interface CompileRouterToStringOptions<T = any> extends CompileRouterOptions {
+  /**
+   * Emit `const <functionName>=<matcher>;` instead of a bare expression.
+   */
+  functionName?: string;
+  /**
+   * Render one route's data as a JavaScript expression (raw code, emitted
+   * as is). Defaults to `JSON.stringify`.
+   */
   serialize?: (data: T) => string;
 }
+
+/**
+ * @deprecated Use {@link CompileRouterToStringOptions} (or
+ * {@link CompileRouterOptions} for `compileRouter`).
+ */
+export type RouterCompilerOptions<T = any> = CompileRouterToStringOptions<T>;
 
 /**
  * Compiles the router instance into a faster route-matching function.
@@ -55,16 +76,31 @@ export function compileRouter<T, O extends RouterCompilerOptions<T> = RouterComp
  * import { compileRouterToString } from "rou3/compiler";
  * const router = createRouter();
  * // [add some routes with serializable data]
- * const compilerCode = compileRouterToString(router, "findRoute");
+ * const compilerCode = compileRouterToString(router, { functionName: "findRoute" });
  * // "const findRoute=(m, p) => {}"
  */
-export function compileRouterToString(
-  router: RouterContext,
-  functionName?: string,
-  opts?: RouterCompilerOptions,
+export function compileRouterToString<T>(
+  router: RouterContext<T>,
+  opts?: CompileRouterToStringOptions<T>,
+): string;
+/**
+ * @deprecated Pass the function name as an option instead:
+ * `compileRouterToString(router, { functionName, ...opts })`.
+ */
+export function compileRouterToString<T>(
+  router: RouterContext<T>,
+  functionName: string | undefined,
+  opts?: CompileRouterToStringOptions<T>,
+): string;
+export function compileRouterToString<T>(
+  router: RouterContext<T>,
+  nameOrOpts?: string | CompileRouterToStringOptions<T>,
+  legacyOpts?: CompileRouterToStringOptions<T>,
 ): string {
+  const opts = (typeof nameOrOpts === "object" && nameOrOpts) || legacyOpts || {};
+  const functionName = typeof nameOrOpts === "string" ? nameOrOpts : opts.functionName;
   const ctx: CompilerContext = {
-    opts: opts || {},
+    opts,
     router,
     data: [],
     compileToString: true,
