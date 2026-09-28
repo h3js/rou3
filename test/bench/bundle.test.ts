@@ -88,8 +88,12 @@ describe("benchmark", () => {
     // anything but a whole-segment `:name`, a constraint + `+` / `*`, empty
     // and `(?` groups, invalid and duplicate param names) with `rou3:` errors;
     // it was accepted with a wrong meaning or threw a raw `SyntaxError`.
-    expect(bytes).toBeLessThanOrEqual(9620); // <9.62kb
-    expect(gzipSize).toBeLessThanOrEqual(3985); // <3.985kb
+    // +~35B raw / +~24B gzip: findRoute's static fast path and `params: false`
+    // (both APIs) return fresh `{ data }` objects instead of the router's
+    // internal (shared, mutable) entries, and findAllRoutes omits `params` on
+    // static matches like compiled.
+    expect(bytes).toBeLessThanOrEqual(9655); // <9.655kb
+    expect(gzipSize).toBeLessThanOrEqual(4010); // <4.01kb
   });
 });
 

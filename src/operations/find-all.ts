@@ -25,16 +25,14 @@ export function findAllRoutes<T>(
     rankFromEnd(matches, segments);
   }
 
-  if (opts?.params === false) {
-    return matches;
-  }
-
-  return matches.map((m) => {
-    return {
-      data: m.data,
-      params: m.paramsMap ? getMatchParams(segments, m.paramsMap, m.suffix) : undefined,
-    };
-  });
+  // Fresh objects (the entries are internal); static routes and
+  // `params: false` carry no `params` key, as in `findRoute` and compiled
+  const params = opts?.params !== false;
+  return matches.map((m) =>
+    params && m.paramsMap
+      ? { data: m.data, params: getMatchParams(segments, m.paramsMap, m.suffix) }
+      : { data: m.data },
+  );
 }
 
 /**

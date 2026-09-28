@@ -193,7 +193,7 @@ function _add<T>(
   const key = "/" + segments.join("/");
   const methods = (node.methods ??= new NullProtoObj());
   (methods[method] ??= []).push({
-    data: data || (null as T),
+    data: data ?? (null as T),
     paramsRegexp,
     paramsMap: hasParams ? paramsMap : undefined,
     route: route ?? key,
