@@ -17,6 +17,7 @@ import {
   duplicateGroupNames,
   hasLookahead,
   hasLookbehind,
+  RESERVED_SYNTAX_ROUTES,
   TWO_CATCH_ALL_ROUTES,
   UNCLOSED_GROUP_ROUTES,
   sweepPaths,
@@ -445,6 +446,60 @@ describe("routeToRegExp: a `(` that does not close in its segment", () => {
   });
 });
 
+// Syntax with no meaning yet throws, so it can be given one later instead of
+// locking in what it happened to do (see `RESERVED_SYNTAX_ROUTES`).
+describe("reserved pattern syntax", () => {
+  it.each(RESERVED_SYNTAX_ROUTES)("%s throws", (route) => {
+    const message = new RegExp(`^rou3: .*\\(${route.replace(/[$()*+.?[\\\]^{|}]/g, "\\$&")}\\)$`);
+    expect(() => addRoute(createRouter(), "", route)).toThrow(message);
+    expect(() => routeToRegExp(route)).toThrow(message);
+    expect(() => routeNodeKeys(route)).toThrow(message);
+  });
+
+  it.each([
+    "/a/:x(\\d+)?",
+    "/a/:x(\\d+)?/b",
+    "/a/:x?",
+    "/a/:x+",
+    "/a/:x*/b",
+    "/a/pre-:x?",
+    "/a/:x((?:a|b))",
+    "/a/:x(\\d{2})",
+    "/a/:x(a{1,2}){-:y}?",
+    "/a/**:x/b",
+    "/a{/**:x}?",
+    "/a/**{.md}?",
+    "/a/*.png",
+    "/a/file-*-*.png",
+    "/a/:x-*",
+    "/a/(\\d+)/(a|b)",
+    "/a/*/:x",
+    "/v1/:id:cancel",
+    "/c++/*",
+    "/a/what?",
+    "/a/{b}?/{c}",
+    "/a/{}",
+    "/a/\\{b",
+    "/a/b\\}",
+    "/a/\\{\\{b\\}\\}",
+    "/a/\\:",
+    "/a/x\\:/:y",
+    "/a/:x\\?",
+    "/a/*\\+",
+    "/a)b",
+  ])("%s is accepted", (route) => {
+    expect(() => addRoute(createRouter(), "", route)).not.toThrow();
+    expect(() => routeToRegExp(route)).not.toThrow();
+  });
+
+  it("keeps escaped braces literal", () => {
+    const router = createRouter();
+    addRoute(router, "GET", "/a/\\{b\\}/:x", {});
+    expect(findRoute(router, "GET", "/a/{b}/1")?.params).toEqual({ x: "1" });
+    expect(routeToRegExp("/a/\\{b\\}/:x").test("/a/{b}/1")).toBe(true);
+  });
+});
+
 // A route expansion that declares a param name twice would emit a duplicate
 // named group. Engines disagree on whether that compiles: V8 (Node 24) accepts
 // it when one copy sits inside an alternative (the `**:name` / `:name+` ending),
@@ -471,7 +526,12 @@ describe("routeToRegExp: duplicate param names", () => {
     // `**` is the `_` param (the router reports it as `params._`).
     ["/a/:_/**", "_"],
   ])("rejects %s", (route, name) => {
-    expect(() => routeToRegExp(route)).toThrowError(`rou3: duplicate param name "${name}"`);
+    // The router rejects it with the same error (across segments the later
+    // value used to win silently, within one a raw `SyntaxError` was thrown),
+    // quoting the route as written.
+    const message = `rou3: duplicate param name "${name}" (${route})`;
+    expect(() => routeToRegExp(route)).toThrowError(message);
+    expect(() => addRoute(createRouter(), "", route)).toThrowError(message);
   });
 
   // Duplicates are per expansion: the alternation fallback repeats a name once
@@ -490,6 +550,7 @@ describe("routeToRegExp: duplicate param names", () => {
       return;
     }
     expect(() => routeToRegExp(route)).not.toThrow();
+    expect(() => addRoute(createRouter(), "", route)).not.toThrow();
   });
 });
 

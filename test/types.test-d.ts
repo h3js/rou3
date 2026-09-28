@@ -46,7 +46,6 @@ describe("types", () => {
     it("should strip regex constraints and modifiers from param names", () => {
       expectTypeOf<InferRouteParams<"/test/:id(\\d+)">>().toEqualTypeOf<{ id: string }>();
       expectTypeOf<InferRouteParams<"/test/:id+">>().toEqualTypeOf<{ id: string }>();
-      expectTypeOf<InferRouteParams<"/test/:id(\\d+)+/x">>().toEqualTypeOf<{ id: string }>();
     });
 
     it("should infer optional params as possibly undefined", () => {
@@ -54,7 +53,6 @@ describe("types", () => {
       expectTypeOf<InferRouteParams<"/test/:id?">>().toEqualTypeOf<Optional>();
       expectTypeOf<InferRouteParams<"/test/:id*">>().toEqualTypeOf<Optional>();
       expectTypeOf<InferRouteParams<"/test/:id(\\d+)?">>().toEqualTypeOf<Optional>();
-      expectTypeOf<InferRouteParams<"/test/:id(\\d+)*">>().toEqualTypeOf<Optional>();
       expectTypeOf<InferRouteParams<"/test/:id?/x">>().toEqualTypeOf<Optional>();
       // a modifier `*` is not a wildcard capture; a real trailing `*` still is
       expectTypeOf<InferRouteParams<"/test/:id*/x/*">>().toEqualTypeOf<{

@@ -83,8 +83,13 @@ describe("benchmark", () => {
     // siblings of its method-scoped ones (`methodEntries`, `_selectMatcher`
     // with an allocation-free two-pass loop): a method-scoped entry no longer
     // hides them from findRoute or findAllRoutes.
-    expect(bytes).toBeLessThanOrEqual(9090); // <9.09kb
-    expect(gzipSize).toBeLessThanOrEqual(3690); // <3.69kb
+    // +~542B raw / +~296B gzip: addRoute rejects pattern syntax with no
+    // meaning yet (unbalanced / nested `{}`, `{…}+` / `{…}*`, a modifier on
+    // anything but a whole-segment `:name`, a constraint + `+` / `*`, empty
+    // and `(?` groups, invalid and duplicate param names) with `rou3:` errors;
+    // it was accepted with a wrong meaning or threw a raw `SyntaxError`.
+    expect(bytes).toBeLessThanOrEqual(9620); // <9.62kb
+    expect(gzipSize).toBeLessThanOrEqual(3985); // <3.985kb
   });
 });
 

@@ -1,3 +1,5 @@
+import { invalidSyntax } from "./operations/_utils.ts";
+
 /** `[pre, body, suf, mod]` split of a `{...}` group, or `undefined`. */
 export type GroupDelimiter = [pre: string, body: string, suf: string, mod: string | undefined];
 
@@ -43,7 +45,12 @@ export function scanFirstGroup(path: string): GroupDelimiter | undefined {
   ];
 }
 
-export function expandGroupDelimiters(path: string): string[] | undefined {
+/**
+ * Expand the first `{...}` / `{...}?` group of `path` into the routes it
+ * stands for. `{...}+` / `{...}*` repetition is not supported: `input` (quoted
+ * in the error) is rejected.
+ */
+export function expandGroupDelimiters(path: string, input: string = path): string[] | undefined {
   if (!path.includes("{")) return;
   const group = scanFirstGroup(path);
   if (!group) {
@@ -52,17 +59,9 @@ export function expandGroupDelimiters(path: string): string[] | undefined {
 
   const [pre, body, suf, mod] = group;
 
-  if (!mod) {
-    return [pre + body + suf];
+  if (mod === "+" || mod === "*") {
+    invalidSyntax(`unsupported \`{}${mod}\``, input);
   }
 
-  if (mod === "?") {
-    return [pre + body + suf, pre + suf];
-  }
-
-  if (body.includes("/")) {
-    throw new Error("unsupported group repetition across segments");
-  }
-
-  return [`${pre}(?:${body})${mod}${suf}`];
+  return mod ? [pre + body + suf, pre + suf] : [pre + body + suf];
 }

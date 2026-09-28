@@ -100,8 +100,9 @@ const SKIP_PATTERNS = new Set([
  *    rou3 `(.*)` is segment-scoped (no cross-segment matching)
  * 4. `**` semantics: URLPattern `**` = literal `**`;
  *    rou3 `**` = catch-all wildcard
- * 5. `{...}+`/`{...}*`: URLPattern supports group repetition;
- *    rou3 only supports `{...}?` (optional groups)
+ * 5. `{...}+`/`{...}*`, and modifiers on `*` or an unnamed group
+ *    (`(.*)?`, `*+`): URLPattern supports them; rou3 rejects them (see
+ *    `RESERVED_PATTERNS`)
  * 6. Backslash escaping: URLPattern uses `\` to escape;
  *    rou3 treats `\` differently in some contexts
  * 7. Path normalization: URLPattern resolves `.`/`..` in input;
@@ -131,40 +132,11 @@ const KNOWN_DIFFS = new Set([
   "/foo/* → /foo/ [match]",
   "/foo/* → /foo [no match]",
   "/foo/:bar(.*) → /foo/ [match]",
-  "/foo/(.*)+ → /foo/ [match]",
-  "/foo/*+ → /foo/ [match]",
-  "/foo/(.*)* → /foo/ [match]",
-
-  // `(.*)` / `*` with modifiers — rou3 doesn't support these as URLPattern does
-  "/foo/(.*)? → /foo [match]",
-  "/foo/(.*)? → /foo/ [match]",
-  "/foo/*? → /foo/bar/baz [match]",
-  "/foo/*? → /foo [match]",
-  "/foo/*? → /foo/ [match]",
-  "/foo/*+ → /foo/bar/baz [match]",
-  // `(.*)*` captures into the trailing `*` group, so params differ from
-  // URLPattern for every strategy even when the input matches.
-  "/foo/(.*)* → /foo/bar [match]",
-  "/foo/(.*)* → /foo/bar/baz [match]",
-  "/foo/(.*)* → /foo [match]",
 
   // `**` — rou3 catch-all vs URLPattern literal double-star
   "/foo/** → /foo/ [match]",
   "/foo/** → /foo/bar [match]",
   "/foo/** → /foo/bar/baz [match]",
-
-  // `{/bar}+` / `{/bar}*` — cross-segment group repetition (unsupported)
-  "/foo{/bar}+ → /foo/bar [match]",
-  "/foo{/bar}+ → /foo/bar/bar [match]",
-  "/foo{/bar}+ → /foo/bar/baz [no match]",
-  "/foo{/bar}+ → /foo [no match]",
-  "/foo{/bar}+ → /foo/ [no match]",
-  "/foo{/bar}* → /foo/bar [match]",
-  "/foo{/bar}* → /foo/bar/bar [match]",
-  "/foo{/bar}* → /foo/bar/baz [no match]",
-  "/foo{/bar}* → /foo [match]",
-  "/foo{/bar}* → /foo/ [match]",
-  "/foo{/bar}* → /foo/ [no match]",
 
   // Non-`/`-prefixed input — URLPattern normalizes input paths
   "/foo/bar → foo/bar [match]",
@@ -202,6 +174,19 @@ const KNOWN_DIFFS = new Set([
   ":foo(baz)bar → bazbar [match]",
   ":foo./ → bar./ [match]",
   ":foo../ → bar../ [match]",
+]);
+
+// Valid URLPattern syntax rou3 has no meaning for (yet): every strategy
+// throws a `rou3:` error for these patterns instead of matching with a
+// different meaning (modifiers on `*` / an unnamed group, group repetition).
+const RESERVED_PATTERNS = new Set([
+  "/foo/(.*)?",
+  "/foo/*?",
+  "/foo/(.*)+",
+  "/foo/*+",
+  "/foo/(.*)*",
+  "/foo{/bar}+",
+  "/foo{/bar}*",
 ]);
 
 // Additional known diffs specific to router-based matching (addRoute+findRoute / compileRouter)
@@ -254,8 +239,6 @@ const ROUTER_KNOWN_DIFFS = new Set([
   // but the segment-scoped radix tree stops at one segment.
   "/foo/(.*) → /foo/bar/baz [match]",
   "/foo/:bar(.*) → /foo/bar/baz [match]",
-  "/foo/(.*)? → /foo/bar/baz [match]",
-  "/foo/(.*)+ → /foo/bar/baz [match]",
 ]);
 
 type MatchStrategy = {
@@ -329,6 +312,13 @@ describe("wpt urlpattern compatibility", () => {
           }
 
           if (test.input === undefined) continue;
+
+          if (RESERVED_PATTERNS.has(test.pattern)) {
+            it(`${label} (rejected)`, () => {
+              expect(() => strategy.match(test.pattern, test.input!)).toThrow(/^rou3: /);
+            });
+            continue;
+          }
 
           const isRegexp = strategy.name === "routeToRegExp";
           const isKnownDiff =

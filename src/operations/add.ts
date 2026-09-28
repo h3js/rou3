@@ -8,12 +8,21 @@ import {
   encodeEscapes,
   expandedRouteId,
   expandModifiers,
+  invalidSyntax,
+  MISPLACED_MODIFIER,
   segmentKey,
   splitRoute,
 } from "./_utils.ts";
 
 /**
  * Add a route to the router context.
+ *
+ * @throws a `rou3:` error for pattern syntax with no meaning (yet), quoting
+ * the pattern: an unclosed `(`, unbalanced or nested `{}`, `{…}+` / `{…}*`,
+ * a `?` / `+` / `*` anywhere but after a whole-segment `:name` (`?` also
+ * after `:name(regex)`), an empty or `(?` group, a `:` without a name, more
+ * after `**:name` in its segment, a repeated param name, and more than one
+ * `**`.
  */
 export function addRoute<T>(
   ctx: RouterContext<T>,
@@ -48,7 +57,7 @@ function _add<T>(
   route?: string,
   input: string = path,
 ): void {
-  const groupExpanded = expandGroupDelimiters(path);
+  const groupExpanded = expandGroupDelimiters(path, input);
   if (groupExpanded) {
     route ??= expandedRouteId(path);
     for (const expandedPath of groupExpanded) {
@@ -62,7 +71,7 @@ function _add<T>(
   const segments = splitRoute(path);
 
   // Expand modifiers (:name?, :name+, :name*) into multiple route entries
-  const expanded = expandModifiers(segments);
+  const expanded = expandModifiers(segments, input);
   if (expanded) {
     route ??= expandedRouteId(path);
     for (const p of expanded) {
@@ -77,6 +86,8 @@ function _add<T>(
 
   const paramsMap: ParamsIndexMap = [];
   const paramsRegexp: RegExp[] = [];
+  // Param names of this expansion: a name declared twice throws
+  const names: string[] = [];
 
   // Segments after a `**` (static key, or `1` for a param) are inserted into
   // the wildcard's `suffix` trie last segment first, once the params are read
@@ -101,7 +112,11 @@ function _add<T>(
         node.wildcard = { key: "**" };
       }
       node = node.wildcard;
-      paramsMap.push([-(i + 1), segment.split(":")[1] || "_", segment.length === 2 /* no id */]);
+      paramsMap.push([
+        -(i + 1),
+        addName(names, segment.length === 2 ? "_" : segment.slice(3), input),
+        segment.length === 2 /* no id */,
+      ]);
       if (i === segments.length - 1) {
         break;
       }
@@ -125,7 +140,7 @@ function _add<T>(
         // A trailing `*` may match no segment, but not after a `**`
         paramsMap.push([i, String(_unnamedParamIndex++), !suffix /* optional */]);
       } else if (!/^:\w+(?:-\w+)*$/.test(segment)) {
-        const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex);
+        const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex, names, input);
         _unnamedParamIndex = nextIndex;
         paramsRegexp[i] = regexp;
         if (!suffix) {
@@ -133,7 +148,7 @@ function _add<T>(
         }
         paramsMap.push([i, regexp, false]);
       } else {
-        paramsMap.push([i, segment.slice(1), false]);
+        paramsMap.push([i, addName(names, segment.slice(1), input), false]);
       }
       continue;
     }
@@ -192,16 +207,55 @@ function _add<T>(
   }
 }
 
-function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
+/**
+ * Record param `name` of an expansion of `input`, throwing on a repeat or on
+ * a name that is not one (`**:x(\\d+)`, `**:x.json`: a `**:name` ends its
+ * segment).
+ */
+function addName(names: string[], name: string, input: string): string {
+  if (names.includes(name) || !/^\w+(?:-\w+)*$/.test(name)) {
+    invalidSyntax(`${names.includes(name) ? "duplicate" : "invalid"} param name "${name}"`, input);
+  }
+  names.push(name);
+  return name;
+}
+
+/**
+ * The regex of a dynamic segment (params, constraints, `*`), after its
+ * modifier has been expanded. Throws on what has no meaning (yet) there: a `:`
+ * without a name, an empty group or one starting with `?`, and a `?` / `+` /
+ * `*` modifier on anything but a whole segment's `:name` (a `?` / `+` was a
+ * raw regex quantifier, a `*` right after a name or group is ambiguous with a
+ * modifier).
+ */
+function getParamRegexp(
+  segment: string,
+  unnamedStart: number,
+  names: string[],
+  input: string,
+): [RegExp, number] {
   let _i = unnamedStart;
   // Replace URLPattern \x escapes outside (...) with \uFFFE placeholder
   let _s = "",
-    _d = 0;
+    _d = 0,
+    // Index right after the last `:name` or top-level group
+    _e = -1;
   for (let j = 0; j < segment.length; j++) {
     const c = segment.charCodeAt(j);
+    if (_d === 0) {
+      if (c === 58 /* : */) {
+        _e = j + 1 + segment.slice(j + 1).search(/(?!\w|(?<=\w)-\w)/);
+        if (_e === j + 1) invalidSyntax('invalid param name ""', input);
+      } else if (c === 40 /* ( */ && /[?)]/.test(segment[j + 1])) {
+        invalidSyntax("empty or `(?` group", input);
+      } else if (c === 63 /* ? */ || c === 43 /* + */ || (c === 42 /* * */ && j === _e)) {
+        invalidSyntax(MISPLACED_MODIFIER, input);
+      }
+    }
     if (c === 40) _d++;
-    else if (c === 41 && _d > 0) _d--;
-    else if (c === 92 && _d === 0 && j + 1 < segment.length) {
+    else if (c === 41 && _d > 0) {
+      if (--_d === 0) _e = j + 1;
+    } else if (c === 92 && _d === 0 && j + 1 < segment.length) {
       const n = segment[j + 1];
       if (n !== ":" && n !== "(" && n !== "*" && n !== "\\") {
         _s += "\uFFFE" + n;
@@ -222,7 +276,7 @@ function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
   const regex = _s
     .replace(
       /:(\w+(?:-\w+)*)(?:\(([^)]*)\))?/g,
-      (_, id, p) => `(?<${toGroupName(id)}>${p || "[^/]+"})`,
+      (_, id, p) => `(?<${toGroupName(addName(names, id, input))}>${p || "[^/]+"})`,
     )
     .replace(/\((?![?<])/g, () => `(?<${toUnnamedGroupKey(_i++)}>`)
     .replace(/\uFFFE(.)/g, (_, c) => (/[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c));
