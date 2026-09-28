@@ -35,7 +35,8 @@ export function addRoute<T>(
  * `/admin` on the same node. A plain pattern's identity is its rewritten
  * segment join — the string `ctx.static` is keyed by (one `join` per entry,
  * no extra parsing) — so spellings the tree cannot tell apart (`\)` vs `)`,
- * `/a/` vs `/a`) share one identity.
+ * `/a/` vs `/a`) share one identity. `input` is the pattern as written, quoted
+ * in errors (an expansion is rewritten: `:x+` is `**:x`).
  */
 function _add<T>(
   ctx: RouterContext<T>,
@@ -43,12 +44,13 @@ function _add<T>(
   path: string,
   data: T | undefined,
   route?: string,
+  input: string = path,
 ): void {
   const groupExpanded = expandGroupDelimiters(path);
   if (groupExpanded) {
     route ??= expandedRouteId(path);
     for (const expandedPath of groupExpanded) {
-      _add(ctx, method, expandedPath, data, route);
+      _add(ctx, method, expandedPath, data, route, input);
     }
     return;
   }
@@ -62,7 +64,7 @@ function _add<T>(
   if (expanded) {
     route ??= expandedRouteId(path);
     for (const p of expanded) {
-      _add(ctx, method, p, data, route);
+      _add(ctx, method, p, data, route, input);
     }
     return;
   }
@@ -88,7 +90,9 @@ function _add<T>(
     // Wildcard
     if (key === 2) {
       if (suffix) {
-        throw new Error(`rou3: a route can have only one \`**\` (${path})`);
+        throw new Error(
+          `rou3: a route can have only one \`**\`, \`:name+\` or \`:name*\` (${input})`,
+        );
       }
       trail?.push(node);
       if (!node.wildcard) {

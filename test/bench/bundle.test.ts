@@ -72,8 +72,11 @@ describe("benchmark", () => {
     // +~45B raw / +~30B gzip: rankFromEnd skips the segments both `**` cover,
     // so a comparison costs the route, not the path (a 4000-segment path with
     // 20 nested `**` routes and one suffix route: ~2.8ms -> ~0.1ms).
-    expect(bytes).toBeLessThanOrEqual(8760); // <8.76kb
-    expect(gzipSize).toBeLessThanOrEqual(3500); // <3.50kb
+    // +~31B raw / +~21B gzip: the "only one `**`" error quotes the pattern as
+    // written (not `/a/**:x/b/**`, the rewrite of `/a/:x+/b/**`) and names
+    // `:name+` / `:name*` as catch-alls too.
+    expect(bytes).toBeLessThanOrEqual(8790); // <8.79kb
+    expect(gzipSize).toBeLessThanOrEqual(3525); // <3.525kb
   });
 });
 

@@ -392,7 +392,8 @@ describe("regex-body scans", () => {
 // segment is one); `routeToRegExp` rejects the others with the same error.
 describe("routeToRegExp: more than one `**`", () => {
   it.each(TWO_CATCH_ALL_ROUTES)("%s throws like addRoute", (route) => {
-    const message = /^rou3: a route can have only one `\*\*`/;
+    // Quoting the route as written, not its rewritten form (`:x+` is `**:x`)
+    const message = `rou3: a route can have only one \`**\`, \`:name+\` or \`:name*\` (${route})`;
     expect(() => addRoute(createRouter(), "", route)).toThrow(message);
     expect(() => routeToRegExp(route)).toThrow(message);
   });

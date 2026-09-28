@@ -1134,6 +1134,10 @@ export const TWO_CATCH_ALL_ROUTES: readonly string[] = [
   "/a/:x*/**",
   "/a/**/:y+",
   "/**.md/**",
+  "/x/:seg*/old/**",
+  "/x/:seg+/old/**",
+  "/x{/y}?/:seg+/old/**",
+  String.raw`/\:x/:seg+/:rest+`,
 ];
 
 /** Whether `addRoute` accepts `pattern`. */

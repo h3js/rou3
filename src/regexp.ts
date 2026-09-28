@@ -68,12 +68,16 @@ export function routeToRegExp(route: string = "/"): RegExp {
   if (route.charCodeAt(0) !== 47 /* '/' */) {
     route = `/${route}`;
   }
+  return toRegExp(route, route);
+}
 
+/** `routeToRegExp` of `route`, an expansion of `input` (quoted in errors). */
+function toRegExp(route: string, input: string): RegExp {
   // Compile a single optional group (`{...}?`) inline as `(?:...)?`
   // instead of expanding it into an alternation of full routes. The alternation
   // form re-emits every param before the group in both branches, producing
   // duplicate named groups that PCRE2-family engines reject.
-  const inlineOptional = inlineOptionalGroup(route);
+  const inlineOptional = inlineOptionalGroup(route, input);
   if (inlineOptional) {
     return inlineOptional;
   }
@@ -88,7 +92,7 @@ export function routeToRegExp(route: string = "/"): RegExp {
     // either way); keep one copy of each.
     const sources = [
       ...new Set(
-        groupExpanded.map((expandedRoute) => routeToRegExp(expandedRoute).source.slice(1, -1)),
+        groupExpanded.map((expandedRoute) => toRegExp(expandedRoute, input).source.slice(1, -1)),
       ),
     ];
     if (sources.length === 1) {
@@ -102,7 +106,7 @@ export function routeToRegExp(route: string = "/"): RegExp {
     return new RegExp(`^(?:${sources.join("|")})$`);
   }
 
-  return _routeToRegExp(route);
+  return _routeToRegExp(route, input);
 }
 
 /**
@@ -112,7 +116,7 @@ export function routeToRegExp(route: string = "/"): RegExp {
  * safely: multi-group routes, a group inside a segment, or unexpected segment
  * shapes.
  */
-function inlineOptionalGroup(route: string): RegExp | undefined {
+function inlineOptionalGroup(route: string, input: string): RegExp | undefined {
   const group = scanFirstGroup(route);
   if (!group) {
     return;
@@ -140,8 +144,12 @@ function inlineOptionalGroup(route: string): RegExp | undefined {
   // segments counted as optional ones (see `lazyCatchAll`). Before more of the
   // route, a catch-all can only be in the shared tail, after the group.
   const extra = suf === "" && body.charCodeAt(0) === 47 /* '/' */ ? splitRoute(body) : [];
-  const [baseSegs, baseOwnSep, , baseOpenTail] = routeToRegExpSegments(pre + suf, extra);
-  const [fullSegs, fullOwnSep, starStar, openTail] = routeToRegExpSegments(pre + body + suf, extra);
+  const [baseSegs, baseOwnSep, , baseOpenTail] = routeToRegExpSegments(pre + suf, input, extra);
+  const [fullSegs, fullOwnSep, starStar, openTail] = routeToRegExpSegments(
+    pre + body + suf,
+    input,
+    extra,
+  );
   const baseLen = baseSegs.length;
   const fullLen = fullSegs.length;
   if (
@@ -369,8 +377,8 @@ function paramModifier(segment: string): string | undefined {
   return /:[\w-]+(?:\([^)]*\))?([?+*])$/.exec(segment)?.[1];
 }
 
-function _routeToRegExp(route: string): RegExp {
-  const [segments, ownSeparator, starStar, openTail] = routeToRegExpSegments(route);
+function _routeToRegExp(route: string, input: string): RegExp {
+  const [segments, ownSeparator, starStar, openTail] = routeToRegExpSegments(route, input);
   const body = joinSegments(segments, ownSeparator);
   // Root: lookup reaches `/` from `/` only (`//` is an empty segment).
   return new RegExp(segments.length > 0 ? `^${ending(body, starStar, openTail)}` : "^/$");
@@ -414,10 +422,12 @@ function joinSegments(segments: string[], ownSeparator: boolean): string {
  * whether the route ends in a bare `**` (its `_` group reads the same as a
  * param named `_`, see `withTrailingSlash`), and whether a plain `/?$` ends
  * it exactly (`openTail`). `extra`: the segments of an inline `{…}?` group
- * that follows `route` (see `lazyCatchAll`).
+ * that follows `route` (see `lazyCatchAll`). `input`: the pattern `route`
+ * expands, quoted in errors.
  */
 function routeToRegExpSegments(
   route: string,
+  input: string,
   extra: string[] = [],
 ): [segments: string[], ownSeparator: boolean, starStar: boolean, openTail: string | boolean] {
   const reSegments: string[] = [];
@@ -435,7 +445,9 @@ function routeToRegExpSegments(
   let openTail: string | boolean = false;
   const oneCatchAll = () => {
     if (catchAll) {
-      throw new Error(`rou3: a route can have only one \`**\` (${route})`);
+      throw new Error(
+        `rou3: a route can have only one \`**\`, \`:name+\` or \`:name*\` (${input})`,
+      );
     }
     catchAll = true;
   };
