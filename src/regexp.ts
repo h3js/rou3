@@ -6,7 +6,7 @@ import {
   resolveEscapePlaceholders,
 } from "./_escape.ts";
 import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcards.ts";
-import { expandModifiers, splitRoute } from "./operations/_utils.ts";
+import { checkConstraints, expandModifiers, splitRoute } from "./operations/_utils.ts";
 import { canBeEmpty, isOptionalGroups } from "./_regexp-scan.ts";
 import { openOptionals, withTrailingSlash } from "./_trailing-slash.ts";
 
@@ -58,7 +58,8 @@ const LAZY_ANY = "[\\s\\S]*?";
  * but may capture like another of the routes the pattern registers.
  *
  * @throws a `rou3:` error, the one `addRoute` throws, when an expansion of
- * `route` has more than one `**` (`/**\/**`, `/a/:x+/b/:y+`).
+ * `route` has more than one `**` (`/**\/**`, `/a/:x+/b/:y+`), or a `(` that
+ * does not close in its own segment (`/files/(2024`, `/a/:id([^/]+)`).
  *
  * @example
  * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)\/?$/
@@ -68,6 +69,7 @@ export function routeToRegExp(route: string = "/"): RegExp {
   if (route.charCodeAt(0) !== 47 /* '/' */) {
     route = `/${route}`;
   }
+  checkConstraints(route);
   return toRegExp(route, route);
 }
 

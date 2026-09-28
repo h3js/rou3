@@ -4,6 +4,7 @@ import { replaceSegmentWildcards } from "../_segment-wildcards.ts";
 import { NullProtoObj } from "../object.ts";
 import type { Node, RouterContext, ParamsIndexMap } from "../types.ts";
 import {
+  checkConstraints,
   encodeEscapes,
   expandedRouteId,
   expandModifiers,
@@ -24,6 +25,7 @@ export function addRoute<T>(
   if (path.charCodeAt(0) !== 47 /* '/' */) {
     path = `/${path}`;
   }
+  checkConstraints(path);
   _add(ctx, method, path, data);
 }
 

@@ -167,7 +167,9 @@ Two separate escape systems handle `\x` in route patterns:
 
 Key invariant: `\uFFFD` (U+FFFD) is used for router-level escaping, `\uFFFE` (U+FFFE) for regex-level escaping — they must not collide.
 
-Perf: `addRoute`'s pre-processing helpers each bail out early when the input lacks their trigger char — `encodeEscapes` (`\`), `decodeEscaped` (`\uFFFD`), `expandGroupDelimiters` (`{`), `expandModifiers` (trailing `?`/`+`/`*` charCode check). Plain routes skip all the regex/scanner machinery (~2x faster add); keep the guards when editing these helpers.
+Perf: `addRoute`'s pre-processing helpers each bail out early when the input lacks their trigger char — `encodeEscapes` (`\`), `decodeEscaped` (`\uFFFD`), `expandGroupDelimiters` (`{`), `expandModifiers` (trailing `?`/`+`/`*` charCode check), `checkConstraints` (`(`). Plain routes skip all the regex/scanner machinery (~2x faster add); keep the guards when editing these helpers.
+
+**A `(` that does not close in its own segment** (`/files/(2024`, #199; or a `/` inside a constraint: `:id([^/]+)`, `(x|/y)`, `:x(\/)`, which the pattern split cuts in two): `checkConstraints()` (`_utils.ts`, called once by `addRoute` and `routeToRegExp`, so `routeNodeKeys` and the overlap APIs inherit it) throws `rou3: a \`(\` must close in its own segment, escape a literal one as \`\(\` (<route>)` instead of the raw `SyntaxError` (naming `__rou3_unnamed_N`) `new RegExp` used to throw. It drops escapes (`\(` is not a group; `\/` stays), removes balanced `/`-free groups innermost-out, and throws if any `(` is left (one message for both causes: telling them apart cost ~90B raw in the core bundle). A stray `)` stays a literal (`/a)b`). `removeRoute` stays a silent no-op for such patterns (they can't be registered). Pinned by `UNCLOSED_GROUP_ROUTES` in `regexp.test.ts`. Known, unrelated: a `(` or `)` inside a class in a constraint (`:x([(])`) is still mis-parsed by `getParamRegexp` / `routeToRegExp`.
 
 ### Regex ≡ router (`routeToRegExp` exactness, #200)
 

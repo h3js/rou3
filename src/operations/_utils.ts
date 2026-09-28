@@ -41,6 +41,28 @@ export function segmentKey(segment: string): string | 1 | 2 {
   );
 }
 
+/**
+ * Throws when a `(...)` group in `route` never closes (`/files/(2024`, #199)
+ * or contains a `/` (`:id([^/]+)`): the pattern is split on `/` before groups
+ * are read, which cut it in two. Either way `new RegExp` threw a raw
+ * `SyntaxError` naming internal group names. Shared by `addRoute` and
+ * `routeToRegExp`. A stray `)` stays a literal.
+ *
+ * Escapes are dropped first (`\(` is no group; `\/` stays, the split cuts
+ * there too), then balanced `/`-free groups innermost-out, so any `(` left
+ * does not close in its own segment.
+ */
+export function checkConstraints(route: string): void {
+  if (!route.includes("(")) return;
+  let s = route.replace(/\\[^/]/g, "");
+  while (s !== (s = s.replace(/\([^()/]*\)/g, "")));
+  if (s.includes("(")) {
+    throw new Error(
+      `rou3: a \`(\` must close in its own segment, escape a literal one as \`\\(\` (${route})`,
+    );
+  }
+}
+
 export function expandModifiers(segments: string[]): string[] | undefined {
   for (let i = 0; i < segments.length; i++) {
     const last = segments[i].charCodeAt(segments[i].length - 1);

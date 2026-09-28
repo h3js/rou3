@@ -75,8 +75,12 @@ describe("benchmark", () => {
     // +~31B raw / +~21B gzip: the "only one `**`" error quotes the pattern as
     // written (not `/a/**:x/b/**`, the rewrite of `/a/:x+/b/**`) and names
     // `:name+` / `:name*` as catch-alls too.
-    expect(bytes).toBeLessThanOrEqual(8790); // <8.79kb
-    expect(gzipSize).toBeLessThanOrEqual(3525); // <3.525kb
+    // +~244B raw / +~95B gzip: addRoute rejects a `(` that does not close in
+    // its own segment (`/files/(2024`, #199, or a `/` inside a constraint:
+    // `:id([^/]+)`) with a `rou3:` error; `new RegExp` threw a raw
+    // `SyntaxError` naming internal group names.
+    expect(bytes).toBeLessThanOrEqual(9025); // <9.025kb
+    expect(gzipSize).toBeLessThanOrEqual(3620); // <3.62kb
   });
 });
 

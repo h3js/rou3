@@ -1140,6 +1140,30 @@ export const TWO_CATCH_ALL_ROUTES: readonly string[] = [
   String.raw`/\:x/:seg+/:rest+`,
 ];
 
+/**
+ * Routes with a `(` that does not close in its own segment: a `/` inside a
+ * constraint, which the pattern split cuts in two, or a `(` that never closes
+ * (#199). `addRoute` and `routeToRegExp` reject them with the same error.
+ */
+export const UNCLOSED_GROUP_ROUTES: readonly string[] = [
+  "/admin/:id([^/]+)",
+  "/a/:x(b/c)",
+  "/a/(x|/y)/z",
+  "/a/:x([/])?",
+  "/a/:x(\\/)",
+  "/a/:x(\\d+)/:y(a/b)",
+  "/a{/:x([^/]+)}?",
+  "/a/:x((b|/c))",
+  "/files/(2024",
+  "/a(b",
+  "/a/:x(\\d+",
+  "/a/:x([a-z]",
+  "/a/((b)",
+  "/files/(2024/x",
+  "/a/(b/(c)",
+  "/a{/(b}?",
+];
+
 /** Whether `addRoute` accepts `pattern`. */
 function routerAccepts(pattern: string): boolean {
   try {

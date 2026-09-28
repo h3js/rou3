@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { routeToRegExp, createRouter, addRoute, findRoute } from "../src/index.ts";
+import { routeToRegExp, createRouter, addRoute, findRoute, routeNodeKeys } from "../src/index.ts";
 import { fromGroupName } from "../src/_group-names.ts";
 import { expandGroupDelimiters } from "../src/_group-delimiters.ts";
 import { expandModifiers, splitRoute } from "../src/operations/_utils.ts";
@@ -17,6 +17,7 @@ import {
   hasLookahead,
   hasLookbehind,
   TWO_CATCH_ALL_ROUTES,
+  UNCLOSED_GROUP_ROUTES,
   sweepPaths,
   sweepPatterns,
 } from "./_regexp-cases.ts";
@@ -396,6 +397,31 @@ describe("routeToRegExp: more than one `**`", () => {
     const message = `rou3: a route can have only one \`**\`, \`:name+\` or \`:name*\` (${route})`;
     expect(() => addRoute(createRouter(), "", route)).toThrow(message);
     expect(() => routeToRegExp(route)).toThrow(message);
+  });
+});
+
+// A pattern is split on `/` before its constraints are read, so a `/` inside
+// one cut it in two, and a `(` that never closes left an unterminated group:
+// `new RegExp` threw a raw `SyntaxError` naming internal group names (#199).
+describe("routeToRegExp: a `(` that does not close in its segment", () => {
+  it.each(UNCLOSED_GROUP_ROUTES)("%s throws like addRoute", (route) => {
+    const message = `rou3: a \`(\` must close in its own segment, escape a literal one as \`\\(\` (${route})`;
+    expect(() => addRoute(createRouter(), "", route)).toThrow(message);
+    expect(() => routeToRegExp(route)).toThrow(message);
+    expect(() => routeNodeKeys(route)).toThrow(message);
+  });
+
+  it.each([
+    "/a/:x(\\d+)/b",
+    "/a/(\\d+)/(b|c)",
+    "/a{/:x(\\d+)}?/b",
+    "/a\\(/b",
+    "/a/\\(x/y\\)",
+    "/a\\(b",
+    "/a)b",
+  ])("%s is accepted", (route) => {
+    expect(() => addRoute(createRouter(), "", route)).not.toThrow();
+    expect(() => routeToRegExp(route)).not.toThrow();
   });
 });
 
