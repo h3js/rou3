@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.10.1
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.10.0...v0.10.1)
+
+### 🩹 Fixes
+
+- **router:** Quote the pattern as written in the one-`**` error ([bc19284](https://github.com/h3js/rou3/commit/bc19284))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.10.0
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.9.2...v0.10.0)
