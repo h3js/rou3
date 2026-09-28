@@ -221,7 +221,7 @@ describe("hyphenated param names", () => {
 });
 
 describe("param names that are not valid capture-group names", () => {
-  // Param names accept `[\w-]+`, but a JS/PCRE capture group name must be an
+  // Param names accept `\w+(?:-\w+)*`, but a JS/PCRE capture group name must be an
   // identifier (no `-`, no leading digit). Whole-segment params store the name
   // as a plain string key and always worked; every regex-compiled position
   // (mixed segments, inline constraints, segment wildcards) used to emit the
@@ -232,7 +232,7 @@ describe("param names that are not valid capture-group names", () => {
     "/blog/:post-id(\\d+)",
     "/n/:0.txt",
     "/mix/:a-b.:a_b",
-    "/run/:a--b.:a_-b",
+    "/run/:a-_b.:a_-b",
     "/w/:file-name.*",
   ]);
 
@@ -259,21 +259,56 @@ describe("param names that are not valid capture-group names", () => {
         params: { "0": "42" },
       });
       // Distinct names must stay distinct through the escape. A `-` -> `_`
-      // sanitize collapses `a-b`/`a_b` onto one group name, corrupts `a--b`
-      // into `a_b`, and makes `a-_b`/`a_-b` a duplicate group (SyntaxError).
+      // sanitize collapses `a-b`/`a_b` onto one group name and makes
+      // `a-_b`/`a_-b` a duplicate group (SyntaxError).
       expect(match("GET", "/mix/x.y")).toMatchObject({
         data: { path: "/mix/:a-b.:a_b" },
         params: { "a-b": "x", a_b: "y" },
       });
       expect(match("GET", "/run/x.y")).toMatchObject({
-        data: { path: "/run/:a--b.:a_-b" },
-        params: { "a--b": "x", "a_-b": "y" },
+        data: { path: "/run/:a-_b.:a_-b" },
+        params: { "a-_b": "x", "a_-b": "y" },
       });
       // Escaped name alongside an unnamed segment wildcard capture.
       expect(match("GET", "/w/logo.dark")).toMatchObject({
         data: { path: "/w/:file-name.*" },
         params: { "file-name": "logo", "0": "dark" },
       });
+    });
+  }
+});
+
+describe("param names end before a `-` that no word char follows", () => {
+  // A name is `\w+(?:-\w+)*`: a `-` belongs to it only between word chars.
+  // `[\w-]+` swallowed the `-` of `:year-:month` (`{ "year-": "2024-0" }`).
+  const router = createRouter([
+    "/blog/:year-:month",
+    "/post/:id{-:title}?",
+    "/a/:x-",
+    "/b/:x-/c",
+    "/d/pre-:x\\-suf",
+    "/e/:test-id",
+    "/f/:x-(\\d+)",
+  ]);
+  const compiledLookup = compileRouter(router);
+  const lookups = [
+    { name: "findRoute", match: (m: string, p: string) => findRoute(router, m, p) },
+    { name: "compiledLookup", match: (m: string, p: string) => compiledLookup(m, p) },
+  ];
+  for (const { name, match } of lookups) {
+    it(`splits names at the \`-\` (${name})`, () => {
+      expect(match("GET", "/blog/2024-05")?.params).toEqual({ year: "2024", month: "05" });
+      expect(match("GET", "/post/1-hi")?.params).toEqual({ id: "1", title: "hi" });
+      expect(match("GET", "/post/1")?.params).toEqual({ id: "1" });
+      expect(match("GET", "/a/b-")?.params).toEqual({ x: "b" });
+      expect(match("GET", "/a/b")).toBeUndefined();
+      expect(match("GET", "/b/b-/c")?.params).toEqual({ x: "b" });
+      // An escaped `-` ends the name too.
+      expect(match("GET", "/d/pre-b-suf")?.params).toEqual({ x: "b" });
+      // A `-` between word chars is still part of the name.
+      expect(match("GET", "/e/abc")?.params).toEqual({ "test-id": "abc" });
+      // `:x-(\d+)` is `:x`, `-` and an unnamed group, as in URLPattern.
+      expect(match("GET", "/f/1-2")?.params).toEqual({ x: "1", "0": "2" });
     });
   }
 });

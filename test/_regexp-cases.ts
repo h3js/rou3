@@ -352,7 +352,7 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/files", "/files/a/b", "/files/a.b//"],
   },
-  // Param names accept `[\w-]+`, but a capture group name must be an identifier
+  // Param names accept `\w+(?:-\w+)*`, but a capture group name must be an identifier
   // (no `-`, no leading digit) in JS and PCRE alike. Such names are emitted in a
   // reserved, injective escaped form (`_` -> `__`, `-` -> `_h`) and decoded back
   // to the original param name when groups are read.
@@ -381,12 +381,28 @@ export const regexpCases: Record<string, RegExpCase> = {
     regex: /^\/mix\/(?<__rou3_esc_a_hb>[^/]+)\.(?<a_b>[^/]+)\/?$/,
     match: [["/mix/x.y", { "a-b": "x", a_b: "y" }]],
   },
-  // Runs of `-`/`_` must survive: the escape is a prefix code, so `a--b` and
-  // `a_-b` stay distinct. A `-` -> `_` sanitize maps `a--b` onto `a_b` (wrong
-  // name) and collides `a-_b` with `a_-b` (duplicate group name -> SyntaxError).
-  "/run/:a--b.:a_-b": {
-    regex: /^\/run\/(?<__rou3_esc_a_h_hb>[^/]+)\.(?<__rou3_esc_a___hb>[^/]+)\/?$/,
-    match: [["/run/x.y", { "a--b": "x", "a_-b": "y" }]],
+  // Runs of `-`/`_` must survive: the escape is a prefix code, so `a-_b` and
+  // `a_-b` stay distinct. A `-` -> `_` sanitize collides them (duplicate group
+  // name -> SyntaxError).
+  "/run/:a-_b.:a_-b": {
+    regex: /^\/run\/(?<__rou3_esc_a_h__b>[^/]+)\.(?<__rou3_esc_a___hb>[^/]+)\/?$/,
+    match: [["/run/x.y", { "a-_b": "x", "a_-b": "y" }]],
+  },
+  // A name is `\w+(?:-\w+)*`: a `-` no word char follows ends it (`[\w-]+`
+  // captured `{ "year-": "2024-0", month: "5" }`).
+  "/blog/:year-:month": {
+    regex: /^\/blog\/(?<year>[^/]+)-(?<month>[^/]+)\/?$/,
+    match: [["/blog/2024-05", { year: "2024", month: "05" }]],
+    noMatch: ["/blog/2024", "/blog/-05"],
+  },
+  "/a/:x-": {
+    regex: /^\/a\/(?<x>[^/]+)-\/?$/,
+    match: [["/a/b-", { x: "b" }]],
+    noMatch: ["/a/b", "/a/-"],
+  },
+  "/a/pre-:x\\-suf": {
+    regex: /^\/a\/pre-(?<x>[^/]+)-suf\/?$/,
+    match: [["/a/pre-b-suf", { x: "b" }]],
   },
   // Leading digit: also not a valid group name.
   "/api/:0": {
