@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.10.2
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.10.1...v0.10.2)
+
+### 🩹 Fixes
+
+- **router:** Throw a clear error for a `(` that does not close in its segment ([9ff2952](https://github.com/h3js/rou3/commit/9ff2952))
+
+### 📖 Documentation
+
+- Document trailing slashes and empty-segment params ([ef35388](https://github.com/h3js/rou3/commit/ef35388))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.10.1
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.10.0...v0.10.1)
