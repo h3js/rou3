@@ -1,4 +1,5 @@
 import type { MethodData, Node } from "../types.ts";
+import { methodEntries } from "./_utils.ts";
 
 /**
  * Collect the routes of a wildcard's `suffix` trie that match `segments`,
@@ -8,8 +9,9 @@ import type { MethodData, Node } from "../types.ts";
  * `start` the first one the `**` may take.
  *
  * Same-node siblings are ordered by weight (one point per passing regex, one
- * for a `**:name`, which must take a segment), ties in insertion order, or
- * reversed with `reverse` (findRoute takes the last match, and ties go to the
+ * for a `**:name`, which must take a segment), ties with the method-agnostic
+ * (`""`) entries first, each in insertion order, or reversed within each with
+ * `reverse` (findRoute takes the last match, and ties go to the
  * first-registered there).
  */
 export function collectSuffix<T>(
@@ -21,11 +23,11 @@ export function collectSuffix<T>(
   matches: MethodData<T>[],
   reverse?: boolean,
 ): void {
-  const match = node.methods && (node.methods[method] || node.methods[""]);
+  const match = node.methods && methodEntries(node.methods, method, reverse);
   if (match) {
     const end = pos + 1;
     const weighted: [MethodData<T>, number][] = [];
-    for (const m of reverse ? match.slice().reverse() : match) {
+    for (const m of match) {
       const w = m.suffix![0];
       let weight = 0;
       for (const [index, , optional] of m.paramsMap!) {

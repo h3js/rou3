@@ -111,9 +111,10 @@ describe("routeNodeKeys", () => {
   });
 
   describe("security property", () => {
-    it("deletes a method-agnostic gate when the nodes collide", () => {
-      // The upstream bug: two textually distinct keys, one radix node, so the
-      // method-scoped entry wins `methods[method] || methods[""]` outright.
+    it("keeps a method-agnostic gate when the nodes collide", () => {
+      // The upstream bug: two textually distinct keys, one radix node. Lookup
+      // used to resolve the node with `methods[method] || methods[""]`, so the
+      // method-scoped entry deleted the gate; now both are siblings.
       const ctx = createRouter<{ path: string }>();
       addRoute(ctx, "", "/users/*", { path: "gate" });
       addRoute(ctx, "GET", "/users/:id", { path: "handler" });
@@ -122,8 +123,11 @@ describe("routeNodeKeys", () => {
             ├── /users
             │       ├── /* ┈> [*] gate, [GET] handler"
       `);
-      expect(findAllRoutes(ctx, "GET", "/users/42").map((r) => r.data.path)).toEqual(["handler"]);
-      // ...and routeNodeKeys is what makes that predictable up-front.
+      expect(findAllRoutes(ctx, "GET", "/users/42").map((r) => r.data.path)).toEqual([
+        "gate",
+        "handler",
+      ]);
+      // ...and routeNodeKeys still reports the shared node up-front.
       expect(routeNodeKeys("/users/*")).toEqual(routeNodeKeys("/users/:id"));
     });
 

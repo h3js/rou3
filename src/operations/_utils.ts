@@ -1,7 +1,7 @@
 import { fromGroupName } from "../_group-names.ts";
 import { hasSegmentWildcard } from "../_segment-wildcards.ts";
 import { NullProtoObj } from "../object.ts";
-import type { MatchedRoute, ParamsIndexMap } from "../types.ts";
+import type { MatchedRoute, MethodData, ParamsIndexMap } from "../types.ts";
 
 export function encodeEscapes(path: string): string {
   if (!path.includes("\\")) return path;
@@ -141,6 +141,27 @@ export function expandedRouteId(path: string): string {
       })
       .join("/")
   );
+}
+
+/**
+ * A node's entries for `method`, least -> most specific on equal weight: the
+ * method-agnostic (`""`) ones, then the method's own. Both are siblings on the
+ * node (a method-scoped entry must never hide a `""` one), and callers order
+ * them by weight with a stable sort. `reverse` flips each bucket (same-node
+ * ties go to the first-registered in findRoute).
+ */
+export function methodEntries<T>(
+  methods: Record<string, MethodData<T>[] | undefined>,
+  method: string,
+  reverse?: boolean,
+): MethodData<T>[] | undefined {
+  let own = methods[method];
+  let any = method ? methods[""] : undefined;
+  if (reverse) {
+    own &&= own.slice().reverse();
+    any &&= any.slice().reverse();
+  }
+  return own && any ? any.concat(own) : own || any;
 }
 
 export function getMatchParams(

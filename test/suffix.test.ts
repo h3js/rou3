@@ -144,7 +144,7 @@ describe("segments after `**`", () => {
     }
   });
 
-  it('resolve method-scoped entries like other nodes (`methods[m] || methods[""]`)', () => {
+  it('resolve method-scoped entries like other nodes (`""` entries are siblings)', () => {
     const router = createRouter<string>();
     addRoute(router, "", "/**", "any");
     addRoute(router, "GET", "/**/_payload.json", "get");
@@ -155,7 +155,7 @@ describe("segments after `**`", () => {
     expect(find("/a/_payload.json", "POST")?.data).toBe("any");
     expect(find("/a/og.png", "POST")?.data).toBe("og-post");
     expect(find("/a/og.png", "GET")?.data).toBe("og-any");
-    expect(all("/a/og.png", "POST").map((m) => m.data)).toEqual(["any", "og-post"]);
+    expect(all("/a/og.png", "POST").map((m) => m.data)).toEqual(["any", "og-any", "og-post"]);
   });
 
   it("resolve ties like same-node siblings: findRoute takes the first registered", () => {

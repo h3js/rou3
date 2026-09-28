@@ -1,6 +1,6 @@
 import type { RouterContext, Node, MatchedRoute, MethodData } from "../types.ts";
 import { collectSuffix, rankFromEnd } from "./_suffix.ts";
-import { getMatchParams, normalizePath, splitPath } from "./_utils.ts";
+import { getMatchParams, methodEntries, normalizePath, splitPath } from "./_utils.ts";
 
 /**
  * Find all route patterns that match the given path.
@@ -39,8 +39,10 @@ export function findAllRoutes<T>(
 
 /**
  * Every route matching `segments`, least -> most specific in tree order.
- * `reverse` flips same-node ties so that the last match is the one
- * `findRoute` would pick (it takes the first-registered on ties).
+ * A node's method-agnostic (`""`) entries and its `method` entries are
+ * siblings (see `methodEntries`). `reverse` flips same-node ties so that the
+ * last match is the one `findRoute` would pick (it takes the first-registered
+ * on ties).
  */
 export function _findAll<T>(
   node: Node<T>,
@@ -54,11 +56,10 @@ export function _findAll<T>(
 
   // 1. Wildcard
   if (node.wildcard) {
-    const match =
-      node.wildcard.methods && (node.wildcard.methods[method] || node.wildcard.methods[""]);
+    const match = node.wildcard.methods && methodEntries(node.wildcard.methods, method, reverse);
     if (match) {
       if (index < segments.length) {
-        pushSorted(matches, match, true, reverse);
+        pushSorted(matches, match, true);
       } else {
         // Zero segments remain: only optional (`**`) wildcards match (mirrors findRoute)
         const optional: MethodData<T>[] = [];
@@ -68,7 +69,7 @@ export function _findAll<T>(
             optional.push(m);
           }
         }
-        pushSorted(matches, optional, true, reverse);
+        pushSorted(matches, optional, true);
       }
     }
     // Routes with segments after the `**` (narrower than a bare one)
@@ -101,7 +102,7 @@ export function _findAll<T>(
       // End of path: only optional trailing params match (e.g. `/*` matches `/`).
       // Filter per entry — one param node can hold both optional (`*`) and
       // required (`:id`, `:id(\d+)`) routes (mirrors the wildcard branch above).
-      const match = node.param.methods[method] || node.param.methods[""];
+      const match = methodEntries(node.param.methods, method, reverse);
       if (match) {
         const optional: MethodData<T>[] = [];
         for (const m of match) {
@@ -110,7 +111,7 @@ export function _findAll<T>(
             optional.push(m);
           }
         }
-        pushSorted(matches, optional, true, reverse);
+        pushSorted(matches, optional, true);
       }
     }
   }
@@ -127,12 +128,12 @@ export function _findAll<T>(
 
   // 4. End of path
   if (index === segments.length && node.methods) {
-    const match = node.methods[method] || node.methods[""];
+    const match = methodEntries(node.methods, method, reverse);
     if (match) {
       // A param node (`key === "*"`) is a dynamic terminal, so a required last
       // param (`:id`) outweighs an optional one (`*`); static terminals don't
       // distinguish them (mirrors the compiler's `hasLastOptionalParam`).
-      pushSorted(matches, match, node.key === "*", reverse);
+      pushSorted(matches, match, node.key === "*");
     }
   }
 
@@ -144,6 +145,8 @@ export function _findAll<T>(
  * weight), preserving insertion order on ties (stable sort). This mirrors the
  * weight-based ordering the compiler emits for `matchAll`, so `findAllRoutes`
  * and compiled `matchAll` agree regardless of route insertion order (#187).
+ * `match` comes from `methodEntries`, so on ties a node's `""` entries stay
+ * before the method's own.
  *
  * Weight matches the compiler's model: one point per regex-constrained param,
  * plus one for a required last param on a `dynamicTerminal` (param/wildcard
@@ -153,10 +156,9 @@ function pushSorted<T>(
   matches: MethodData<T>[],
   match: MethodData<T>[],
   dynamicTerminal: boolean,
-  reverse?: boolean,
 ): void {
   if (match.length > 1) {
-    match = (reverse ? match.slice().reverse() : match)
+    match = match
       .map((m): [MethodData<T>, number] => {
         let w = 0;
         const { paramsRegexp: rx, paramsMap: pm } = m;
