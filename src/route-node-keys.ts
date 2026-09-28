@@ -30,9 +30,16 @@ import type { Node } from "./types.ts";
  * bucketing this is meant for.
  *
  * A pattern with optional syntax (`:x?`, `:x*`, `{...}?`) registers on several
- * nodes, so the result is a deduplicated **array**, ordered outermost-first.
+ * nodes, so the result is a deduplicated **array**. Compare keys as a set: the
+ * array order is unspecified.
  * Keys are themselves valid route patterns reaching exactly the node they name
  * (`routeNodeKeys(k)` is `[k]`), so they can be used directly as bucket ids.
+ *
+ * The key grammar is stable: segments joined by `/`, `*` for a param node,
+ * `**` for a wildcard node (segments after it are the ones matched from the end
+ * of the path), and static segments in route syntax (`: ( ) { }`
+ * backslash-escaped, a whole-segment literal `*` / `**` as `\*` / `\*\*`, any
+ * other backslash is literal).
  *
  * Invalid patterns throw exactly as `addRoute` does.
  *

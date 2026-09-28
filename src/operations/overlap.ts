@@ -5,6 +5,8 @@ import type { MatchedRoute, Node, RouterContext } from "../types.ts";
 
 /**
  * How the match-sets of two route patterns relate. See {@link compareRoutes}.
+ *
+ * A closed union: these five values are all there will be.
  */
 export type RouteComparison = "disjoint" | "equal" | "superset" | "subset" | "partial";
 
@@ -68,6 +70,11 @@ export function routesOverlap(patternA: string, patternB: string): boolean {
  * - Containment of one multi-shape pattern (optional groups/modifiers) in
  *   another is proven shape-by-shape, so a subset split across several of the
  *   other pattern's alternatives may also degrade to `"partial"`.
+ *
+ * It is not a sort comparator: it returns a string, which `Array#sort` treats
+ * as `0`, so `patterns.sort(compareRoutes)` silently does nothing. Map the
+ * verdicts to numbers yourself (and note `"partial"` / `"disjoint"` pairs have
+ * no order).
  *
  * Patterns are expanded through rou3's own `addRoute` pipeline (groups,
  * modifiers, escaping), so the verdict is consistent with

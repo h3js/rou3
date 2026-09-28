@@ -5,6 +5,9 @@ Lightweight, high-performance JavaScript/TypeScript HTTP router. Zero runtime de
 > [!IMPORTANT]
 > Keep `AGENTS.md` updated with project status.
 
+> [!IMPORTANT]
+> **v1 stability contract:** README "Stability" defines what semver covers (public functions + documented behavior; `RouterContext` is opaque and the tree types are `@internal`; `routeToRegExp` match semantics, not its source; the `routeNodeKeys` key grammar as a set; `RouteComparison` closed; `findAllRoutes` "broader before narrower" only where one route contains the other without optional syntax; `regExpToRoute` / `InferRouteParams` `@experimental`). A change that breaks it needs a major; record user-facing breaking changes in `MIGRATION.md`.
+
 ## Project Structure
 
 ```
@@ -273,7 +276,7 @@ Two different rules, and they must not be conflated:
 ```bash
 pnpm build             # Build with obuild
 pnpm dev               # Vitest watch mode
-pnpm lint              # ESLint + Prettier
+pnpm lint              # oxlint + oxfmt --check
 pnpm lint:fix          # Auto-fix
 pnpm test              # Full test suite + coverage
 pnpm test:types        # TypeScript type checking
@@ -302,8 +305,8 @@ pnpm bench:deno        # Benchmarks (deno)
 - **Abbreviated hot-path vars:** `m` (method), `p` (path), `s` (segments), `l` (length)
 - **Internal files:** Prefixed with `_` (e.g., `_utils.ts`)
 - **ESM only**, explicit `.ts` extensions in imports
-- **ESLint:** `eslint-config-unjs` with custom overrides
-- **Formatter:** Prettier
+- **Linter:** oxlint (`.oxlintrc.json`)
+- **Formatter:** oxfmt (`.oxfmtrc.json`)
 
 ## Best Practices
 

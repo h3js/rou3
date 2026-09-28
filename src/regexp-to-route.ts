@@ -32,6 +32,11 @@ const ROUTE_SPECIAL = new Set([
  * Convert an anchored {@link RegExp} (or its source string) produced by
  * {@link routeToRegExp} back into a rou3 route pattern.
  *
+ * @experimental Not covered by semver. It targets the output of
+ * `routeToRegExp` from the **same** rou3 version; output of older versions
+ * (0.9.x) is accepted best-effort, and other regexes are not guaranteed to
+ * convert (anything it can't represent throws a `rou3:` error).
+ *
  * @example
  * regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
  * regExpToRoute(/^\/path\/(?:(?<param>[^/]+)\/?|\/)$/); // "/path/:param"

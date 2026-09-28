@@ -61,6 +61,12 @@ const LAZY_ANY = "[\\s\\S]*?";
  * `route` has more than one `**` (`/**\/**`, `/a/:x+/b/:y+`), or a `(` that
  * does not close in its own segment (`/files/(2024`, `/a/:id([^/]+)`).
  *
+ * Stability: the match semantics (the paths `findRoute` matches, minus the
+ * documented exceptions) and the captured params of plain-identifier param
+ * names are the contract. The exact regex source is not: it may change in any
+ * minor release, so regenerate it rather than persisting it. Group names other
+ * than plain identifiers (`_`, `_N`, `__rou3_…`) are an encoding detail.
+ *
  * @example
  * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)\/?$/
  * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/

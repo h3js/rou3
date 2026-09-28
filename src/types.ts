@@ -1,9 +1,21 @@
+/**
+ * A router instance, created by `createRouter()`.
+ *
+ * Treat it as **opaque**: only the rou3 functions may read or modify `root`
+ * and `static`. The tree behind them (`Node`, `MethodData`, `paramsMap`, ...)
+ * is an implementation detail that can change in any release, so code that
+ * walks or patches it is not covered by semver.
+ */
 export interface RouterContext<T = unknown> {
+  /** @internal */
   root: Node<T>;
+  /** @internal */
   static: Record<string, Node<T> | undefined>;
 }
 
+/** @internal */
 export type ParamsIndexMap = Array<[Index: number, name: string | RegExp, optional: boolean]>;
+/** @internal */
 export type MethodData<T = unknown> = {
   data: T;
   paramsMap?: ParamsIndexMap;
@@ -23,6 +35,7 @@ export type MethodData<T = unknown> = {
   suffix?: [wildcard: number, length: number];
 };
 
+/** @internal */
 export interface Node<T = unknown> {
   key: string;
 
@@ -48,6 +61,10 @@ export interface Node<T = unknown> {
   methods?: Record<string, MethodData<T>[] | undefined>;
 }
 
+/**
+ * A route match: the `data` given to `addRoute` and the captured `params`.
+ * Only these two properties are public.
+ */
 export type MatchedRoute<T = unknown> = {
   data: T;
   params?: Record<string, string>;
@@ -115,6 +132,14 @@ type StripParams<TPath extends string> = TPath extends `${infer Prefix}**:${infe
       : Prefix
     : TPath;
 
+/**
+ * The params object `findRoute` returns for a route pattern.
+ *
+ * @experimental Not covered by semver: it is wrong for several pattern shapes
+ * (groups like `/users{/:id}?`, mid-segment params like `/:name.:ext`, unnamed
+ * groups like `/(\d+)`, escapes like `/static\:path`) and may change in any
+ * release.
+ */
 export type InferRouteParams<TPath extends string> = {
   [Token in ExtractParamTokens<TPath> as ParamName<Token>]: OptionalParam<Token> extends true
     ? string | undefined

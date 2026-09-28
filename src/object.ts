@@ -1,2 +1,8 @@
+/**
+ * Constructor for objects that do not inherit from `Object.prototype`
+ * (`new NullProtoObj()`), so keys like `__proto__` or `constructor` are plain
+ * own keys. Faster to create than `Object.create(null)`. rou3 uses it for
+ * `params` and its lookup maps.
+ */
 // prettier-ignore
 export const NullProtoObj = /* @__PURE__ */ (()=>{const e=function(){};return e.prototype=Object.create(null),Object.freeze(e.prototype),e})() as unknown as { new (): any };
