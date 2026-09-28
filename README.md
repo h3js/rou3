@@ -20,6 +20,8 @@ Lightweight and fast router for JavaScript.
 npx nypm install rou3
 ```
 
+**Requirements:** ESM only; Node.js 20.19+ (where `require()` of ESM works), or any runtime with ES2021 and regex look-behind and named groups (Bun, Deno, modern browsers). A few `routeToRegExp` outputs also need duplicate named groups (Node.js 23+, see [Regular expressions](#regular-expressions)).
+
 **Import:**
 
 <!-- automd:jsimport cdn src="./src/index.ts"-->

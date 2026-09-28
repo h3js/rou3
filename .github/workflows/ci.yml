@@ -27,3 +27,19 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  # Oldest supported Node.js line that runs the test suite (vitest needs 22.12+).
+  # V8 12.4 lacks duplicate named groups, so this also covers the gated fixtures.
+  node22:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - run: corepack enable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm build
+      - run: pnpm vitest run
