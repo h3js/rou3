@@ -174,6 +174,24 @@ rou3 aims for URLPattern-compatible syntax but has intentional differences due t
 | Unicode param names           | Supports Unicode identifiers       | Params use `\w` (ASCII word chars only)                       |
 | Percent-encoding              | Normalizes `%xx` sequences         | Does not decode percent-encoded input                         |
 
+### Trailing slashes and empty segments
+
+Lookup ignores **at most one** trailing slash: `/users/foo/` matches `/users/:name`, but `/users/foo//` does not. On the pattern side, trailing slashes are ignored (`/users/` and `/users//` register the same route as `/users`).
+
+Other empty segments are kept and are real segments: `/a//b` does not match `/a/b`. A param (`:name`, `*`) or a catch-all (`**`, `**:name`, `:name+`) takes an empty segment and captures `""`, both in the middle and at the end of the path:
+
+```js
+addRoute(router, "GET", "/admin/:id", {});
+addRoute(router, "GET", "/files/:path+", {});
+
+findRoute(router, "GET", "/admin/"); // undefined (the one trailing slash is ignored)
+findRoute(router, "GET", "/admin//"); // params: { id: "" }
+findRoute(router, "GET", "/files//"); // params: { path: "" }
+```
+
+> [!IMPORTANT]
+> A required param or `:name+` is **not** guaranteed to be non-empty. If a handler needs a value, check for `""` or use a regex constraint (`/admin/:id(.+)`, `/users/:id(\\d+)`).
+
 ### Path normalization
 
 By default, `findRoute` and `findAllRoutes` do **not** resolve `.`/`..` segments in input paths. If your input paths may contain relative segments, enable normalization:
