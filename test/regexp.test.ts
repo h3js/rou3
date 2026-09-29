@@ -674,7 +674,9 @@ describe("reserved pattern syntax", () => {
 
   it("points a misplaced modifier at `:name` and at escaping", () => {
     // One message (bundle size) for modifier misuse, a `?` after plain text
-    // and a mid-segment `**`.
+    // and a mid-segment `**`: it states where each one goes.
+    const message =
+      "misplaced `?` / `+` / `*`: `?` follows a `:name`, `+` / `*` a whole-segment `:name`, escape a literal one with `\\`";
     for (const route of [
       "/a/:x.png?",
       "/a/*?",
@@ -685,9 +687,10 @@ describe("reserved pattern syntax", () => {
       "/a**b",
       "/a/x**",
       "/a/*.**",
+      "/p/**:i?",
     ]) {
       expect(() => addRoute(createRouter(), "", route), route).toThrow(
-        "must follow a whole-segment `:name` (escape a literal one with `\\`)",
+        `rou3: ${message} (${route})`,
       );
     }
   });

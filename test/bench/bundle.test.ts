@@ -121,8 +121,10 @@ describe("benchmark", () => {
     // +~62B raw / +~35B gzip: a `{` / `}` ends a param name, as in URLPattern
     // (`scanFirstGroup` escapes a name char after one; `/:a{b}?` was `:ab`).
     // +1B: a `$` right after a name throws (part of it in URLPattern).
-    expect(bytes).toBeLessThanOrEqual(10441); // <10.45kb
-    expect(gzipSize).toBeLessThanOrEqual(4367); // <4.37kb
+    // +~20B raw / +~2B gzip: the modifier error says where `?` and `+` / `*`
+    // go (it said a whole-segment `:name` for all three, wrong for `pre-:x?`).
+    expect(bytes).toBeLessThanOrEqual(10461); // <10.47kb
+    expect(gzipSize).toBeLessThanOrEqual(4369); // <4.37kb
   });
 });
 

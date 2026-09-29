@@ -121,7 +121,7 @@ export function invalidSyntax(what: string, route: string): never {
  * a `**` in the middle of a segment too (one message, bundle size; see README).
  */
 export const MISPLACED_MODIFIER =
-  "a `?` / `+` / `*` modifier must follow a whole-segment `:name` (escape a literal one with `\\`)";
+  "misplaced `?` / `+` / `*`: `?` follows a `:name`, `+` / `*` a whole-segment `:name`, escape a literal one with `\\`";
 
 /**
  * Expand the first `?` / `+` / `*` modifier of a param into the routes it
