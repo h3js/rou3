@@ -89,9 +89,10 @@ function toRegExp(route: string, input: string): RegExp {
   // A `?` on a param that does not start its segment makes only the param
   // optional (see `expandModifiers`). Where it can't compile in place,
   // `*-:x?` is `*-{:x}?`; in a route with groups already, it is read once
-  // they are expanded (an escaped `\{` is no group).
+  // they are expanded (an escaped `\{` or a `{}` quantifier in a constraint is
+  // no group).
   const inSegment = inSegmentOptional(route, input);
-  if (inSegment !== route && !encodeEscapes(route).includes("{")) {
+  if (inSegment !== route && !scanFirstGroup(route)) {
     route = inSegment;
   }
   // Compile a single optional group (`{...}?`) inline as `(?:...)?`

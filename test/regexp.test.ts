@@ -109,10 +109,13 @@ describe("routeToRegExp", () => {
 
   // `sweepPatterns()` has no escapes and `sweepPaths()` no escaped chars: a
   // `\x` is a literal `x` in both, wherever it sits in the pattern (#227).
-  // An escaped `\{` / `\}` is no group: `*-:e?` still compiles as `*-{:e}?`.
+  // An escaped `\{` / `\}` or a `{}` quantifier in a constraint is no group:
+  // `*-:e?` still compiles as `*-{:e}?`.
   it("reads an escaped brace as no group before an in-segment optional", () => {
     const paths = ["/{x/a-b", "/{x/a-", "/{x/a", "/a}/a-b", "/a}/a-", "/{x}/a-b-c", "/x/a-b"];
-    for (const route of ["/\\{x/*-:e?", "/a\\}/*-:e?", "/\\{x\\}/*-:e?"]) {
+    paths.push("/12", "/123", "/12/a-b", "/12/a-", "/1/a-b");
+    const routes = ["/\\{x/*-:e?", "/a\\}/*-:e?", "/\\{x\\}/*-:e?", "/(\\d{2}):e?"];
+    for (const route of routes.concat("/:x(\\d{2})/*-:e?")) {
       if (!DUPLICATE_NAMED_GROUPS) {
         expect(() => routeToRegExp(route), route).toThrowError(NEEDS_DUPLICATE_NAMES);
         continue;
