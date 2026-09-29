@@ -1,14 +1,8 @@
 import { expandGroupDelimiters, scanFirstGroup } from "./_group-delimiters.ts";
 import { toGroupName } from "./_group-names.ts";
-import {
-  escapeBareDots,
-  replaceEscapesOutsideGroups,
-  resolveEscapePlaceholders,
-} from "./_escape.ts";
-import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcards.ts";
 import { createRouter } from "./context.ts";
-import { addRoute } from "./operations/add.ts";
-import { expandModifiers, splitRoute } from "./operations/_utils.ts";
+import { addRoute, getParamRegexp } from "./operations/add.ts";
+import { encodeEscapes, expandModifiers, segmentKey, splitRoute } from "./operations/_utils.ts";
 import { canBeEmpty, isOptionalGroups } from "./_regexp-scan.ts";
 import { openOptionals, withTrailingSlash } from "./_trailing-slash.ts";
 
@@ -35,8 +29,9 @@ const LAZY_ANY = "[\\s\\S]*?";
  * only `route` — including the router's tolerances: one optional trailing slash,
  * empty segments for `:name` / `*` params, and an optional trailing `*` — so it
  * can stand in for the router as a guard or scope check. Not modeled: param
- * constraints that can match `/` (the tree splits on `/` first), the empty
- * path, and `normalize: true`.
+ * constraints that can match `/` (`(.*)`: the tree splits on `/` first, so
+ * the regex matches more paths, never fewer), the empty path, and
+ * `normalize: true`.
  *
  * Most routes also compile to RE2-compatible output (RE2, Go, Rust `regex`):
  * the trailing-slash rule is encoded without look-behinds, except for the few
@@ -556,6 +551,24 @@ function routeToRegExpSegments(
     return false;
   };
 
+  // A dynamic segment (or the base of a `?`-modified one) exactly as the tree
+  // compiles it (`getParamRegexp`): a whole `:name` is an unchecked param
+  // node, which also takes an empty segment (`/a//b` reaches `/a/:x/b`).
+  const dynamic = (segment: string): string => {
+    if (/^:\w+(?:-\w+)*$/.test(segment)) {
+      return `(?<${groupName(segment.slice(1))}>[^/]*)`;
+    }
+    const [regexp, next] = getParamRegexp(
+      encodeEscapes(segment),
+      idCtr,
+      [],
+      input,
+      toRegExpUnnamedKey,
+    );
+    idCtr = next;
+    return regexp.source.slice(1, -1);
+  };
+
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
     // An empty *middle* segment (`/a//b`) is a real static segment in the tree,
@@ -604,25 +617,14 @@ function routeToRegExpSegments(
         reSegments.push(`?(?<_>${ANY})`);
       }
       break;
-    } else if (
-      segment.includes(":") ||
-      /(^|[^\\])\(/.test(segment) ||
-      hasSegmentWildcard(segment)
-    ) {
+    } else if (segmentKey(encodeEscapes(segment)) === 1) {
       const modMatch = segment.match(/^(.*:\w+(?:-\w+)*(?:\([^)]*\))?)([?+*])$/);
       if (modMatch) {
         const [, base, mod] = modMatch;
 
         if (mod === "?") {
-          const whole = /^:\w+(?:-\w+)*$/.test(base);
-          const inner = escapeBareDots(
-            base.replace(
-              /:(\w+(?:-\w+)*)(?:\(([^)]*)\))?/g,
-              (_, id, pattern) => `(?<${groupName(id)}>${pattern || (whole ? "[^/]*" : "[^/]+")})`,
-            ),
-          );
           // Append optional group to previous segment: /foo(?:/<inner>)?
-          pushOptional(inner, whole);
+          pushOptional(dynamic(base), /^:\w+(?:-\w+)*$/.test(base));
           continue;
         }
 
@@ -654,30 +656,12 @@ function routeToRegExpSegments(
         continue;
       }
 
-      // Strip URLPattern backslash escapes before regex processing
-      let dynamicSegment = replaceEscapesOutsideGroups(segment);
-      [dynamicSegment, idCtr] = replaceSegmentWildcards(dynamicSegment, idCtr, toRegExpUnnamedKey);
-
-      // A whole-segment `:name` is an unchecked param node in the tree, which
-      // also takes an empty segment (`/a//b` reaches `/a/:x/b`); inside a mixed
-      // segment (`get-:file`) the tree compiles it to `[^/]+`.
-      const whole = /^:\w+(?:-\w+)*$/.test(segment);
-      reSegments.push(
-        resolveEscapePlaceholders(
-          escapeBareDots(
-            dynamicSegment
-              .replace(
-                /:(\w+(?:-\w+)*)(?:\(([^)]*)\))?/g,
-                (_, id, pattern) =>
-                  `(?<${groupName(id)}>${pattern || (whole ? "[^/]*" : "[^/]+")})`,
-              )
-              .replace(/(^|[^\\])\((?![?<])/g, (_, p) => `${p}(?<${toRegExpUnnamedKey(idCtr++)}>`),
-          ),
-        ),
-      );
+      reSegments.push(dynamic(segment));
       nest = 0;
     } else {
-      reSegments.push(segment.replace(/\\(.)/g, "$1").replace(/[.*+?^${}()|[\]]/g, "\\$&"));
+      // A static key: any `\x` is a literal `x` (see `segmentKey`)
+      const key = segmentKey(encodeEscapes(segment)) as string;
+      reSegments.push(key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
       nest = 0;
     }
   }

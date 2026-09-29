@@ -92,8 +92,13 @@ describe("benchmark", () => {
     // (both APIs) return fresh `{ data }` objects instead of the router's
     // internal (shared, mutable) entries, and findAllRoutes omits `params` on
     // static matches like compiled.
-    expect(bytes).toBeLessThanOrEqual(9655); // <9.655kb
-    expect(gzipSize).toBeLessThanOrEqual(4010); // <4.01kb
+    // +~183B raw / +~80B gzip: any `\x` is a literal `x` in static keys and
+    // param segments alike (the tree kept the `\` of `\.`, and `\\` before a
+    // `:` / `(` was misread), and a `\/`, a trailing `\` and anchors or
+    // look-arounds in a constraint throw: they made `routeToRegExp` match
+    // fewer paths than the router (#227).
+    expect(bytes).toBeLessThanOrEqual(9840); // <9.84kb
+    expect(gzipSize).toBeLessThanOrEqual(4090); // <4.09kb
   });
 });
 

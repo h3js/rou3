@@ -107,6 +107,73 @@ describe("routeToRegExp", () => {
     expect(mismatches).toEqual([]);
   });
 
+  // `sweepPatterns()` has no escapes and `sweepPaths()` no escaped chars: a
+  // `\x` is a literal `x` in both, wherever it sits in the pattern (#227).
+  it("reads escapes like findRoute", () => {
+    const chars = [".", "b", "\\", "*", "?", "+", ":", "(", ")", "{", "}", "-", "$", "^", "|", "["];
+    const patterns = chars.flatMap((c) => [
+      `/a\\${c}b`,
+      `/a\\${c}:x`,
+      `/:x\\${c}b`,
+      `/a/\\${c}`,
+      `/a/\\${c}*`,
+      `/a/\\${c}(\\d+)`,
+    ]);
+    const paths = chars.flatMap((c) => [
+      `/a${c}b`,
+      `/a\\${c}b`,
+      `/a${c}1`,
+      `/a\\${c}1`,
+      `/1${c}b`,
+      `/1\\${c}b`,
+      `/a/${c}`,
+      `/a/\\${c}`,
+      `/a/${c}1`,
+      `/a/\\${c}1`,
+      `/a/${c}x`,
+    ]);
+    const mismatches: string[] = [];
+    for (const pattern of patterns) {
+      const router = createRouter();
+      addRoute(router, "", pattern, true);
+      const regex = routeToRegExp(pattern);
+      for (const path of paths) {
+        const found = findRoute(router, "", path);
+        const match = path.match(regex);
+        if (!!found !== !!match) {
+          mismatches.push(`${pattern} ${path} (${found ? "router" : "regex"} only)`);
+        } else if (match) {
+          const captures = definedCaptures(normalizeGroups(match.groups));
+          if (JSON.stringify(captures) !== JSON.stringify(definedCaptures(found?.params))) {
+            mismatches.push(`${pattern} ${path} (captures)`);
+          }
+        }
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
+
+  // The one documented exception to "regex ≡ router": a constraint that can
+  // match `/` spans segments in the inline regex, while the tree splits
+  // first. The regex may match more (a guard still runs), never less (#227).
+  it("over-matches only for constraints that can match `/`", () => {
+    const paths = sweepPaths();
+    const underMatches: string[] = [];
+    let overMatches = 0;
+    for (const pattern of ["/foo/(.*)", "/:x(.*)", "/a/:x([^b]+)", "/a/:x(\\D+)/b", "/:x(.+)?"]) {
+      const router = createRouter();
+      addRoute(router, "", pattern, true);
+      const regex = routeToRegExp(pattern);
+      for (const path of paths) {
+        const routed = findRoute(router, "", path) !== undefined;
+        if (routed && !regex.test(path)) underMatches.push(`${pattern} ${path}`);
+        if (!routed && regex.test(path)) overMatches++;
+      }
+    }
+    expect(underMatches).toEqual([]);
+    expect(overMatches).toBeGreaterThan(0);
+  });
+
   // The router splits paths on `/` only, so a line terminator is an ordinary
   // char to it (`/admin/**:p` routes `/admin/x\ry` with `p: "x\ry"`). A JS `.`
   // excludes `\n`, `\r`, U+2028 and U+2029, and other engines disagree on `\r`
@@ -491,6 +558,13 @@ describe("reserved pattern syntax", () => {
     "/a/:x\\?",
     "/a/*\\+",
     "/a)b",
+    "/a\\\\/b",
+    "/a/:x\\\\",
+    "/a/:x([^a])",
+    "/a/:x([$^])",
+    "/a/:x(\\^a\\$)",
+    "/a/:x(a\\\\)",
+    "/a/:x(a|(?:b))",
   ])("%s is accepted", (route) => {
     expect(() => addRoute(createRouter(), "", route)).not.toThrow();
     // Accepted syntax whose regex is an alternation repeating a named group

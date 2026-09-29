@@ -103,8 +103,8 @@ const SKIP_PATTERNS = new Set([
  * 5. `{...}+`/`{...}*`, and modifiers on `*` or an unnamed group
  *    (`(.*)?`, `*+`): URLPattern supports them; rou3 rejects them (see
  *    `RESERVED_PATTERNS`)
- * 6. Backslash escaping: URLPattern uses `\` to escape;
- *    rou3 treats `\` differently in some contexts
+ * 6. Backslash escaping: any `\x` is a literal `x` in both (inside a
+ *    constraint it is regex); rou3 rejects a `\/`
  * 7. Path normalization: URLPattern resolves `.`/`..` in input;
  *    rou3 does not
  * 8. Case sensitivity: URLPattern may be case-insensitive;
