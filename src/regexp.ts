@@ -367,8 +367,8 @@ function lazyCatchAll(after: string[], extra: string[]): boolean | undefined {
 
 /** How the router ranks a route segment: 3 literal, 2 regex param, 0 param. */
 function segmentKind(segment: string): number {
-  const base = segment.replace(/\\./g, "x").replace(/(:[\w-]+(?:\([^)]*\))?)[?+*]$/, "$1");
-  if (base === "*" || /^:[\w-]+$/.test(base)) {
+  const base = segment.replace(/\\./g, "x").replace(/(:\w+(?:-\w+)*(?:\([^)]*\))?)[?+*]$/, "$1");
+  if (base === "*" || /^:\w+(?:-\w+)*$/.test(base)) {
     return 0;
   }
   return /[:(*]/.test(base) ? 2 : 3;
@@ -376,7 +376,7 @@ function segmentKind(segment: string): number {
 
 /** The `?`/`+`/`*` modifier of a param segment (`:x?`, `pre-:x(\\d+)+`). */
 function paramModifier(segment: string): string | undefined {
-  return /:[\w-]+(?:\([^)]*\))?([?+*])$/.exec(segment)?.[1];
+  return /:\w+(?:-\w+)*(?:\([^)]*\))?([?+*])$/.exec(segment)?.[1];
 }
 
 function _routeToRegExp(route: string, input: string): RegExp {
@@ -520,7 +520,7 @@ function routeToRegExpSegments(
       !pattern &&
       extra.length === 0 &&
       tail.length === 1 &&
-      (/^:[\w-]+\?$/.test(tail[0]) || (repeat && tail[0] === "*"))
+      (/^:\w+(?:-\w+)*\?$/.test(tail[0]) || (repeat && tail[0] === "*"))
     ) {
       const catchAllGroup = `(?<${groupName(id)}>${ANY})`;
       const last =
@@ -611,15 +611,15 @@ function routeToRegExpSegments(
       /(^|[^\\])\(/.test(segment) ||
       hasSegmentWildcard(segment)
     ) {
-      const modMatch = segment.match(/^(.*:[\w-]+(?:\([^)]*\))?)([?+*])$/);
+      const modMatch = segment.match(/^(.*:\w+(?:-\w+)*(?:\([^)]*\))?)([?+*])$/);
       if (modMatch) {
         const [, base, mod] = modMatch;
 
         if (mod === "?") {
-          const whole = /^:[\w-]+$/.test(base);
+          const whole = /^:\w+(?:-\w+)*$/.test(base);
           const inner = escapeBareDots(
             base.replace(
-              /:([\w-]+)(?:\(([^)]*)\))?/g,
+              /:(\w+(?:-\w+)*)(?:\(([^)]*)\))?/g,
               (_, id, pattern) => `(?<${groupName(id)}>${pattern || (whole ? "[^/]*" : "[^/]+")})`,
             ),
           );
@@ -630,7 +630,7 @@ function routeToRegExpSegments(
 
         // + or * (preserve inline constraint when present). `modMatch` ensures
         // `base` holds a `:name`; only the first one is emitted.
-        const [, id, pattern] = base.match(/:([\w-]+)(?:\(([^)]*)\))?/)!;
+        const [, id, pattern] = base.match(/:(\w+(?:-\w+)*)(?:\(([^)]*)\))?/)!;
         oneCatchAll();
         if (i < segments.length - 1) {
           // The tree has `**:name` here (`:name*` also registers the route
@@ -670,13 +670,13 @@ function routeToRegExpSegments(
       // A whole-segment `:name` is an unchecked param node in the tree, which
       // also takes an empty segment (`/a//b` reaches `/a/:x/b`); inside a mixed
       // segment (`get-:file`) the tree compiles it to `[^/]+`.
-      const whole = /^:[\w-]+$/.test(segment);
+      const whole = /^:\w+(?:-\w+)*$/.test(segment);
       reSegments.push(
         resolveEscapePlaceholders(
           escapeBareDots(
             dynamicSegment
               .replace(
-                /:([\w-]+)(?:\(([^)]*)\))?/g,
+                /:(\w+(?:-\w+)*)(?:\(([^)]*)\))?/g,
                 (_, id, pattern) =>
                   `(?<${groupName(id)}>${pattern || (whole ? "[^/]*" : "[^/]+")})`,
               )

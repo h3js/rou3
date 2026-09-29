@@ -1,4 +1,4 @@
-// Route param names accept `[\w-]+`, but a named capture group must be a valid
+// Route param names are `\w+(?:-\w+)*`, but a named capture group must be a valid
 // identifier — no `-`, no leading digit — in JS and in PCRE alike. Names that
 // can't be emitted verbatim are escaped into a reserved form so `(?<name>...)`
 // stays compilable, and decoded back when groups are read: params always surface

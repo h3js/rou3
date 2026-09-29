@@ -124,7 +124,7 @@ function _add<T>(
       if (segment === "*") {
         // A trailing `*` may match no segment, but not after a `**`
         paramsMap.push([i, String(_unnamedParamIndex++), !suffix /* optional */]);
-      } else if (segment.includes("(") || segment.includes(":", 1) || !/^:[\w-]+$/.test(segment)) {
+      } else if (!/^:\w+(?:-\w+)*$/.test(segment)) {
         const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex);
         _unnamedParamIndex = nextIndex;
         paramsRegexp[i] = regexp;
@@ -220,7 +220,10 @@ function getParamRegexp(segment: string, unnamedStart = 0): [RegExp, number] {
   [_s, _i] = replaceSegmentWildcards(_s, _i);
 
   const regex = _s
-    .replace(/:([\w-]+)(?:\(([^)]*)\))?/g, (_, id, p) => `(?<${toGroupName(id)}>${p || "[^/]+"})`)
+    .replace(
+      /:(\w+(?:-\w+)*)(?:\(([^)]*)\))?/g,
+      (_, id, p) => `(?<${toGroupName(id)}>${p || "[^/]+"})`,
+    )
     .replace(/\((?![?<])/g, () => `(?<${toUnnamedGroupKey(_i++)}>`)
     .replace(/\uFFFE(.)/g, (_, c) => (/[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c));
 

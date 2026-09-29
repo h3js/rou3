@@ -68,7 +68,7 @@ export function regExpToRoute(regexp: RegExp | string): string {
   // quantifier inside a constraint included, is parsed as written.
   const rootRepeat = ROOT_REPEAT.exec(src);
   if (rootRepeat) {
-    return `/:${fromGroupName(rootRepeat[1])}*`;
+    return `/:${paramName(rootRepeat[1])}*`;
   }
   // Endings with the rule built in back to the plain body and `\/?`.
   const closed = { dot: false };
@@ -293,19 +293,37 @@ function reverseSegment(seg: string): string {
 
   let out = "";
   let i = 0;
+  // After a bare `:name`, a word char (or a `-` and one) would extend the
+  // name: escape it. A `(pat)` would read as its constraint and, after any
+  // group, a `*` as a modifier: no route emits these.
+  let afterName = false;
+  const literal = (ch: string, next = "") => {
+    out +=
+      afterName && (/\w/.test(ch) || (ch === "-" && /\w/.test(next)))
+        ? `\\${ch}`
+        : escapeLiteral(ch);
+    afterName = false;
+  };
+  const param = (token: string, name?: string) => {
+    if ((afterName && token[0] !== ":") || (token === "*" && out.endsWith(")"))) {
+      throw new Error(`rou3: no route has a param followed by a group in "${seg}"`);
+    }
+    out += token;
+    afterName = token === `:${name}`;
+  };
   while (i < seg.length) {
     const c = seg[i];
     if (c === "(") {
       const g = matchNamedGroup(seg, i);
       if (g) {
-        out += paramToken(g.name, g.body);
+        param(paramToken(g.name, g.body), g.name);
         i = g.end;
         continue;
       }
       if (!seg.startsWith("(?", i)) {
         // Bare capturing group `(...)` -> unnamed param (route `(pat)` / `*`).
         const end = readGroup(seg, i);
-        out += paramToken("_0", seg.slice(i + 1, end - 1));
+        param(paramToken("_0", seg.slice(i + 1, end - 1)));
         i = end;
         continue;
       }
@@ -324,7 +342,7 @@ function reverseSegment(seg: string): string {
       if (/[a-z0-9]/i.test(next)) {
         throw new Error(`rou3: unsupported escape "\\${next}" in "${seg}"`);
       }
-      out += escapeLiteral(next);
+      literal(next, seg[i + 2]);
       i += 2;
       continue;
     }
@@ -335,7 +353,7 @@ function reverseSegment(seg: string): string {
     if (BARE_META.has(c)) {
       throw new Error(`rou3: unsupported metacharacter "${c}" in "${seg}"`);
     }
-    out += escapeLiteral(c);
+    literal(c, seg[i + 1]);
     i += 1;
   }
   return out;
@@ -367,7 +385,7 @@ function applyOptional(
     // `pushCatchAll` in regexp.ts): `(?:/(?:(?<x>[\s\S]*)/)?(?<y>[^/]*))?`.
     const nested = NESTED_CATCH_ALL.exec(rest);
     if (nested) {
-      const [, catchAll, last] = nested.map((name) => name && fromGroupName(name));
+      const [catchAll, last] = nested.slice(1).map(paramName);
       const unnamed = /^_\d+$/.test(last);
       segments.push(catchAll === "_" && !unnamed ? "**" : `:${catchAll}*`);
       segments.push(unnamed ? "*" : `:${last}?`);
@@ -526,10 +544,19 @@ function matchNamedGroup(src: string, start: number): NamedGroup | undefined {
   }
   const end = readGroup(src, start);
   return {
-    name: fromGroupName(src.slice(start + 3, gt)),
+    name: paramName(src.slice(start + 3, gt)),
     body: src.slice(gt + 1, end - 1),
     end,
   };
+}
+
+/** Decode a capture-group name into a route param name (`\w+(?:-\w+)*`). */
+function paramName(key: string): string {
+  const name = fromGroupName(key);
+  if (!/^\w+(?:-\w+)*$/.test(name)) {
+    throw new Error(`rou3: "${name}" is not a valid param name`);
+  }
+  return name;
 }
 
 /** Index just past the `)` matching the `(` at `start`, class/escape aware. */
