@@ -162,6 +162,22 @@ describe("types", () => {
       expectTypeOf<InferRouteParams<"/:a{b}">>().toEqualTypeOf<{ a: string }>();
       expectTypeOf<InferRouteParams<"/:foo{}bar">>().toEqualTypeOf<{ foo: string }>();
       expectTypeOf<InferRouteParams<"/c/{:a}b">>().toEqualTypeOf<{ a: string }>();
+      // A `**:name` too
+      expectTypeOf<InferRouteParams<"/a{/**:x}?">>().toEqualTypeOf<{ x: string | undefined }>();
+      expectTypeOf<InferRouteParams<"/a/**:x{/b}?">>().toEqualTypeOf<{ x: string }>();
+      expectTypeOf<InferRouteParams<"/a/**:x{s}?">>().toEqualTypeOf<{ x: string }>();
+    });
+
+    // Types read names like `addRoute` but don't validate routes: a name it
+    // rejects (`:0`, `:id$`) gives no key.
+    it("should give no key for an invalid param name", () => {
+      expectTypeOf<keyof InferRouteParams<"/:0">>().toEqualTypeOf<never>();
+      expectTypeOf<keyof InferRouteParams<"/:id$">>().toEqualTypeOf<never>();
+      expectTypeOf<keyof InferRouteParams<"/a/:$x">>().toEqualTypeOf<never>();
+      expectTypeOf<keyof InferRouteParams<"/a/**:id$">>().toEqualTypeOf<never>();
+      expectTypeOf<InferRouteParams<"/a/:x-:id$">>().toEqualTypeOf<{ x: string }>();
+      // An escaped `$` is a literal
+      expectTypeOf<InferRouteParams<"/:id\\$">>().toEqualTypeOf<{ id: string }>();
     });
 
     it("should infer mixed params", () => {
