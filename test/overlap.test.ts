@@ -124,7 +124,7 @@ describe("compareRoutes", () => {
     ["/a/:x", "/a/b", "superset", ":param vs literal"],
     ["/a/:x", "/a/:y", "equal", "params equal regardless of name"],
     ["/a/*", "/a/:x", "superset", "trailing * also matches zero segments"],
-    ["/a/*/c", "/a/:x/c", "equal", "mid * is exactly one, like :param"],
+    ["/a/*/c", "/a/:x/c", "superset", "mid * is exactly one, and takes an empty one"],
     ["/a/**", "/a/:x", "superset", "** vs :param"],
 
     // partial overlap (the pre-merge ambiguity case)
@@ -132,7 +132,8 @@ describe("compareRoutes", () => {
     ["/a/**", "/*/b", "partial", "deep wildcard vs fixed-depth suffix"],
 
     // optional / repeat modifiers (multi-shape patterns)
-    ["/a/:x?", "/a/*", "equal", "optional param == trailing *"],
+    ["/a/:x?", "/a/*", "subset", "a trailing * takes an empty segment, :param doesn't"],
+    ["/a/:x?", "/a{/:y}?", "equal", "optional param == optional group"],
     ["/a/:x?", "/a", "superset", "optional param matches without"],
     ["/a/:x*", "/a/**", "equal", "repeat* == bare **"],
     ["/a/:x+", "/a/**:rest", "equal", "repeat+ == named **"],
@@ -430,11 +431,15 @@ describe("segments after `**`", () => {
     ["/**/_payload.json", "/blog", "disjoint"],
     ["/**/_payload.json", "/**/og.png", "disjoint"],
     ["/**.md", "/**/*.md", "equal"],
-    ["/**:p/x", "/**/:y/x", "equal"],
-    ["/**/:y", "/**:y", "equal"],
+    // A `**:p` needs a value, a `:y` too: `/a//x` is only `**:p`'s.
+    ["/**:p/x", "/**/:y/x", "superset"],
+    ["/**/:y", "/**:y", "subset"],
+    ["/**/*/x", "/**:p/x", "superset"],
     ["/a/:x+/b", "/a/**:x/b", "equal"],
-    ["/a/:p/**", "/a/**/x", "superset"],
-    ["/:a/**/p", "/**/b/p", "superset"],
+    ["/a/*/**", "/a/**/x", "superset"],
+    ["/*/**/p", "/**/b/p", "superset"],
+    // A `:p` needs a value: `/a//x` is only `/a/**/x`'s.
+    ["/a/:p/**", "/a/**/x", "partial"],
     ["/**/a/b", "/**/b", "subset"],
     ["/a/**/b", "/**/a/b", "partial"],
     ["/a/**/b", "/b/**/a", "disjoint"],
@@ -494,7 +499,8 @@ describe("segments after `**`", () => {
       "/a/b/**/b",
       "/:x(\\d+)/**/b",
     ];
-    const alphabet = ["a", "b", "x", "1", "q.png"];
+    // `""`: an empty segment, which a `:x` / `**:r` can't take (#229)
+    const alphabet = ["a", "b", "x", "1", "q.png", ""];
     const paths = ["/"];
     for (let depth = 1, prev = [""]; depth <= 5; depth++) {
       prev = prev.flatMap((path) => alphabet.map((segment) => `${path}/${segment}`));

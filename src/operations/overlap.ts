@@ -75,8 +75,9 @@ export function routesOverlap(patternA: string, patternB: string): boolean {
  *
  * Patterns are expanded through rou3's own `addRoute` pipeline (groups,
  * modifiers, escaping), so the verdict is consistent with
- * `findRoute`/`findAllRoutes` by construction — e.g. `/a/:x?` is `"equal"` to
- * `/a/*` (both match `/a` and `/a/seg`).
+ * `findRoute`/`findAllRoutes` by construction — e.g. `/a/:x*` is `"equal"` to
+ * `/a/**`, and `/a/:x?` a `"subset"` of `/a/*` (only `*` takes the empty
+ * segment of `/a//`).
  *
  * @example
  * compareRoutes("/api/**", "/api/admin/**"); // "superset"

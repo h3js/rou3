@@ -140,9 +140,29 @@ export function expandModifiers(segments: string[], input?: string): string[] | 
     if (m[1] || m[2].includes("(")) {
       invalidSyntax(MISPLACED_MODIFIER, input!);
     }
-    const wc = "/" + pre.concat(`**${m[2]}`, suf).join("/");
+    // A `:name*`'s `**:name` may capture `""`: marked `**:\uFFFFname`, no
+    // route syntax (see `emptyParam`)
+    const wc =
+      "/" + pre.concat(`**:${m[3] === "*" ? "\uFFFF" : ""}${m[2].slice(1)}`, suf).join("/");
     return m[3] === "+" ? [wc] : [wc, without];
   }
+}
+
+/**
+ * Whether matching `m` on `segments` gives a `:name` an empty segment, or a
+ * `**:name` (`:name+`) an empty value: those need one, as in URLPattern. A
+ * `*`, a `**`, a `:name*` and a constraint (it decides: `:id(\d*)`) may be
+ * empty. Callers check only paths with an empty segment.
+ */
+export function emptyParam(m: MethodData<unknown>, segments: string[]): boolean {
+  const pMap = m.paramsMap;
+  const params = pMap && getMatchParams(segments, pMap, m.suffix)!;
+  // A `*` is named by a digit and a constraint is a RegExp (`/^…$/`), both
+  // `< ":"`; a `**` is `optional`
+  return !!pMap?.some(
+    ([, name, optional, empty]) =>
+      !optional && !empty && (name as string) > ":" && params![name as string] === "",
+  );
 }
 
 export function normalizePath(path: string): string {

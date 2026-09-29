@@ -129,7 +129,7 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 
 - **`*`** matches one segment, or part of one, and captures it into a numbered key: `/files/*`, `/files/*.png`.
 - **`**`** matches zero or more segments and captures them into `_`: `/docs/**`.
-- **`**:name`** matches one or more segments and captures them into `name`: `/docs/**:path`.
+- **`**:name`** matches one or more segments and captures them into `name`: `/docs/**:path`. Like `:name` and `:name+`, it needs a value: `/docs//` doesn't match (see [empty segments](#trailing-slashes-and-empty-segments)).
 - **Segments after `**`** are matched from the **end** of the path, and the `**` takes whatever is in between. `/**/_payload.json` matches `_payload.json` in any directory, and `/blog/**:path/og.png` matches `og.png` anywhere under `/blog`.
 - **`**` followed by text** is short for `**/*<text>`: `/**.md` matches any path whose last segment ends in `.md`. Anywhere else in a segment, `**` throws (`/a**b`, `/a/x**`): write `*` for one capture or `\\*\\*` for a literal.
 
@@ -172,6 +172,7 @@ rou3 matches paths segment by segment in a tree, which leads to a few intentiona
 | Non-`/`-prefixed paths        | Supported                          | Paths must start with `/`                       |
 | Optional param after a greedy capture (`/*-:x?`, `/:a(\d+):b?`) | The greedy capture takes what it can (`/--`: `{ 0: "-" }`; `/12`: `{ a: "12" }`) | The route with the param wins (`/--`: `{ 0: "", x: "-" }`; `/12`: `{ a: "1", b: "2" }`) |
 | Param names                   | Unicode identifiers                | ASCII identifiers (`[A-Za-z_]\w*`)              |
+| Empty segments in `:name*` / `:name+` | Every repeated segment needs a value (`/foo/:bar*` doesn't match `/foo//`) | A `:name*` may be empty (`/foo/:bar*` on `/foo//` is `{ bar: "" }`), a `:name+` needs a value as a whole (`/foo/:bar+` on `/foo//a` is `{ bar: "/a" }`) |
 | Percent-encoding              | Normalizes `%xx` sequences         | Input is not decoded                            |
 
 ## Matching
@@ -203,19 +204,19 @@ A lookup sees the routes for its method and the method-agnostic ones together, a
 - **At most one trailing slash** is ignored: `/users/foo/` matches `/users/:name`, `/users/foo//` does not.
 - In patterns, trailing slashes are ignored: `/users/`, `/users//` and `/users` are the same route.
 - **Empty segments in the middle are real**: `/a//b` does not match `/a/b`.
-- A param or catch-all can match an empty segment and capture `""`:
+- A `:name`, `:name+` or `**:name` needs a value, as in URLPattern: it never captures `""`. A `*`, `**`, `:name*` or a regex constraint that can match empty (`:id(\\d*)`) takes an empty segment:
 
 ```js
 addRoute(router, "GET", "/admin/:id", {});
 addRoute(router, "GET", "/files/:path+", {});
+addRoute(router, "GET", "/raw/*", {});
 
 findRoute(router, "GET", "/admin/"); // undefined (the trailing slash is ignored)
-findRoute(router, "GET", "/admin//"); // params: { id: "" }
-findRoute(router, "GET", "/files//"); // params: { path: "" }
+findRoute(router, "GET", "/admin//"); // undefined (an empty segment)
+findRoute(router, "GET", "/files//"); // undefined
+findRoute(router, "GET", "/files///"); // params: { path: "/" } (two empty segments)
+findRoute(router, "GET", "/raw//"); // params: { "0": "" }
 ```
-
-> [!IMPORTANT]
-> A required param (or `:name+`) can still be an empty string. If a handler needs a value, check for `""` or use a regex constraint such as `/admin/:id(.+)` or `/users/:id(\\d+)`.
 
 ### Path normalization
 
@@ -470,7 +471,7 @@ The output is **PCRE-compatible**, so its `.source` also works in `grep -P`, `rg
 import { regExpToRoute } from "rou3";
 
 regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
-regExpToRoute(/^\/path\/(?:(?<param>[^/]+)\/?|\/)$/); // "/path/:param"
+regExpToRoute(/^\/path\/(?<param>[^/]+)\/?$/); // "/path/:param"
 regExpToRoute(/^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$/); // "/path/**"
 regExpToRoute("^\\/files\\/(?<_0>[^/]*)\\.png\\/?$"); // "/files/*.png"
 regExpToRoute(/^\/?(?<_>[\s\S]*)\/_payload\.json\/?$/); // "/**/_payload.json"
@@ -486,7 +487,7 @@ It understands the regexes `routeToRegExp` emits, and every one of them round-tr
 - In PCRE and Perl, `$` also matches before a final `\n`, so there the regex also matches `<path>\n`.
 - `.` and `..` are not resolved. Normalize the path first if your router uses `normalize: true`.
 
-**Params.** The regex leaves a group **unset** where the router reports `""` in two cases: a required segment that is empty (`/a//` on `/a/:x`) and a `**` that matches no segment (`/a` on `/a/**`; at the root the regex captures `""` too). When optional segments meet a `*` or a constrained optional, or several optional segments follow a `**`, the regex can assign a segment to a different param than the router (`/a/:x?/*` on `/a/b` sets `x`, the router sets `*`). The set of matched paths is still the same.
+**Params.** The regex leaves a group **unset** where the router reports a value in three cases: a `**` that matches no segment (`/a` on `/a/**`, where the router reports `""`; at the root the regex captures `""` too), a `**:name` / `:name+` at the end whose value is two empty segments (`/a///` on `/a/**:x`, where the router reports `/`), and a `*` after a `**` on an empty last segment (`/a//` on `/**/*`, where the router reports `""`). When optional segments meet a `*` or a constrained optional, or several optional segments follow a `**`, the regex can assign a segment to a different param than the router (`/a/:x?/*` on `/a/b` sets `x`, the router sets `*`). The set of matched paths is still the same.
 
 **Errors.** Patterns that `addRoute` rejects throw the same error, and so does a route that declares the same param name twice (`/files/:path/**:path`; a bare `**` is the param `_`).
 
@@ -500,16 +501,16 @@ The trailing-slash rule (at most one trailing slash, exactly one when the last s
 | Route                          | Regex                                                            |
 | ------------------------------ | ---------------------------------------------------------------- |
 | `/users/:id(\d+)`              | `^\/users\/(?<id>\d+)\/?$`                                       |
-| `/path/:id?`                   | `^\/path(?:\/(?<id>[^/]*))??\/?$`                                |
-| `/path/:param`                 | `^\/path\/(?:(?<param>[^/]+)\/?\|\/)$`                           |
-| `/users/:id/:tab?`             | `^\/users\/(?:(?<id>[^/]+)(?:\/\|$)\|\/)(?:(?<tab>[^/]*)\/?)??$` |
+| `/path/:id?`                   | `^\/path(?:\/(?<id>[^/]+))?\/?$`                                 |
+| `/path/:param`                 | `^\/path\/(?<param>[^/]+)\/?$`                                    |
+| `/users/:id/:tab?`             | `^\/users\/(?<id>[^/]+)(?:\/(?<tab>[^/]+))?\/?$`                  |
 | `/path/**`                     | `^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$`                   |
-| `/base/**:path`                | `^\/base\/(?:\/\|(?<path>(?:[\s\S]*[^/]\|\/)\/*?)\/?)$`          |
+| `/base/**:path`                | `^\/base\/(?:\/\/\|(?<path>(?:[\s\S]*[^/]\|\/\/)\/*?)\/?)$`      |
 | `/**`                          | `^\/?(?<_>(?:[\s\S]*[^/])?\/*?)\/?$`                             |
 | `/**/_payload.json`            | `^\/?(?<_>[\s\S]*)\/_payload\.json\/?$`                          |
 | `/path/**/suffix`              | `^\/path(?:\/(?<_>[\s\S]*))?\/suffix\/?$`                        |
-| `/**/:file`                    | `^\/?(?<_>[\s\S]*)\/(?:(?<file>[^/]+)\/?\|\/)$`                  |
-| `/a/**/:page?`                 | `^\/a(?:\/(?:(?:(?<_>[\s\S]*)\/)?(?:(?<page>[^/]+)\/?\|\/))?)?$` |
+| `/**/:file`                    | `^\/?(?<_>[\s\S]*)\/(?<file>[^/]+)\/?$`                           |
+| `/a/**/:page?`                 | `^\/a(?:\/(?<_>[\s\S]*?))??(?:\/(?<page>[^/]+))?\/?$`             |
 | `/`                            | `^\/$`                                                           |
 | `/path/:id(\d*)` (look-behind) | `^\/path\/(?<id>\d*)(?:(?<=\/)\/\|(?<!\/)\/?)$`                  |
 
@@ -517,8 +518,8 @@ The trailing-slash rule (at most one trailing slash, exactly one when the last s
 
 - a constraint at the end of the route whose match can end in `/` (`:name([^.]+)`, `:x(.+)`),
 - a required last segment whose constraint can match empty (`/path/:id(\d*)`),
-- optional segments side by side where an earlier one can be empty (`/a/:x(\d*)?/:y?`, `/a/:x?{/b/c}?`, `/a/:x/:y(\d+)?/:z?`),
-- a catch-all combined with optional segments (`/a/**:rest/:page?`, `/a/:p/**/:n(\d+)?`, `/a/**/:y?{/b}?`).
+- optional segments side by side where an earlier one can be empty (`/a/:x(\d*)?/:y?`),
+- a catch-all combined with optional segments (`/a/**:rest/:page?`, `/a/*/**/:n(\d+)?`, `/a/**/:y?{/b}?`).
 
 Fixed-length look-behinds work in JavaScript, PCRE and Perl, but not in RE2-family engines.
 
@@ -528,9 +529,9 @@ Fixed-length look-behinds work in JavaScript, PCRE and Perl, but not in RE2-fami
 routeToRegExp("/blog/:id(\\d+){-:title}?");
 // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+?))?\/?$/
 routeToRegExp("/files/:name{.:ext}?");
-// /^\/files\/(?:(?<name>[^/]+?)(?:\.(?<ext>[^/]+?))?\/?|\/)$/
+// /^\/files\/(?<name>[^/]+?)(?:\.(?<ext>[^/]+?))?\/?$/
 routeToRegExp("/users{/:id}?/posts/:post");
-// /^\/users(?:\/(?<id>[^/]*))?\/posts\/(?:(?<post>[^/]+)\/?|\/)$/
+// /^\/users(?:\/(?<id>[^/]+))?\/posts\/(?<post>[^/]+)\/?$/
 ```
 
 A param in a segment with other text is lazy (`[^/]+?`), like in the router, so `/files/:name{.:ext}?` splits `archive.tar.gz` into `name: "archive"` and `ext: "tar.gz"`, and `/pre-:x?` compiles to `^\/pre-(?:(?<x>[^/]+?))?\/?$`. When the group follows a `*` or a regex constraint in its segment (`/files/*{.:ext}?/raw`), a look-ahead gives the capture the same value as the router. RE2-family engines reject that output.

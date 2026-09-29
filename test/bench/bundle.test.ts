@@ -108,8 +108,13 @@ describe("benchmark", () => {
     // +~58B raw / +~37B gzip: a nested `(?<name>…)` in a constraint throws
     // too, a `?` guard skips the static-segment scan, and the modifier error
     // names the escape (review of #229).
-    expect(bytes).toBeLessThanOrEqual(10060); // <10.06kb
-    expect(gzipSize).toBeLessThanOrEqual(4190); // <4.19kb
+    // +~271B raw / +~126B gzip: a `:name` / `:name+` needs a value, as in
+    // URLPattern (#229): `emptyParam` rejects matches that give one `""`,
+    // `findRoute` sends paths with an empty segment through the
+    // `findAllRoutes` walk (`_findRanked`, so the tree walk never checks), and
+    // `:name*` marks its `**:name` expansion, which may still be empty.
+    expect(bytes).toBeLessThanOrEqual(10330); // <10.33kb
+    expect(gzipSize).toBeLessThanOrEqual(4320); // <4.32kb
   });
 });
 

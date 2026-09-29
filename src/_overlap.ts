@@ -1,15 +1,23 @@
 import { createRouter } from "./context.ts";
 import { addRoute } from "./operations/add.ts";
-import { matcherAt, maxLength, mergeShapes, minLength, stableLength } from "./_subsume.ts";
+import {
+  matcherAt,
+  maxLength,
+  mergeShapes,
+  minLength,
+  NON_EMPTY,
+  stableLength,
+} from "./_subsume.ts";
 import type { MethodData, Node } from "./types.ts";
 
 /**
  * A canonical (fully expanded) route shape: fixed single-segment matchers
- * (`string` literal | `RegExp` constraint | `undefined` = any) followed by a
- * variable-length tail. The tail (trailing `*`, `**`, `**:name`) matches any
- * segment values, so it only constrains the total number of segments:
- * trailing bare `*` -> `[0, 1]`, `**` -> `[0, Infinity]`,
- * `**:name` -> `[1, Infinity]`, no variable tail -> `[0, 0]`.
+ * (`string` literal | `RegExp` constraint, `NON_EMPTY` for a `:name` |
+ * `undefined` = any) followed by a variable-length tail. The tail (trailing
+ * `*`, `**`, `**:name`) matches any segment values, so it only constrains the
+ * total number of segments: trailing bare `*` -> `[0, 1]`, `**` ->
+ * `[0, Infinity]`, `**:name` -> `[1, Infinity]`, no variable tail -> `[0, 0]`.
+ * A `**:name` needs a value (`some`): a one-segment tail can't be `""`.
  *
  * Segments after a `**` form the `suffix`: fixed matchers aligned to the end
  * of the path, after the tail (`/**\/_payload.json` -> `[] [0, Infinity]
@@ -20,6 +28,7 @@ export interface RouteShape {
   tailMin: number;
   tailMax: number;
   suffix?: (string | RegExp | undefined)[];
+  some?: true;
 }
 
 /**
@@ -81,7 +90,7 @@ export function shapeOf(edges: Edge[], entry: MethodData): RouteShape {
  * so the value check is independent of the chosen length.
  */
 export function shapesOverlap(a: RouteShape, b: RouteShape): boolean {
-  if (a.suffix || b.suffix) {
+  if (a.suffix || b.suffix || a.some || b.some) {
     // Try every common length up to the one that stands for all longer ones
     const lo = Math.max(minLength(a), minLength(b));
     const hi = Math.min(maxLength(a), maxLength(b));
@@ -183,6 +192,7 @@ function _computeShape(edges: Edge[], entry: MethodData): RouteShape {
   let suffix: RouteShape["fixed"] | undefined;
   let tailMin = 0;
   let tailMax = 0;
+  let some: true | undefined;
   const pMap = entry.paramsMap;
   for (let d = 0; d < edges.length; d++) {
     const edge = edges[d];
@@ -190,10 +200,13 @@ function _computeShape(edges: Edge[], entry: MethodData): RouteShape {
     if (typeof edge === "string") {
       into.push(edge);
     } else if (edge === 1) {
-      // `**` is optional, `**:name` requires one segment. Segments after it
-      // are the suffix, aligned to the end of the path.
-      tailMin = pMap!.find((e) => e[0] === -(d + 1))![2] ? 0 : 1;
+      // `**` is optional, `**:name` requires one segment with a value (not a
+      // `:name*`'s, see `emptyParam`). Segments after it are the suffix,
+      // aligned to the end of the path.
+      const [, , optional, empty] = pMap!.find((e) => e[0] === -(d + 1))!;
+      tailMin = optional ? 0 : 1;
       tailMax = Number.POSITIVE_INFINITY;
+      if (!optional && !empty) some = true;
       if (d < edges.length - 1) suffix = [];
     } else if (pMap) {
       // Param: classified by this entry's paramsMap entry at this segment index.
@@ -204,16 +217,19 @@ function _computeShape(edges: Edge[], entry: MethodData): RouteShape {
         // A trailing bare `*` matches zero-or-one segment; elsewhere exactly one.
         tailMax = 1;
       } else {
-        into.push(undefined);
+        // A `:name` needs a value, a `*` (named by a digit) doesn't
+        into.push((p[1] as string) > ":" ? NON_EMPTY : undefined);
       }
     }
   }
   // Canonical form: trailing any-value matchers are equivalent to tail
   // positions (both match exactly one arbitrary segment), so fold them into
-  // the tail. This is what lets `/a/:x` compare equal to shapes reached
-  // through the tail model (e.g. the `/a/:x?` <-> `/a/*` equivalence).
+  // the tail. This is what lets `/a/*/**` compare equal to shapes reached
+  // through the tail model (`/a/**/*`). A `:name` needs a value (`NON_EMPTY`),
+  // and nothing folds into a `**:name`'s tail: it would move its first
+  // segment.
   let f = fixed.length;
-  while (f > 0 && fixed[f - 1] === undefined) f--;
+  while (f > 0 && !some && fixed[f - 1] === undefined) f--;
   if (f < fixed.length) {
     tailMin += fixed.length - f;
     tailMax += fixed.length - f;
@@ -223,11 +239,11 @@ function _computeShape(edges: Edge[], entry: MethodData): RouteShape {
     // Likewise for leading any-value matchers of the suffix (`/**\/:x/y` is
     // `/**:x/y`); a suffix of them only (`/**\/:x`) is just a longer tail.
     let s = 0;
-    while (s < suffix.length && suffix[s] === undefined) s++;
+    while (s < suffix.length && !some && suffix[s] === undefined) s++;
     tailMin += s;
-    if (s < suffix.length) return { fixed, tailMin, tailMax, suffix: suffix.slice(s) };
+    if (s < suffix.length) return { fixed, tailMin, tailMax, suffix: suffix.slice(s), some };
   }
-  return { fixed, tailMin, tailMax };
+  return { fixed, tailMin, tailMax, some };
 }
 
 /**

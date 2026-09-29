@@ -1,6 +1,6 @@
 import type { RouterContext, MatchedRoute, Node, MethodData } from "../types.ts";
-import { _findAll } from "./find-all.ts";
-import { hasSuffixMatch, rankFromEnd } from "./_suffix.ts";
+import { _findRanked } from "./find-all.ts";
+import { hasSuffixMatch } from "./_suffix.ts";
 import { getMatchParams, normalizePath, splitPath } from "./_utils.ts";
 
 /**
@@ -33,10 +33,15 @@ export function findRoute<T = unknown>(
   const segments = splitPath(path);
 
   // A route with segments after `**` matches from the end of the path: when
-  // one does, every match is ranked from the end (see `rankFromEnd`)
+  // one does, every match is ranked from the end (see `rankFromEnd`). A
+  // `:name` can't take an empty segment: paths with one (rare) take this
+  // path too, so the tree walk never checks for it.
   let match: MethodData<T> | undefined;
-  if (ctx.root.hasSuffix && hasSuffixMatch(ctx.root, method, segments, 0)) {
-    const matches = rankFromEnd(_findAll(ctx.root, method, segments, 0, [], true), segments);
+  if (
+    segments.includes("") ||
+    (ctx.root.hasSuffix && hasSuffixMatch(ctx.root, method, segments, 0))
+  ) {
+    const matches = _findRanked(ctx, method, segments, true);
     match = matches[matches.length - 1];
   } else {
     match = _lookupTree<T>(ctx.root, method, segments, 0);

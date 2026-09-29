@@ -44,7 +44,7 @@ A3 can't be fixed by weights; a real fix is a global re-sort against `compareRou
 
 ## Segments after `**`
 
-Segments after a `**` match from the **end** of the path; the `**` takes what is between (≥ 0 segments, ≥ 1 for `**:name`). Mid-route `:x+` / `:x*` become `**:x` and keep the segments after them.
+Segments after a `**` match from the **end** of the path; the `**` takes what is between (≥ 0 segments, ≥ 1 with a value for `**:name`). Mid-route `:x+` / `:x*` become `**:x` and keep the segments after them.
 
 - **Syntax:** one catch-all per route (`**`, `:x+`, `:x*`); `_add` throws `rou3: a route can have only one ...` quoting the input as written (threaded through expansion as `input`). `splitRoute()` rewrites a `**<rest>` segment (rest not starting with `:`, `{`, `}`) into `**` + `*<rest>`, so `/**.md` ≡ `/**/*.md` everywhere. A `*` after `**` is required.
 - **Params:** `MethodData.suffix = [wildcard index w, suffix length n]`; a param at route index `k` after the `**` maps to `index - w - 1 + (n - k)` at match time (`getMatchParams`, `collectSuffix`, compiled `s[l-j]`).
@@ -65,7 +65,10 @@ Segments after a `**` match from the **end** of the path; the `**` takes what is
 ## Empty segments and normalization
 
 - **Pattern** trailing empties: `splitRoute()` pops all of them (`/a//` ≡ `/a/` ≡ `/a`).
-- **Lookup** paths: at most **one** trailing `/` is ignored and `splitPath` keeps every other segment, so `/a//` has an empty last segment that only a param/wildcard takes (`x: ""`). Do not add a pop to `splitPath` or the compiled prologue; the regexp and compiler rely on this rule.
+- **Lookup** paths: at most **one** trailing `/` is ignored and `splitPath` keeps every other segment, so `/a//` has an empty last segment that only a `*`, `**`, `:x*` or a constraint takes (`0: ""`). Do not add a pop to `splitPath` or the compiled prologue; the regexp and compiler rely on this rule.
+- **`:name` / `**:name` need a value** (URLPattern): `emptyParam()` (`operations/_utils.ts`) rejects an entry that gives a `:name` an empty segment or a `**:name` / `:name+` an empty value (exactly one empty segment; `/a///` gives `/`). It tells them apart in `paramsMap`: a `*` is digit-named (no param name starts with a digit), a constraint is a RegExp and decides itself (`:id(\d*)` takes `""`, as in URLPattern), a bare `**` is `optional`. `:name*` may be empty (issue #229, unlike URLPattern): `expandModifiers` writes its catch-all as `**:\uFFFFname` (no route syntax), which `_add` reads into `paramsMap` slot 4 (`empty`). `:name?` and `{/:x}?` follow from their expansions.
+  - Interpreter: `findRoute` sends paths with an empty segment (`segments.includes("")`, rare) through `_findRanked` (`find-all.ts`: `findAllRoutes`' walk, filtered by `emptyParam`, ranked from the end when a suffix route is among them), whose last match is `_lookupTree`'s pick (same traversal, weights and ties), so `_lookupTree` / `_selectMatcher` / `collectSuffix` never check. Paths without one pay a single `includes("")`.
+  - Compiler: see [compiler.md](compiler.md#codegen-invariants). Pinned by the "empty segments (compiled parity, sweep)" in `find.test.ts`.
 - **Middle** empties are real static `""` segments: `/a//b` matches only the doubled-slash path. Never collapse them (normalization-mismatch bypass).
 - `normalizePath()` resolves `.` / `..` before matching (skipped when no `/.`); the compiler inlines the same logic.
 

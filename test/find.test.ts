@@ -311,9 +311,10 @@ describe("params sharing a segment (URLPattern)", () => {
       expect(match("/s")?.data).toEqual({ path: "/s/{pre-:x}?" });
       expect(match("/s/pre-a")?.params).toEqual({ x: "a" });
       expect(match("/s/pre-")).toBeUndefined();
-      // The route without `b` is `/e/:a`, which takes an empty segment.
+      // The route without `b` is `/e/:a`, which needs a value too.
       expect(match("/e/")).toBeUndefined();
-      expect(match("/e//")?.params).toEqual({ a: "" });
+      expect(match("/e//")).toBeUndefined();
+      expect(match("/e/x")?.params).toEqual({ a: "x" });
       expect(match("/e/xyz")?.params).toEqual({ a: "x", b: "yz" });
       // A greedy `*` or a constraint before it: the route with the param wins.
       expect(match("/g/a-b-")?.params).toEqual({ "0": "a", x: "b-" });
@@ -767,8 +768,10 @@ describe("at most one trailing slash is ignored (#209)", () => {
         expect(match("GET", "//")).toBeUndefined();
         expect(match("GET", "/users/123/")).toMatchObject({ params: { id: "123" } });
         expect(match("GET", "/users/123//")).toBeUndefined();
-        // a slash after a real empty last segment is still the one ignored
-        expect(match("GET", "/users//")).toMatchObject({ params: { id: "" } });
+        // a slash after a real empty last segment is still the one ignored,
+        // and a `:name` needs a value
+        expect(match("GET", "/users//")).toBeUndefined();
+        expect(match("GET", "/opt/a/")).toMatchObject({ params: { _: "a" } });
         expect(match("GET", "/users/")).toBeUndefined();
         expect(match("GET", "/opt/a//")).toMatchObject({ params: { _: "a/" } });
       });
@@ -1112,4 +1115,75 @@ describe("falsy route data is kept", () => {
       });
     }
   }
+});
+
+// Paths with an empty segment take `findAllRoutes`' walk in `findRoute` (a
+// `:name` / `**:name` can't take one, #229), while the compiled matchers
+// guard each param: both must still pick the same route, and list the same
+// ones. Routers are random (seeded) picks from a pool, some method-agnostic.
+describe("empty segments (compiled parity, sweep)", () => {
+  const pool = [
+    "/a/:x",
+    "/a/*",
+    "/:x/b",
+    "/a/:x/b",
+    "/a//b",
+    "/a/**",
+    "/a/**:r",
+    "/a/:y*",
+    "/a/:z+/b",
+    "/**/:f",
+    "/**/b",
+    "/:x",
+    "/*",
+    "/a/:x?",
+    "/a{/:x}?/b",
+    "/a/:id(\\d*)",
+    "/a/:id(\\d+)",
+    "/a/pre-:x",
+    "/**",
+    "/a/b",
+    "/:x/:y",
+    "/*/:y",
+    "/a/**/:y",
+    "/:x/**:r",
+    "/a/:x/*",
+  ];
+  const paths = ["/", "//"];
+  for (let depth = 1, prev = [""]; depth <= 3; depth++) {
+    prev = prev.flatMap((path) => ["a", "b", "", "1", "pre-"].map((s) => `${path}/${s}`));
+    paths.push(...prev);
+  }
+
+  it("findRoute / findAllRoutes agree with JIT and AOT", () => {
+    let seed = 7;
+    const random = () => (seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648) / 2_147_483_648;
+    const failures: string[] = [];
+    for (let n = 0; n < 150; n++) {
+      const router = createEmptyRouter<string>();
+      const routes = pool.filter(() => random() < 0.25);
+      for (const route of routes) addRoute(router, random() < 0.3 ? "" : "GET", route, route);
+      const jit = compileRouter(router);
+      const jitAll = compileRouter(router, { matchAll: true });
+      const aot = new Function(`return ${compileRouterToString(router)}`)();
+      for (const path of paths) {
+        const found = findRoute(router, "GET", path);
+        const expected = JSON.stringify(found && { data: found.data, params: found.params });
+        for (const [name, match] of [
+          ["jit", jit("GET", path)],
+          ["aot", aot("GET", path)],
+        ]) {
+          if (JSON.stringify(match) !== expected) {
+            failures.push(`${name} [${routes}] ${path}: ${JSON.stringify(match)} vs ${expected}`);
+          }
+        }
+        const all = findAllRoutes(router, "GET", path).map((m) => m.data);
+        const compiledAll = jitAll("GET", path).map((m) => m.data);
+        if (JSON.stringify(all) !== JSON.stringify(compiledAll)) {
+          failures.push(`matchAll [${routes}] ${path}: ${compiledAll} vs ${all}`);
+        }
+      }
+    }
+    expect(failures.slice(0, 10)).toEqual([]);
+  });
 });

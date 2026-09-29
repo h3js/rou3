@@ -109,7 +109,8 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(routeToRegExp("/:_*"))).toBe("/:_*");
     // The `:name*` ending must not reverse to a single-segment constraint.
     expect(regExpToRoute(routeToRegExp("/path/:rest*"))).toBe("/path/:rest*");
-    expect(regExpToRoute(routeToRegExp("/a/c{/:w+}?"))).toBe("/a/c/:w*");
+    // `:w+` needs a value, `:w*` doesn't (`/a/c//`): the group stays.
+    expect(regExpToRoute(routeToRegExp("/a/c{/:w+}?"))).toBe("/a/c{/:w+}?");
   });
 
   it("accepts catch-all regexes emitted by older versions", () => {
@@ -166,6 +167,17 @@ describe("regExpToRoute", () => {
     ]) {
       expect(regExpToRoute(routeToRegExp(route)), route).toBe(route);
     }
+  });
+
+  // 0.10 closed endings, where a `:x` / `**:x` could be empty: back to the
+  // route they were emitted for.
+  it.each([
+    [String.raw`^\/path\/(?:(?<param>[^/]+)\/?|\/)$`, "/path/:param"],
+    [String.raw`^\/base\/(?:\/|(?<path>(?:[\s\S]*[^/]|\/)\/*?)\/?)$`, "/base/:path+"],
+    [String.raw`^\/a(?:\/(?:(?:(?<_>[\s\S]*)\/)?(?:(?<page>[^/]+)\/?|\/))?)?$`, "/a/**/:page?"],
+    [String.raw`^\/path\/(?:(?<id>[^/]+)(?:\/|$)|\/)(?:(?<tab>[^/]*)\/?)??$`, "/path/:id/:tab?"],
+  ])("reverses the 0.10 ending %s", (source, route) => {
+    expect(regExpToRoute(source)).toBe(route);
   });
 
   it("accepts the two-trailing-slash suffix emitted by older versions (#209)", () => {
@@ -403,11 +415,7 @@ const KNOWN_NON_EQUIVALENT: Record<string, readonly [back: string, reason: strin
   // `routeToRegExpSegments`), so these compile to the regex of the `{/:x/…}?`
   // route and come back as it: the same paths, captured like the regex does,
   // which differs from the original route (KNOWN_CAPTURE_DIFFS in
-  // test/regexp.test.ts).
-  "/a/:x?/*": ["/a{/:x/*}?", "the router gives a lone segment to `*`, the regex to `x`"],
-  "/a/:x?/**": ["/a{/:x/**}?", 'the router reports `**` as `""` on `/a`, the regex not'],
-  "/:x/:y?/**": ["/:x{/:y/**}?", 'the router reports `**` as `""` on `/a`, the regex not'],
-  "/a/:x?/**/b": ["/a{/:x/**}?/b", 'the router reports `**` as `""` on `/a/b`, the regex not'],
+  // test/regexp.test.ts). One that can be empty (`*`, `**`) doesn't nest.
   "/a/:x?/:y(\\d+)?": [
     "/a{/:x/:y(\\d+)?}?",
     "the router gives a lone number to `y`, the regex to `x`",

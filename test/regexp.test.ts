@@ -368,10 +368,11 @@ describe("routeToRegExp", () => {
 
   // Captures must agree too: consumers read params off the regex. The one
   // accepted difference is the look-behind-free ending of a required
-  // segment that can be empty (`:x`, `**:x`, `:x+`, see `withTrailingSlash`):
+  // segment that can be empty (a `*` after `**`, see `withTrailingSlash`):
   // where that segment is empty, at the end of the path or before optional
-  // ones, it leaves the group unset where the router reports `""`. Anything
-  // else must be listed in KNOWN_CAPTURE_DIFFS.
+  // ones, it leaves the group unset where the router reports `""`, and a
+  // trailing `**:x` / `:x+` of two empty segments, where it reports `/`.
+  // Anything else must be listed in KNOWN_CAPTURE_DIFFS.
   it("captures what findRoute captures", () => {
     const paths = sweepPaths();
     const unexpected: string[] = [];
@@ -440,7 +441,7 @@ describe("routeToRegExp", () => {
   it("does not mistake a param named `_` for `**`", () => {
     const cases: [route: string, path: string, params: Record<string, string>][] = [
       ["/a/:_?", "/a/", {}],
-      ["/a/:_?", "/a//", { _: "" }],
+      ["/a/:_?", "/a/b/", { _: "b" }],
       ["/a/:_*", "/a/", {}],
       ["/a/:_*", "/a//", { _: "" }],
       ["/a/:_*", "/a/b/", { _: "b" }],
@@ -889,14 +890,15 @@ function fmt(captures: Record<string, string>): string {
 
 /**
  * The accepted trade-off of the look-behind-free endings for a required
- * segment that can be empty: where it is empty (`/a//` for `/a/:x`, `/a//b`
- * for `/a/:x/:y?`), its group is unset and the router reports `""`. `key` is
- * that group iff for some empty segment of `path`, the route can end right
- * after it, with `key` taking it: cut there and filled in (`/a/z`), the path
- * is routed with `key: "z"`. After a `**`, segments count from the end of the
- * path, so cutting it moves `key`: there it is filled in and the rest kept
- * (`/**\/:x/:y?` on `/a///`: `/a/z//` gives `x: "z"`). (`**` has its own,
- * listed, zero-segment difference.)
+ * segment that can be empty (a `*` after `**`): where it is empty (`/a//` for
+ * `/a/**\/*`), its group is unset and the router reports `""`. `key` is that
+ * group iff for some empty segment of `path`, the route can end right after
+ * it, with `key` taking it: cut there and filled in (`/a/z`), the path is
+ * routed with `key: "z"`. After a `**`, segments count from the end of the
+ * path, so cutting it moves `key`: there it is filled in and the rest kept.
+ * (`**` has its own, listed, zero-segment difference.) Likewise a trailing
+ * `**:x` / `:x+` of two empty segments (`/a///` for `/a/**:x`) is unset
+ * where the router reports `/` (see `closedEnding`).
  */
 function isRequiredSegmentGap(
   router: ReturnType<typeof createRouter>,
@@ -905,7 +907,13 @@ function isRequiredSegmentGap(
   groups: Record<string, string>,
   params: Record<string, string>,
 ): boolean {
-  if (key === "_" || key in groups || params[key] !== "") {
+  if (key === "_" || key in groups) {
+    return false;
+  }
+  if (params[key] === "/") {
+    return path.endsWith("///") && !path.endsWith("////");
+  }
+  if (params[key] !== "") {
     return false;
   }
   const segments = path.split("/");

@@ -12,7 +12,7 @@ import type { RouteShape } from "./_overlap.ts";
  * undecidable in general).
  */
 export function shapeSubsumes(a: RouteShape, b: RouteShape): boolean {
-  if (a.suffix || b.suffix) {
+  if (a.suffix || b.suffix || a.some || b.some) {
     // Every length of `b` must be one of `a`'s, and at each (up to the one
     // that stands for all longer ones) `a` must cover `b` position by position.
     const lo = minLength(b);
@@ -48,9 +48,10 @@ export function shapeSubsumes(a: RouteShape, b: RouteShape): boolean {
 /**
  * Collapse shapes that differ only in tail length into one shape per fixed
  * prefix (union of contiguous total-length ranges). An optional-syntax pattern
- * expands into several entries (`/a/:x?` -> `/a` + `/a/:x`) whose canonical
- * shapes are `["a"] [0,0]` and `["a"] [1,1]`; merging yields `["a"] [0,1]` —
- * the same shape as `/a/*` — so containment checks see through the expansion.
+ * expands into several entries (`/a/:x*` -> `/a` + `/a/**:x`) whose canonical
+ * shapes are `["a"] [0,0]` and `["a"] [1,Infinity]`; merging yields `["a"]
+ * [0,Infinity]` — the same shape as `/a/**` — so containment checks see
+ * through the expansion.
  */
 export function mergeShapes(shapes: RouteShape[]): RouteShape[] {
   for (let i = 0; i < shapes.length; i++) {
@@ -64,6 +65,8 @@ export function mergeShapes(shapes: RouteShape[]): RouteShape[] {
         a.tailMin <= b.tailMax + 1 &&
         b.tailMin <= a.tailMax + 1
       ) {
+        // A one-segment tail needs a value if it does in both (or one has none)
+        a.some = _someTail(a) && _someTail(b) ? true : undefined;
         a.tailMin = Math.min(a.tailMin, b.tailMin);
         a.tailMax = Math.max(a.tailMax, b.tailMax);
         shapes.splice(j, 1);
@@ -84,23 +87,41 @@ export function maxLength(shape: RouteShape): number {
   return shape.fixed.length + (shape.suffix?.length || 0) + shape.tailMax;
 }
 
-/** The matcher of `shape` at segment `i` of a path with `n` segments. */
+/**
+ * The matcher of `shape` at segment `i` of a path with `n` segments: a tail
+ * segment is any value, unless it is the only one of a `**:name` (`some`).
+ */
 export function matcherAt(shape: RouteShape, n: number, i: number): RouteShape["fixed"][number] {
-  if (i < shape.fixed.length) return shape.fixed[i];
-  const suffix = shape.suffix;
-  return suffix && i >= n - suffix.length ? suffix[i - n + suffix.length] : undefined;
+  const f = shape.fixed.length;
+  if (i < f) return shape.fixed[i];
+  const s = shape.suffix?.length || 0;
+  if (i >= n - s) return shape.suffix![i - n + s];
+  return shape.some && n - f - s === 1 ? NON_EMPTY : undefined;
 }
 
 /**
  * A path length from which on the matchers of `a` and `b` stop moving
  * relative to each other (their fixed prefixes aligned to the start, suffixes
- * to the end, any-value in between), so it stands for every longer length.
+ * to the end, any-value in between, a `**:name` tail two segments or more),
+ * so it stands for every longer length.
  */
 export function stableLength(a: RouteShape, b: RouteShape): number {
   return (
     Math.max(a.fixed.length, b.fixed.length) +
-    Math.max(a.suffix?.length || 0, b.suffix?.length || 0)
+    Math.max(a.suffix?.length || 0, b.suffix?.length || 0) +
+    (a.some || b.some ? 2 : 0)
   );
+}
+
+/**
+ * The matcher of a segment that needs a value (a `:name`, the only segment of
+ * a `**:name`): any but `""`. Compared by identity (see `_segmentSubsumes`).
+ */
+export const NON_EMPTY: RegExp = /^[\s\S]/;
+
+/** Whether a one-segment tail of `shape` needs a value, or it has none. */
+function _someTail(shape: RouteShape): boolean {
+  return !!shape.some || shape.tailMin > 1 || shape.tailMax < 1;
 }
 
 function _sameFixed(a: RouteShape["fixed"], b: RouteShape["fixed"]): boolean {
@@ -130,12 +151,15 @@ function _segmentEqual(x: string | RegExp | undefined, y: string | RegExp | unde
  * Whether single-segment matcher `x` certainly matches every value `y`
  * matches. `any` covers everything; literals must be equal; an (anchored)
  * regex provably covers a literal it tests true on, and another regex only
- * when their sources are identical (modulo named-group names).
+ * when their sources are identical (modulo named-group names); `NON_EMPTY`
+ * covers a regex that can't match `""`.
  */
 function _segmentSubsumes(x: string | RegExp | undefined, y: string | RegExp | undefined): boolean {
   if (x === undefined) return true;
   if (typeof x === "string") return x === y;
   if (typeof y === "string") return x.test(y);
+  // Any value but `""` covers a constraint that can't match it
+  if (x === NON_EMPTY && y) return y === NON_EMPTY || !y.test("");
   return y instanceof RegExp && x.flags === y.flags && _regExpKey(x) === _regExpKey(y);
 }
 

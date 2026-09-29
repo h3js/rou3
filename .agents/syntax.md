@@ -1,6 +1,6 @@
 # Pattern syntax
 
-`addRoute` pipeline: `checkConstraints` → `expandGroupDelimiters` → `encodeEscapes` / `splitRoute` → `expandModifiers` → per segment `getParamRegexp` / `addName`. Each helper bails early when its trigger is absent (`\`, `�`, `{`, trailing `?`/`+`/`*`, `(`/`{`/`}`), so plain routes skip the scanners. Keep those guards.
+`addRoute` pipeline: `checkConstraints` → `expandGroupDelimiters` → `encodeEscapes` / `splitRoute` → `expandModifiers` (`:x+` → `**:x`, `:x*` → `**:\uFFFFx` + the route without it, see [matching.md](matching.md#empty-segments-and-normalization)) → per segment `getParamRegexp` / `addName`. Each helper bails early when its trigger is absent (`\`, `�`, `{`, trailing `?`/`+`/`*`, `(`/`{`/`}`), so plain routes skip the scanners. Keep those guards.
 
 ## Escapes
 

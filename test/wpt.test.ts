@@ -335,8 +335,9 @@ describe("wpt urlpattern compatibility", () => {
             const { matched, params } = strategy.match(test.pattern, test.input!);
 
             if (!test.expectedMatch) {
-              // rou3 allows trailing slash — acceptable difference
-              if (matched && test.input!.endsWith("/")) return;
+              // rou3 ignores one trailing slash — acceptable difference (a
+              // second one is an empty last segment)
+              if (matched && test.input!.endsWith("/") && !test.input!.endsWith("//")) return;
               expect(matched, `"${test.input}" should not match pattern "${test.pattern}"`).toBe(
                 false,
               );
@@ -357,4 +358,56 @@ describe("wpt urlpattern compatibility", () => {
       });
     });
   }
+});
+
+// Not in the WPT data: a `:name` / `:name+` needs a value, as in URLPattern
+// (#229). `[pattern, input, groups]`, `null` for no match; checked against
+// the runtime's URLPattern where it has one.
+const EMPTY_SEGMENT_CASES: [string, string, Record<string, string> | null][] = [
+  ["/foo/:bar", "/foo//", null],
+  ["/foo/:bar+", "/foo//", null],
+  ["/foo/:bar?", "/foo//", null],
+  ["/foo{/:bar}?", "/foo//", null],
+  ["/foo/:bar/baz", "/foo//baz", null],
+  ["/foo/pre-:bar", "/foo/pre-", null],
+  ["/foo/:bar", "/foo/a", { bar: "a" }],
+  ["/foo/:bar+", "/foo/a/b", { bar: "a/b" }],
+];
+
+// Where rou3 still differs (see the README): a `:name*` takes an empty segment
+// (URLPattern's needs a value in each), and `:name+` / `:name*` / `**` take
+// empty segments between others.
+const EMPTY_SEGMENT_DIFFS: [string, string, Record<string, string>][] = [
+  ["/foo/:bar*", "/foo//", { bar: "" }],
+  ["/foo/:bar+", "/foo////", { bar: "//" }],
+  ["/foo/:bar+", "/foo//a", { bar: "/a" }],
+];
+
+describe("wpt urlpattern compatibility: empty segments", () => {
+  const URLPatternCtor = (globalThis as { URLPattern?: any }).URLPattern;
+  for (const strategy of strategies) {
+    for (const [pattern, input, groups] of EMPTY_SEGMENT_CASES) {
+      it(`${strategy.name}: ${pattern} → ${input}`, () => {
+        const { matched, params } = strategy.match(pattern, input);
+        expect(matched ? params : null).toEqual(groups);
+      });
+    }
+    for (const [pattern, input, groups] of EMPTY_SEGMENT_DIFFS) {
+      it(`${strategy.name}: ${pattern} → ${input} (rou3 only)`, () => {
+        const { matched, params } = strategy.match(pattern, input);
+        expect(matched ? params : null).toEqual(groups);
+      });
+    }
+  }
+
+  it.runIf(URLPatternCtor)("agrees with URLPattern", () => {
+    for (const [pattern, input, groups] of EMPTY_SEGMENT_CASES) {
+      const result = new URLPatternCtor({ pathname: pattern }).exec({ pathname: input });
+      expect(result ? result.pathname.groups : null, `${pattern} → ${input}`).toEqual(groups);
+    }
+    for (const [pattern, input] of EMPTY_SEGMENT_DIFFS) {
+      const result = new URLPatternCtor({ pathname: pattern }).exec({ pathname: input });
+      expect(result, `${pattern} → ${input}`).toBeNull();
+    }
+  });
 });
