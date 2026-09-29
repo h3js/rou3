@@ -125,8 +125,10 @@ describe("benchmark", () => {
     // go (it said a whole-segment `:name` for all three, wrong for `pre-:x?`).
     // +18B raw / +6B gzip: an invalid param name is quoted without `\`s
     // (`/a/**:x{s}?` named `x\s`, an escape `scanFirstGroup` added).
-    expect(bytes).toBeLessThanOrEqual(10479); // <10.48kb
-    expect(gzipSize).toBeLessThanOrEqual(4375); // <4.38kb
+    // +32B raw / +17B gzip: the modifier error names `:name(…)` and says no
+    // modifier follows a `**:name` (it read as wrong for `/p/**:i?`).
+    expect(bytes).toBeLessThanOrEqual(10511); // <10.52kb
+    expect(gzipSize).toBeLessThanOrEqual(4392); // <4.40kb
   });
 });
 

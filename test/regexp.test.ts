@@ -674,10 +674,15 @@ describe("reserved pattern syntax", () => {
 
   it("points a misplaced modifier at `:name` and at escaping", () => {
     // One message (bundle size) for modifier misuse, a `?` after plain text
-    // and a mid-segment `**`: it states where each one goes.
+    // and a mid-segment `**`: it states where each one goes (none after a
+    // `**:name`).
     const message =
-      "misplaced `?` / `+` / `*`: `?` follows a `:name`, `+` / `*` a whole-segment `:name`, escape a literal one with `\\`";
+      "misplaced `?` / `+` / `*`: `?` follows `:name` or `:name(…)`, `+` / `*` a whole-segment `:name`, not `**:name`; escape a literal one with `\\`";
     for (const route of [
+      "/a/**:x+",
+      "/a/**:x*",
+      "/a/:x(\\d+)+",
+      "/a/(\\d+)?",
       "/a/:x.png?",
       "/a/*?",
       "/a/:x*.png",
