@@ -83,7 +83,7 @@ describe("routeNodeKeys", () => {
   });
 
   describe("property sweep", () => {
-    // The honesty test: key-set intersection must be *exactly* radix-node
+    // The honesty test: key-set intersection must be *exactly* tree-node
     // sharing, in both directions. A drifting key model shows up here.
     const corpus = buildCorpus();
 
@@ -112,7 +112,7 @@ describe("routeNodeKeys", () => {
 
   describe("security property", () => {
     it("keeps a method-agnostic gate when the nodes collide", () => {
-      // The upstream bug: two textually distinct keys, one radix node. Lookup
+      // The upstream bug: two textually distinct keys, one tree node. Lookup
       // used to resolve the node with `methods[method] || methods[""]`, so the
       // method-scoped entry deleted the gate; now both are siblings.
       const ctx = createRouter<{ path: string }>();

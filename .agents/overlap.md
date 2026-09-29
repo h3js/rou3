@@ -1,0 +1,25 @@
+# Pattern relations
+
+Both features are tree-shakeable and never touch the core bundle.
+
+## Overlap and subsumption
+
+Files: `src/_overlap.ts` (shape model), `src/_subsume.ts` (subsumption, canonicalization), `src/operations/overlap.ts` (public API, tree traversal).
+
+- **Shape** (`RouteShape`): fixed single-segment matchers (`string` literal | `RegExp` | `undefined` = any) + a tail length range `[tailMin, tailMax]` (`*` → `[0,1]`, `**` → `[0,∞]`, `**:name` → `[1,∞]`, none → `[0,0]`; the tail constrains count only) + `suffix`: matchers aligned to the path **end** for segments after `**`. Leading any-value suffix matchers fold into the tail (`/**/:x/b` ≡ `/**:x/b`). With a suffix, overlap/subsumption check each path length position by position (`matcherAt`) up to `stableLength` (max fixed + max suffix), which stands for all longer lengths.
+- Shapes come from tree entries (`shapeOf`, kind-tagged edges so an escaped static `\*` stays distinct from a param), cached per entry in a `WeakMap`. Query patterns go through the real `addRoute` on a throwaway router (`routeToShapes`, memoized per string, cleared at 1024 entries; returned shapes are immutable). A multi-expansion pattern has several shapes; patterns overlap when any pair does.
+- **Canonicalization:** trailing any-value matchers fold into the tail (`/a/:x` → `["a"] [1,1]`); shapes with identical fixed prefixes (`_segmentEqual`, strict identity) and contiguous ranges merge (`mergeShapes`; suffixes must be identical). So `/a/:x?` == `/a/*`.
+- **Overlap** = some concrete path matches both. Static/static and static/regex are exact; any-vs-anything and regex/regex over-approximate to overlap.
+- **`compareRoutes(a, b)`** → `disjoint` | `equal` | `superset` (a ⊇ b) | `subset` | `partial`, named after ES2025 Set methods. `shapeSubsumes()`: b's length range inside a's + per-position containment (any ⊇ all; literals by equality; regex ⊇ literal via `test()`; regex ⊇ regex only by source equality modulo group names, `_regExpKey`) + a's fixed positions under b's tail must be any. Pattern containment is proven shape by shape (sufficient, not necessary; union coverage degrades to `partial`). **Containment claims are proofs; undecidable cases degrade to a weaker verdict, never a wrong claim.** Inherent: strictness is best-effort (`/u/:id(42)` vs `/u/42`), and `partial` may be disjoint for regex pairs.
+- **`findOverlappingRoutes`** traverses in `findAllRoutes` order (wildcard, param, static, self; suffix tries after bare `**` entries, unpruned), prunes unreachable static subtrees, reports `""` entries then the method's, and dedupes per registration identity + bucket + data (`Map<data, Set<route>>`): a route's expansions collapse, distinct routes sharing data are all reported. The same route registered twice with the same data is reported once. Matches carry `data` only.
+
+## `routeNodeKeys` (`src/route-node-keys.ts`)
+
+Exposes the **tree-node identity** of a pattern: a syntactic tree property, deliberately separate from `compareRoutes`' match-set relations (`"equal"` has poor recall on node collisions and equal patterns can live on different nodes, e.g. `/a/:x/**` vs `/a/:x+`). Consumers that bucket per-route metadata by pattern text need it: rou3 has one slot per node.
+
+- **Contract:** `routeNodeKeys(A) ∩ routeNodeKeys(B) ≠ ∅` ⟺ A and B share a node. Not a statement about match sets (constraints erased, `**:name` widened to `**`); over-merging is the fail-closed bias. Not a canonical pattern, hence the name.
+- **Never a second parser:** insert via the real `addRoute` into a throwaway router and DFS the tree, emitting `prefix || "/"` at every node with `methods`. Must not import `_overlap.ts` (pulls `_subsume.ts` in).
+- **Key encoding:** segments joined by `/`; param → `*`, wildcard → `**`, suffix trie in route order (`/a/**:r/b` → `/a/**/b`, `/**.md` → `/**/*`); a static key escapes `*` → `\*`, `**` → `\*\*` and `: ( ) { }` with a backslash, so every key is itself a pattern reaching exactly its node (`routeNodeKeys(k) === [k]`). Weaker escaping breaks idempotence.
+- Trailing empties pop (`/a` ≡ `/a/`); middle empties are a static `""` key.
+- Memo: bounded `Map` (cleared at 1024); returns `keys.slice()`.
+- Tests (`route-node-keys.test.ts`): the pair sweep asserts key intersection ⟺ shared node against tree ground truth; a security sweep asserts disjoint-key `""` routes are never shadowed; encoding injectivity is brute-forced; a non-goal guard checks equal keys don't imply equal match sets.

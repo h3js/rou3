@@ -117,7 +117,7 @@ const SKIP_PATTERNS = new Set([
 const KNOWN_DIFFS = new Set([
   // `(.*)` cross-segment — a regex group `(.*)` matches across `/` (URLPattern
   // semantics), which routeToRegExp now reproduces, so single-segment inputs
-  // agree for every strategy. The radix tree is segment-scoped, so multi-segment
+  // agree for every strategy. The tree is segment-scoped, so multi-segment
   // and empty inputs stay router-only diffs (see ROUTER_KNOWN_DIFFS). Only inputs
   // that still differ for *every* strategy remain here.
 
@@ -190,7 +190,7 @@ const RESERVED_PATTERNS = new Set([
 ]);
 
 // Additional known diffs specific to router-based matching (addRoute+findRoute / compileRouter)
-// These patterns use syntax that routeToRegExp handles but the radix tree cannot represent
+// These patterns use syntax that routeToRegExp handles but the tree cannot represent
 // Known diffs that only apply to routeToRegExp (router handles these correctly)
 const REGEXP_ONLY_KNOWN_DIFFS = new Set([
   // Non-`/`-prefixed input — router prepends `/` for lookup
@@ -233,10 +233,10 @@ const ROUTER_SKIP_PATTERNS = new Set([
 ]);
 
 // Additional known diffs specific to router-based matching.
-// These are tests where the radix tree router behaves differently from routeToRegExp.
+// These are tests where the tree router behaves differently from routeToRegExp.
 const ROUTER_KNOWN_DIFFS = new Set([
   // `(.*)` cross-segment — routeToRegExp matches `bar/baz` (regex `.` spans `/`),
-  // but the segment-scoped radix tree stops at one segment.
+  // but the segment-scoped tree stops at one segment.
   "/foo/(.*) → /foo/bar/baz [match]",
   "/foo/:bar(.*) → /foo/bar/baz [match]",
 ]);

@@ -788,7 +788,7 @@ describe("at most one trailing slash is ignored (#209)", () => {
 
 describe("route patterns with trailing empty segments (#193)", () => {
   // A route registered as "/a//" used to keep a trailing empty segment, so the
-  // radix tree ("/a///"), the ctx.static key ("/a/") and the compiled static
+  // tree ("/a///"), the ctx.static key ("/a/") and the compiled static
   // dispatch ("/a") each matched a different set of paths. Trailing slashes are
   // already "don't care" for routes (/a === /a/), so the extras fold in too:
   // /a// registers exactly as /a. Middle empties stay meaningful (see "/a//b").

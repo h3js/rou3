@@ -3,20 +3,18 @@ import { addRoute } from "./operations/add.ts";
 import type { Node } from "./types.ts";
 
 /**
- * The radix-tree node keys a route pattern registers on.
+ * The route-tree node keys a route pattern registers on.
  *
  * rou3 buckets registrations by **tree node**, not by pattern text: every route
  * ending on one node shares that node's `methods[]` buckets, and its entries
  * compete as same-node siblings (one of them wins a `findRoute`). Consumers
  * that key their own per-route metadata by pattern text cannot see which
- * registrations compete. (Up to 0.10, lookup also resolved a node with
- * `methods[method] || methods[""]`, so a method-scoped registration hid the
- * method-agnostic one; `""` entries are siblings of the method's own now.)
+ * registrations compete.
  *
  * The returned keys make node identity observable:
  *
  * > `routeNodeKeys(a)` and `routeNodeKeys(b)` intersect **iff** `a` and `b`
- * > share a radix node (hence one `methods[]` bucket).
+ * > share a tree node (hence one `methods[]` bucket).
  *
  * Sound in both directions *as a statement about nodes*. It is deliberately
  * **not** a statement about match-sets — the key erases regex constraints and

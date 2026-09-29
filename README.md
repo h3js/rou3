@@ -11,111 +11,173 @@
 
 Lightweight and fast router for JavaScript.
 
-## Usage
+- 🌲 **Tree-based lookups**, one node per path segment, with a fast path for static routes.
+- 🧩 **URLPattern-like syntax**: params, regex constraints, optional segments, groups and wildcards.
+- ⚡ **Compiler** that turns a router into one optimized function, at runtime or at build time.
+- 🧪 **Utilities** to compare patterns, find overlapping routes and convert routes to and from `RegExp`.
+- 📦 **Zero dependencies**, tree-shakeable, typed.
 
-**Install:**
+## Install
 
 ```sh
 # ✨ Auto-detect
 npx nypm install rou3
 ```
 
-**Requirements:** ESM only; Node.js 20.19+ (where `require()` of ESM works), or any runtime with ES2021 and regex look-behind and named groups (Bun, Deno, modern browsers). A few `routeToRegExp` outputs also need duplicate named groups (Node.js 23+, see [Regular expressions](#regular-expressions)).
+rou3 is ESM only. It runs on Node.js 20.19+, Bun, Deno and modern browsers.
 
-**Import:**
-
-<!-- automd:jsimport cdn src="./src/index.ts"-->
-
-**ESM** (Node.js, Bun, Deno)
+## Quick start
 
 ```js
-import {
-  createRouter,
-  addRoute,
-  findRoute,
-  removeRoute,
-  findAllRoutes,
-  routesOverlap,
-  compareRoutes,
-  findOverlappingRoutes,
-  routeNodeKeys,
-  routeToRegExp,
-  regExpToRoute,
-  NullProtoObj,
-} from "rou3";
+import { createRouter, addRoute, findRoute, findAllRoutes, removeRoute } from "rou3";
+
+const router = createRouter();
+
+addRoute(router, "GET", "/about", { page: "about" });
+addRoute(router, "GET", "/users/:id", { page: "user" });
+addRoute(router, "GET", "/docs/**", { page: "docs" });
 ```
 
-**CDN** (Deno and Browsers)
+`findRoute` returns the best match, or `undefined`:
 
 ```js
-import {
-  createRouter,
-  addRoute,
-  findRoute,
-  removeRoute,
-  findAllRoutes,
-  routesOverlap,
-  compareRoutes,
-  findOverlappingRoutes,
-  routeNodeKeys,
-  routeToRegExp,
-  regExpToRoute,
-  NullProtoObj,
-} from "https://esm.sh/rou3";
+findRoute(router, "GET", "/about");
+// { data: { page: "about" } }
+
+findRoute(router, "GET", "/users/42");
+// { data: { page: "user" }, params: { id: "42" } }
+
+findRoute(router, "GET", "/docs/guide/intro");
+// { data: { page: "docs" }, params: { _: "guide/intro" } }
+
+findRoute(router, "GET", "/missing");
+// undefined
 ```
 
-<!-- /automd -->
-
-**Create a router instance and insert routes:**
+`findAllRoutes` returns every match, from the least to the most specific:
 
 ```js
-import { createRouter, addRoute } from "rou3";
+addRoute(router, "GET", "/docs/:section/intro", { page: "intro" });
 
-const router = createRouter(/* options */);
-
-addRoute(router, "GET", "/path", { payload: "this path" });
-addRoute(router, "POST", "/path/:name", { payload: "named route" });
-addRoute(router, "GET", "/path/foo/**", { payload: "wildcard route" });
-addRoute(router, "GET", "/path/foo/**:name", {
-  payload: "named wildcard route",
-});
-```
-
-**Match route to access matched data:**
-
-```js
-// Returns { payload: 'this path' }
-findRoute(router, "GET", "/path");
-
-// Returns { payload: 'named route', params: { name: 'fooval' } }
-findRoute(router, "POST", "/path/fooval");
-
-// Returns { payload: 'wildcard route' }
-findRoute(router, "GET", "/path/foo/bar/baz");
-
-// Returns undefined (no route matched for/)
-findRoute(router, "GET", "/");
-```
-
-**Match all routes, ordered least → most specific:**
-
-```js
-findAllRoutes(router, "GET", "/path/foo/bar/baz");
+findAllRoutes(router, "GET", "/docs/guide/intro");
 // [
-//   { data: { payload: "wildcard route" } },
-//   { data: { payload: "named wildcard route" }, params: { name: "bar/baz" } },
+//   { data: { page: "docs" }, params: { _: "guide/intro" } },
+//   { data: { page: "intro" }, params: { section: "guide" } },
 // ]
 ```
 
-The result ordering is a documented contract — see [Result ordering](#result-ordering).
+`removeRoute` removes a route by the pattern it was added with:
 
-> [!IMPORTANT]
-> Paths should **always begin with `/`**.
+```js
+removeRoute(router, "GET", "/users/:id");
+```
 
-> [!IMPORTANT]
-> Method should **always be UPPERCASE**.
+Route data can be anything: a handler, a config object, an id. rou3 stores it and hands it back on a match.
 
-**Method-agnostic routes:** a route registered with the method `""` matches every method. A lookup for a method sees both the routes registered for that method and the method-agnostic ones, whichever patterns they use:
+## Route patterns
+
+rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API)-like syntax. A **segment** is the part of a path between two `/`.
+
+| Pattern                     | Example match                            | Params                                               |
+| --------------------------- | ---------------------------------------- | ---------------------------------------------------- |
+| `/path/to/resource`         | `/path/to/resource`                      | `{}`                                                 |
+| `/users/:name`              | `/users/foo`                             | `{ name: "foo" }`                                    |
+| `/users/:id(\\d+)`          | `/users/123`                             | `{ id: "123" }`                                      |
+| `/files/:ext(png\|jpg)`     | `/files/png`                             | `{ ext: "png" }`                                     |
+| `/path/(\\d+)`              | `/path/123`                              | `{ "0": "123" }`                                     |
+| `/users/:id?`               | `/users` or `/users/123`                 | `{}` or `{ id: "123" }`                              |
+| `/files/:path+`             | `/files/a/b/c`                           | `{ path: "a/b/c" }`                                  |
+| `/files/:path*`             | `/files` or `/files/a/b`                 | `{}` or `{ path: "a/b" }`                            |
+| `/files/*.png`              | `/files/icon.png`                        | `{ "0": "icon" }`                                    |
+| `/files/file-*-*.png`       | `/files/file-a-b.png`                    | `{ "0": "a", "1": "b" }`                             |
+| `/path/**`                  | `/path/foo/bar`                          | `{ _: "foo/bar" }`                                   |
+| `/path/**:rest`             | `/path/foo/bar`                          | `{ rest: "foo/bar" }`                                |
+| `/**/_payload.json`         | `/_payload.json` or `/a/b/_payload.json` | `{ _: "" }` or `{ _: "a/b" }`                        |
+| `/**.md`                    | `/docs/intro.md`                         | `{ _: "docs", "0": "intro" }`                        |
+| `/book{s}?`                 | `/book` or `/books`                      | `{}`                                                 |
+| `/blog/:id(\\d+){-:title}?` | `/blog/123` or `/blog/123-my-post`       | `{ id: "123" }` or `{ id: "123", title: "my-post" }` |
+
+> [!NOTE]
+> In JavaScript strings a regex backslash is written twice: `"/users/:id(\\d+)"` is the pattern `/users/:id(\d+)`.
+
+### Params
+
+- **Named params** `:name` match one segment: `/users/:name`. They can also sit inside a segment: `/blog/:year-:month`.
+- **Regex constraints** `:name(regex)` only match when the regex does: `/users/:id(\\d+)`. The regex applies to one segment and can't contain `/`.
+- **Unnamed groups** `(regex)` capture into numbered keys `"0"`, `"1"`, …: `/path/(\\d+)`.
+- **Modifiers** go at the end of a whole-segment param:
+  - `:name?` optional (also works with a regex: `:id(\\d+)?`)
+  - `:name+` one or more segments
+  - `:name*` zero or more segments
+
+<details>
+<summary>Param naming rules</summary>
+
+- A name is word characters (`[A-Za-z0-9_]`), with `-` allowed between them (`:test-id`). Any other character ends it, so `/blog/:year-:month` has two params and `/files/:name-` has a literal trailing `-`.
+- To end a name early, escape the next character: `/files/:name\\-v2` gives `{ name }` followed by a literal `-v2`.
+- A name can appear only once per route: `/a/:x/:x` throws.
+- A `:` must start a name. Write a literal colon as `\\:`.
+- `+` and `*` only repeat a whole-segment `:name` (`:id(\d+)+` and `pre-:x+` throw).
+
+</details>
+
+### Wildcards
+
+- **`*`** matches one segment, or part of one, and captures it into a numbered key: `/files/*`, `/files/*.png`.
+- **`**`** matches zero or more segments and captures them into `_`: `/docs/**`.
+- **`**:name`** matches one or more segments and captures them into `name`: `/docs/**:path`.
+- **Segments after `**`** are matched from the **end** of the path, and the `**` takes whatever is in between. `/**/_payload.json` matches `_payload.json` in any directory, and `/blog/**:path/og.png` matches `og.png` anywhere under `/blog`.
+- **`**` followed by text** is short for `**/*<text>`: `/**.md` matches any path whose last segment ends in `.md`.
+
+A route can have only one catch-all. `**`, `**:name`, and a `:name+` / `:name*` that is not the last segment all count as one.
+
+### Groups
+
+`{...}` groups part of a pattern without capturing it. Add `?` to make it optional:
+
+- `/book{s}?` matches `/book` and `/books`.
+- `/users{/:id}?/posts` matches `/users/posts` and `/users/42/posts`.
+
+Groups can't be nested or repeated (`{...}+` and `{...}*` throw).
+
+### Escaping
+
+Escape `:`, `*`, `?`, `+`, `(`, `)`, `{` and `}` with a backslash to match them literally:
+
+```js
+addRoute(router, "GET", "/static\\:path/\\*\\*", {}); // matches only "/static:path/**"
+addRoute(router, "GET", "/files/\\(2024\\)", {}); // matches only "/files/(2024)"
+```
+
+### Invalid patterns
+
+`addRoute` throws a `rou3:` error that quotes the pattern when the syntax has no meaning, instead of silently matching something unexpected. For example: an unclosed `(` or `{`, a nested group, an empty group `()`, a modifier in the wrong place (`*?`, `**+`, `:x.png?`), a repeated param name, or a second catch-all.
+
+### Differences from URLPattern
+
+rou3 matches paths segment by segment in a tree, which leads to a few intentional differences:
+
+| Feature                       | URLPattern                         | rou3                                                    |
+| ----------------------------- | ---------------------------------- | ------------------------------------------------------- |
+| `*` (single star)             | Greedy catch-all `(.*)` across `/` | One segment (or part of one), `([^/]*)`                 |
+| `**` (double star)            | Literal `**`                       | Catch-all, zero or more segments, one per route         |
+| `(.*)` in a segment           | Greedy match across `/`            | Stays within the segment                                |
+| `{...}+` / `{...}*` groups    | Group repetition                   | Not supported (throws)                                  |
+| Path normalization (`.`/`..`) | Resolved in input paths            | Opt-in with `{ normalize: true }`                       |
+| Case sensitivity              | Can be case-insensitive            | Always case-sensitive                                   |
+| Non-`/`-prefixed paths        | Supported                          | Paths must start with `/`                               |
+| Param names                   | Unicode identifiers (no `-`)       | ASCII word characters, `-` allowed between (`:test-id`) |
+| Percent-encoding              | Normalizes `%xx` sequences         | Input is not decoded                                    |
+
+## Matching
+
+### Methods and paths
+
+The paths you look up must start with `/` and the methods must be **UPPERCASE** (`"GET"`, not `"get"`). rou3 does not normalize lookup input, so do it before calling `findRoute`.
+
+### Routes for any method
+
+Register a route with the method `""` to match every method. It's useful for things like middleware or auth checks:
 
 ```js
 addRoute(router, "", "/users/*", { auth: true }); // any method
@@ -123,114 +185,56 @@ addRoute(router, "GET", "/users/:id(\\d+)", { handler: "user" });
 
 findAllRoutes(router, "GET", "/users/42").map((m) => m.data);
 // [{ auth: true }, { handler: "user" }]
+
 findRoute(router, "GET", "/users/42")?.data; // { handler: "user" }
 findRoute(router, "GET", "/users/me")?.data; // { auth: true }
 findRoute(router, "POST", "/users/42")?.data; // { auth: true }
 ```
 
-`findRoute` returns the most specific match as usual (see [Result ordering](#result-ordering)); only between **equally specific** routes does the method-scoped one win over the method-agnostic one (and comes after it in `findAllRoutes`). A lookup with the method `""` sees the method-agnostic routes only.
-
-> [!TIP]
-> If you need to register a pattern containing literal `:` or `*`, you can escape them with `\\`. For example, `/static\\:path/\\*\\*` matches only the static `/static:path/**` route.
-
-**Remove a route:**
-
-```js
-removeRoute(router, "GET", "/path/:name");
-```
-
-Removal is by registered pattern: it removes every entry that `addRoute` call created (including optional/group expansions and duplicate registrations) and leaves routes registered under other patterns alone, even ones that share a tree node (`/path/:id` vs `/path/:name`, `/path/**` vs `/path/**:rest`). Pass the pattern as it was registered — spellings the tree cannot tell apart (`/a/` vs `/a`, `/a/:x?/` vs `/a/:x?`, escaped statics, `/**.md` vs `/**/*.md`) are equivalent, but `/path/*` does not remove `/path/:name` and `/ab` does not remove `/a{b}`.
-
-## Route Patterns
-
-rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API)-compatible syntax.
-
-| Pattern                     | Example Match                            | Params                                               |
-| --------------------------- | ---------------------------------------- | ---------------------------------------------------- |
-| `/path/to/resource`         | `/path/to/resource`                      | `{}`                                                 |
-| `/users/:name`              | `/users/foo`                             | `{ name: "foo" }`                                    |
-| `/path/**`                  | `/path/foo/bar`                          | `{}`                                                 |
-| `/path/**:rest`             | `/path/foo/bar`                          | `{ rest: "foo/bar" }`                                |
-| `/**/_payload.json`         | `/_payload.json` or `/a/b/_payload.json` | `{ _: "" }` or `{ _: "a/b" }`                        |
-| `/**.md`                    | `/docs/intro.md`                         | `{ _: "docs", "0": "intro" }`                        |
-| `/files/*.png`              | `/files/icon.png`                        | `{ "0": "icon" }`                                    |
-| `/files/file-*-*.png`       | `/files/file-a-b.png`                    | `{ "0": "a", "1": "b" }`                             |
-| `/users/:id(\\d+)`          | `/users/123`                             | `{ id: "123" }`                                      |
-| `/files/:ext(png\|jpg)`     | `/files/png`                             | `{ ext: "png" }`                                     |
-| `/path/(\\d+)`              | `/path/123`                              | `{ "0": "123" }`                                     |
-| `/users/:id?`               | `/users` or `/users/123`                 | `{}` or `{ id: "123" }`                              |
-| `/files/:path+`             | `/files/a/b/c`                           | `{ path: "a/b/c" }`                                  |
-| `/files/:path*`             | `/files` or `/files/a/b`                 | `{}` or `{ path: "a/b" }`                            |
-| `/book{s}?`                 | `/book` or `/books`                      | `{}`                                                 |
-| `/blog/:id(\\d+){-:title}?` | `/blog/123` or `/blog/123-my-post`       | `{ id: "123" }` or `{ id: "123", title: "my-post" }` |
-
-- **Named params** (`:name`) match a single segment. A name is word characters (`[A-Za-z0-9_]`), with a `-` allowed between them (`:test-id`); any other character ends it, so `/blog/:year-:month` has two params and `/files/:name-` a literal trailing `-`. Escape the character after a name to end it there: `/files/:name\\-v2` (params `{ name }`, literal `-v2`). A `:` must start a name (escape a literal one: `\\:`), a name can appear once per route (`/a/:x/:x` throws), and `**:name` ends its segment (`/a/**:x(\\d+)` throws).
-- **Single-segment wildcards** (`*`) capture unnamed params (`0`, `1`, ...) and can be used as full or mid-segment tokens (for example `/*` or `/*.png`).
-- **Wildcards** (`**`) match zero or more segments. Use `**:name` to capture (one or more segments).
-- **Segments after a wildcard** (`/**/_payload.json`, `/blog/**:path/og.png`) are matched from the **end** of the path; the `**` takes whatever is between. `**<rest>` is short for `**/*<rest>`: `/**.md` matches any path whose last segment ends in `.md`. A route can have one `**` (a `:name+` / `:name*` before the last segment counts as one: `/files/:path+/meta` is `/files/**:path/meta`), and a `*` after it always takes a segment. On paths such a route matches, routes are ranked from the end of the path — see [Result ordering](#result-ordering).
-- **Regex constraints** (`:name(regex)`) restrict matching. Constrained and unconstrained params can coexist on the same node (constrained checked first). A constraint applies to one segment and cannot contain `/` (`:id([^/]+)` throws; `:id(.+)` already stops at `/`).
-- **Literal parentheses:** a `(` always opens a group, so a literal one must be escaped (`/files/\\(2024`); an unclosed `(` throws. A `)` with no group to close is a literal.
-- **Unnamed groups** (`(regex)`) capture into auto-indexed keys `0`, `1`, etc. A group can't be empty or start with `?` (`/a/()`, `/a/(?:x)` throw: use a constraint, `:name((?:x))`).
-- **Modifiers:** `:name?` (optional), `:name+` (one or more), `:name*` (zero or more), at the end of a segment. `?` also combines with a regex (`:id(\d+)?`); `+` / `*` repeat a whole-segment `:name` only, so `:id(\d+)+` and `pre-:x+` throw. A modifier anywhere else (`*?`, `**+`, `(\d+)?`, `:x??`, `:x.png?`) throws too: escape a literal `?`, `+` or `*` in a segment with a param (`:x\\?`).
-- **Non-capturing groups** (`{...}`): supported with inline (`/foo{bar}`) and optional (`/foo{bar}?`) forms. Repetition (`{...}+`, `{...}*`) is not supported and throws, and so do a `{` / `}` that does not pair up and nested groups (`/a/{b`, `/a/{{b}?}?`): escape a literal brace (`\\{`).
-- **Backslash escaping** (`\`): escape special characters like `:`, `*`, `(`, `)`, `{`, `}` with a backslash (e.g., `/static\:path` matches literal `/static:path`).
-
-### Differences from URLPattern
-
-rou3 aims for URLPattern-compatible syntax but has intentional differences due to its radix-tree design:
-
-| Feature                       | URLPattern                         | rou3                                                          |
-| ----------------------------- | ---------------------------------- | ------------------------------------------------------------- |
-| `*` (single star)             | Greedy catch-all `(.*)` across `/` | Single-segment unnamed param `([^/]*)`                        |
-| `**` (double star)            | Literal `**`                       | Catch-all wildcard (zero or more segments), one per route     |
-| `(.*)` in segment             | Greedy match across `/`            | Segment-scoped (does not cross `/`)                           |
-| `{...}+` / `{...}*` groups    | Group repetition                   | Not supported (throws)                                        |
-| Path normalization (`.`/`..`) | Resolves `.`/`..` in input paths   | Not done by default (opt-in with `{ normalize: true }`)       |
-| Case sensitivity              | Can be case-insensitive            | Always case-sensitive                                         |
-| Non-`/`-prefixed paths        | Supported                          | Paths must start with `/`                                     |
-| Param names                   | Unicode identifiers (no `-`)       | ASCII word chars, `-` allowed between them (`:test-id`)       |
-| Percent-encoding              | Normalizes `%xx` sequences         | Does not decode percent-encoded input                         |
+A lookup sees the routes for its method and the method-agnostic ones together, and the most specific one wins. When two routes are equally specific, the one registered for the method wins over the method-agnostic one (and comes after it in `findAllRoutes`). A lookup with the method `""` only sees method-agnostic routes.
 
 ### Trailing slashes and empty segments
 
-Lookup ignores **at most one** trailing slash: `/users/foo/` matches `/users/:name`, but `/users/foo//` does not. On the pattern side, trailing slashes are ignored (`/users/` and `/users//` register the same route as `/users`).
-
-Other empty segments are kept and are real segments: `/a//b` does not match `/a/b`. A param (`:name`, `*`) or a catch-all (`**`, `**:name`, `:name+`) takes an empty segment and captures `""`, both in the middle and at the end of the path:
+- **At most one trailing slash** is ignored: `/users/foo/` matches `/users/:name`, `/users/foo//` does not.
+- In patterns, trailing slashes are ignored: `/users/`, `/users//` and `/users` are the same route.
+- **Empty segments in the middle are real**: `/a//b` does not match `/a/b`.
+- A param or catch-all can match an empty segment and capture `""`:
 
 ```js
 addRoute(router, "GET", "/admin/:id", {});
 addRoute(router, "GET", "/files/:path+", {});
 
-findRoute(router, "GET", "/admin/"); // undefined (the one trailing slash is ignored)
+findRoute(router, "GET", "/admin/"); // undefined (the trailing slash is ignored)
 findRoute(router, "GET", "/admin//"); // params: { id: "" }
 findRoute(router, "GET", "/files//"); // params: { path: "" }
 ```
 
 > [!IMPORTANT]
-> A required param or `:name+` is **not** guaranteed to be non-empty. If a handler needs a value, check for `""` or use a regex constraint (`/admin/:id(.+)`, `/users/:id(\\d+)`).
+> A required param (or `:name+`) can still be an empty string. If a handler needs a value, check for `""` or use a regex constraint such as `/admin/:id(.+)` or `/users/:id(\\d+)`.
 
 ### Path normalization
 
-By default, `findRoute` and `findAllRoutes` do **not** resolve `.`/`..` segments in input paths. If your input paths may contain relative segments, enable normalization:
+`.` and `..` segments are **not** resolved by default. If your input paths may contain them, enable `normalize`:
 
 ```js
-findRoute(router, "GET", "/foo/bar/../baz", { normalize: true });
-// Matches "/foo/baz"
-
-findAllRoutes(router, "GET", "/foo/./bar", { normalize: true });
-// Matches "/foo/bar"
+findRoute(router, "GET", "/foo/bar/../baz", { normalize: true }); // matches "/foo/baz"
+findAllRoutes(router, "GET", "/foo/./bar", { normalize: true }); // matches "/foo/bar"
 ```
 
-The compiled router also supports this via the `normalize` option:
+The [compiler](#compiler) accepts the same option: `compileRouter(router, { normalize: true })`.
+
+### Skipping params
+
+If you only need the route data, pass `{ params: false }` to skip building the params object:
 
 ```js
-const match = compileRouter(router, { normalize: true });
-match("GET", "/foo/bar/../baz"); // Matches "/foo/baz"
+findRoute(router, "GET", "/docs/guide", { params: false });
+// { data: { page: "docs" } }
 ```
 
 ### Result ordering
 
-`findAllRoutes` returns matches ordered **least → most specific**: the broadest scopes first, the most specific match last. The compiled `matchAll` (see [Compiler](#compiler)) returns the **exact same results in the exact same order**. This ordering is a **contract**, not incidental behavior — merge/fold-style consumers (e.g. route rules resolved by merging all matched layers, taking the last as the most specific) can rely on it, and it is pinned by tests. Any intentional change to it would be a breaking change.
+`findAllRoutes` returns matches from the **least to the most specific**, and `findRoute` returns the most specific one. This order is part of the public API: you can rely on it, for example to merge all matched route rules so that the most specific one wins.
 
 ```js
 const router = createRouter();
@@ -242,12 +246,17 @@ findAllRoutes(router, "GET", "/api/v1/users/42").map((m) => m.data.name);
 // ["catch-all", "api", "user"]
 ```
 
-Precisely:
+The [compiled](#compiler) `matchAll` function returns exactly the same results in the same order.
 
-- **Across the tree:** at each level, wildcard (`**`) matches are emitted first, then single-segment params (`*`, `:name`), then static segments — so wilder/shallower routes come before more-static/deeper ones.
-- **Same-node siblings** (multiple routes ending on the same dynamic node, e.g. `/foo/*` and `/foo/:id(\d+)`): ordered by ascending specificity — optional/unconstrained entries before required/regex-constrained ones — with **insertion order preserved on ties**. Method-agnostic (`""`) routes and the method's own routes on a node are ordered together by this rule; on a tie the method-agnostic one comes first (so `findRoute` picks the method-scoped one).
-- **Subsumption consistency (patterns without optional syntax):** when the registered patterns use **no** optional syntax and are strictly ordered by containment (each a `"superset"` of the next per [`compareRoutes`](#pattern-overlap)), the result order agrees with the subsumption order (broader first).
-- **Carve-out — optional syntax:** a pattern containing `:name?`, `:name*` or `{...}?` registers **several** entries (one per expansion), and results are ordered by the specificity of the **entry that matched**, not by the breadth of the whole pattern. A pattern that is a `"superset"` of another can therefore come **last**:
+In short: static segments beat params, and params beat wildcards. Among routes that end on the same kind of segment, a constrained or required param beats an optional or unconstrained one. Registration order only breaks exact ties.
+
+<details>
+<summary>Detailed ordering rules</summary>
+
+- **Across the tree:** at each level, wildcard (`**`) matches come first, then single-segment params (`*`, `:name`), then static segments. Broader and shallower routes come before more static and deeper ones.
+- **Routes on the same tree node** (for example `/foo/*` and `/foo/:id(\d+)`, see [Route node keys](#route-node-keys)): optional and unconstrained routes come before required and regex-constrained ones. Ties keep registration order. Method-agnostic routes are sorted together with the method's own routes, and on a tie the method-agnostic one comes first (so `findRoute` picks the method's own).
+- **Consistent with containment:** when no pattern uses optional syntax and each pattern contains the next (a `"superset"` per [`compareRoutes`](#pattern-overlap)), the result order is broadest first.
+- **Carve-out — optional syntax:** a pattern with `:name?`, `:name*` or `{...}?` registers one entry per variant, and results are ordered by the variant that matched, not by the whole pattern. A broader pattern can therefore come **last**:
 
   ```js
   const router = createRouter();
@@ -255,13 +264,12 @@ Precisely:
   addRoute(router, "GET", "/admin/:page?", { name: "admin-page" }); // superset of "/admin"
 
   findAllRoutes(router, "GET", "/admin").map((m) => m.data.name);
-  // ["admin", "admin-page"] — the broader pattern is last
+  // ["admin", "admin-page"] (the broader pattern is last)
   ```
 
-  If you need a true **pattern-level** containment order and your patterns may use optional syntax, re-sort the (small) result array yourself with [`compareRoutes`](#pattern-overlap).
+  Both routes match `/admin` with an identical entry, so registration order decides: adding `/admin/:page?` first swaps them. If you need a strict pattern-level order with optional syntax, sort the result with [`compareRoutes`](#pattern-overlap).
 
-- Registration order never affects the result order, except as the tiebreaker between equally specific same-node **entries** — which, per the carve-out above, includes expansions of optional-syntax patterns (registering `/admin/:page?` before `/admin` swaps the two results in the example above).
-- **Segments after a wildcard:** a route like `/**/_payload.json` is anchored at the end of the path, so the tree order (which decides at the first segment) would let `/blog/**` or `/blog/:slug` win over it on `/blog/_payload.json`. Instead, on every path such a route matches, all matches are ranked **from the last segment backwards** — a literal segment beats a regex-constrained param, which beats a plain param or a segment taken by `**` — with ties in the order above. `findRoute` returns the last one, and paths no such route matches are not affected:
+- **Segments after a wildcard:** a route like `/**/_payload.json` is anchored at the end of the path. On every path such a route matches, all matches are ranked **from the last segment backwards**: a literal segment beats a regex-constrained param, which beats a plain param or a segment covered by `**`. Ties fall back to the rules above. Paths that no such route matches are not affected:
 
   ```js
   const router = createRouter();
@@ -274,175 +282,34 @@ Precisely:
   // ["blog", "post", "payload"]
   findAllRoutes(router, "GET", "/blog/hello/_payload.json").map((m) => m.data.name);
   // ["blog", "payload", "post-payload"]
-  findRoute(router, "GET", "/blog/hello")?.data.name; // "post" (tree order)
+  findRoute(router, "GET", "/blog/hello")?.data.name; // "post"
   ```
 
-  This keeps the subsumption consistency above for such routes too (a narrower route never loses to a broader one). Note that it also applies between the other routes on those paths: with `/**/_payload.json` registered, `/:lang/_payload.json` wins over `/blog/:slug` on `/blog/_payload.json` (it pins the last segment), while without it the tree order picks `/blog/:slug`.
+  This also applies between the other routes on those paths: with `/**/_payload.json` registered, `/:lang/_payload.json` wins over `/blog/:slug` on `/blog/_payload.json`, because it pins the last segment.
 
-[`findOverlappingRoutes`](#pattern-overlap) follows the same least → most specific order (a route with segments after `**` comes right after the bare `**` it follows: a scope has no last segment to rank from).
+</details>
 
-### Pattern overlap
+### Removing routes
 
-`findRoute`/`findAllRoutes` match a **concrete path** against registered patterns. Sometimes you instead need to reason about **patterns against patterns** — e.g. to resolve an "effective" merged config over a whole scope, you need to know when two patterns can match a common concrete path.
-
-Three utilities cover this:
+`removeRoute(router, method, pattern)` removes everything that the matching `addRoute` call added, including all variants of an optional pattern and duplicate registrations. Other routes are left alone, even ones that share a tree node:
 
 ```js
-import { createRouter, addRoute, routesOverlap, compareRoutes, findOverlappingRoutes } from "rou3";
+addRoute(router, "GET", "/path/:id", { a: true });
+addRoute(router, "GET", "/path/:name", { b: true });
 
-// Do two patterns share at least one concrete path? (pure, router-free)
-routesOverlap("/**", "/protected/feed/**"); // true
-routesOverlap("/a/**", "/b/**"); // false
-
-// How do two patterns' match-sets relate? (pure, router-free)
-compareRoutes("/api/**", "/api/admin/**"); // "superset"
-compareRoutes("/api/admin/**", "/api/**"); // "subset"
-compareRoutes("/a/:x", "/a/:y"); // "equal" (names don't matter)
-compareRoutes("/a/*/c", "/a/b/*"); // "partial" (ambiguous specificity)
-
-// Every registered route whose match-set intersects a *pattern* (a scope),
-// ordered least -> most specific like findAllRoutes.
-const router = createRouter();
-addRoute(router, "GET", "/**", { isr: true });
-addRoute(router, "GET", "/protected/**", { basicAuth: true });
-addRoute(router, "GET", "/protected/feed/**", { isr: 60 });
-
-findOverlappingRoutes(router, "GET", "/protected/feed/**");
-// [ { data: { isr: true } },        // /**
-//   { data: { basicAuth: true } },  // /protected/**
-//   { data: { isr: 60 } } ]         // /protected/feed/**
+removeRoute(router, "GET", "/path/:name"); // "/path/:id" is still registered
 ```
 
-- **`routesOverlap(patternA, patternB)`** — returns `true` if the two patterns' match-sets intersect (there **exists a concrete path matched by both**). This is _overlap_, not subset containment.
-- **`compareRoutes(patternA, patternB)`** — classifies the relation between the two match-sets. Verdicts follow the ES2025 Set-method vocabulary (`isSupersetOf`/`isSubsetOf`/`isDisjointFrom`) and are directional — read them as "`patternA` is a … of `patternB`":
-  - `"disjoint"` — provably no common path.
-  - `"equal"` — provably the same paths. Param _names_ are ignored: `/a/:x` equals `/a/:y`, `/u/:id(\d+)` equals `/u/:x(\d+)`, and `/a/:x?` equals `/a/*`.
-  - `"superset"` — `patternA` provably matches every path `patternB` matches (strict unless equality is undecidable).
-  - `"subset"` — the mirror image (`patternA` ⊆ `patternB`).
-  - `"partial"` — no containment proven; the sets _may_ intersect.
-
-  Useful for ordering patterns by specificity and detecting ambiguous pairs where "most specific match" is undefined. Every verdict's containment claims are proofs, and undecidable cases degrade to a **weaker verdict, never a wrong claim**: containment between two different regex constraints falls back to `"partial"` (even when the sets are actually disjoint — see the over-approximation note below — or actually equal), and an actually-equal pair whose equality is only provable in one direction (e.g. `/u/:id(42)` vs `/u/42`) reports the proven containment instead of `"equal"`.
-
-- **`findOverlappingRoutes(router, method, pattern)`** — like `findAllRoutes`, but the query is a **pattern** instead of a concrete path. Returns every registered route whose match-set intersects the pattern, ordered least → most specific, with the same method handling as `findAllRoutes` (routes for the method and method-agnostic ones). Matches carry only `data` — a scope has no single concrete path, so no `params` are resolved. A single route registered with optional/group syntax expands into several tree entries and is reported once; distinct routes (a different pattern or method) are always reported separately, even when they share one `data` reference or an equal primitive value (or none). Registering the same route again with the same `data` does not add a match.
-
-**Overlap semantics** are computed with rou3's own segment/radix rules, so they stay consistent with `findRoute`/`findAllRoutes`:
-
-- Patterns are expanded through the same pipeline as `addRoute`, so groups (`{s}?`), optional/repeat modifiers (`:x?`/`:x+`/`:x*`), and escaping (`\:`, `\*`) are all respected. A pattern with optional syntax expands to several shapes; two patterns overlap when **any** pair of shapes overlaps.
-- **Segment counts:** bare `**` matches **zero or more** segments (so `/a/**` overlaps `/a`), `**:name` matches **one or more**, a **trailing** bare `*` matches **zero or one**, and mid-pattern `*` / `:name` match **exactly one**. Segments after a `**` are aligned to the end of the path (`compareRoutes("/**/_payload.json", "/blog/:slug/_payload.json")` is `"superset"`).
-- **Regex constraints** (`:id(\d+)`, unnamed groups, `*.png`) are matched **precisely against static literals** (`/user/:id(\d+)` does _not_ overlap `/user/abc`), but two dynamic segments where at least one is constrained are **over-approximated to "overlaps"** — `routesOverlap("/user/:id(\d+)", "/user/:name([a-z]+)")` returns `true` even though the sets are disjoint. Exact regex intersection is undecidable, and over-approximating toward "overlaps" is the safe conservative default.
-
-### Route node keys
-
-Different patterns can end up on the **same node** of the radix tree — `/users/:id` and `/users/*` both become "any single segment under `/users`". `routeNodeKeys(pattern)` tells you which node(s) a pattern lands on:
-
-```js
-import { routeNodeKeys } from "rou3";
-
-routeNodeKeys("/users/:id"); // ["/users/*"]
-routeNodeKeys("/users/*"); // ["/users/*"]   -> same node as /users/:id
-routeNodeKeys("/admin/**:rest"); // ["/admin/**"]
-routeNodeKeys("/**:path/og.png"); // ["/**/og.png"]
-routeNodeKeys("/a/:x?"); // ["/a", "/a/*"]  -> optional syntax lands on two nodes
-```
-
-**Why it matters:** routes on the same node are same-node siblings — for one lookup, `findRoute` returns at most one of them (the most specific, see [Result ordering](#result-ordering)), and the tree cannot tell `"/users/*"` and `"/users/:id"` apart beyond their param names and constraints. If you keep your own per-route metadata (route rules, middleware, auth gates) in a map keyed by **pattern text**, those look like two unrelated entries while rou3 has one slot; key that map by `routeNodeKeys` to see which registrations compete (e.g. to warn about a route that another one shadows, or to merge per-node metadata). The guarantee runs both ways:
-
-> `routeNodeKeys(a)` and `routeNodeKeys(b)` intersect **⟺** `a` and `b` share a node (hence one bucket).
-
-- The result is an array because optional syntax (`:x?`, `:x*`, `{...}?`) registers on several nodes (`/x{/a}?{/b}?` registers 4). It is deduplicated.
-- Each key is itself a valid route pattern for exactly the node it names, so keys work directly as ids: `routeNodeKeys(k)` is `[k]`.
-- Invalid patterns throw exactly as `addRoute` does.
-
-> [!NOTE]
-> Up to rou3 0.10, lookup resolved a node with `methods[method] || methods[""]`, so a method-scoped route **hid** a method-agnostic one on the same node (`""` `/users/*` + `GET` `/users/:id`: `findAllRoutes(router, "GET", "/users/42")` dropped the `""` gate, and `findRoute(router, "GET", "/users")` found nothing). Method-agnostic routes are now siblings of the method's own (see [Method-agnostic routes](#usage)), so node sharing no longer changes which routes a lookup returns.
-
-> [!IMPORTANT]
-> Sharing a node does **not** mean matching the same paths. The key drops regex constraints and widens `**:name` to `**`, so `/u/:id(\d+)` and `/u/:slug([a-z]+)` share the key `/u/*` but match **disjoint** paths. Merging too much is the safe direction for metadata, but to ask which paths two patterns share, use [`compareRoutes`](#pattern-overlap) — the two answers are independent in both directions (`"equal"` patterns need not share a node either).
-
-### Regular expressions
-
-`routeToRegExp(route)` converts a route pattern into an anchored `RegExp` with named capture groups, useful outside the router (validation, codegen, matching in other tools):
-
-```js
-import { routeToRegExp } from "rou3";
-
-routeToRegExp("/users/:id(\\d+)");
-// /^\/users\/(?<id>\d+)\/?$/  ->  "/users/123".match(re).groups // { id: "123" }
-```
-
-The regex matches the paths `findRoute()` matches for a router holding only that route, so it can stand in for the router as a guard or scope check. That includes the router's lookup tolerances: one optional trailing slash (`/users/123/`, but not `/users/123//`), empty segments for whole-segment `:name` and `*` params (`/a//b` matches `/a/:x/b`), an optional trailing `*` (`/a` matches `/a/*`), catch-alls (`**`, `**:name`, `:name+`, `:name*`) that match any character, line terminators included, and [segments after a wildcard](#route-patterns) matched at the end of the path (`/**/_payload.json` matches `/_payload.json` and `/blog/post/_payload.json/`, not `/_payload.jsonx`). Paths are compared as-is, like `findRoute()` without `{ normalize: true }`, so resolve `.`/`..` segments first if the router normalizes them. A few cases are not modeled:
-
-- A constraint that can match `/` (`:x(.+)`, `:x([^.]+)`) can span segments in the regex (`/a/:x(.+)` matches `/a/b/c`), while the router splits the path first.
-- The empty path `""`: the router treats it as `/`, the regex matches it only for root routes whose first segment is optional (`/**`, `/:x*`, `/:x?`, `/*`), not for `/` itself.
-- In PCRE and Perl, `$` also matches before a final `\n`, so there the regex also matches `<path>\n`.
-
-The named groups hold the params. In two cases the regex leaves a group **unset** where the router reports `""`: a required segment that is empty (`/a//` on `/a/:x`, `/a//b` on `/a/:x/:y?`) and a `**` that matches no segment (`/a` on `/a/**`, `/a/b` on `/a/**/b`; at the root the regex captures `""` too: `/_payload.json` on `/**/_payload.json`). The first is the cost of avoiding look-behind: capturing `""` there would need look-around, backreferences or the same named group twice. Separately, when optional segments meet a `*` or a constrained optional, the regex can give a segment to a different param than the router (`/a/:x?/*` on `/a/b` sets `x`, the router sets `*`), and so can several optional segments after a `**` (see below).
-
-The trailing-slash rule (at most one trailing slash, and exactly one when the path's last segment is empty) is built into the end of the regex:
-
-| Route                          | Regex                                                            |
-| ------------------------------ | ---------------------------------------------------------------- |
-| `/users/:id(\d+)`              | `^\/users\/(?<id>\d+)\/?$`                                       |
-| `/path/:id?`                   | `^\/path(?:\/(?<id>[^/]*))??\/?$`                                |
-| `/path/:param`                 | `^\/path\/(?:(?<param>[^/]+)\/?\|\/)$`                           |
-| `/users/:id/:tab?`             | `^\/users\/(?:(?<id>[^/]+)(?:\/\|$)\|\/)(?:(?<tab>[^/]*)\/?)??$` |
-| `/path/**`                     | `^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$`                   |
-| `/base/**:path`                | `^\/base\/(?:\/\|(?<path>(?:[\s\S]*[^/]\|\/)\/*?)\/?)$`          |
-| `/**`                          | `^\/?(?<_>(?:[\s\S]*[^/])?\/*?)\/?$`                             |
-| `/**/_payload.json`            | `^\/?(?<_>[\s\S]*)\/_payload\.json\/?$`                          |
-| `/path/**/suffix`              | `^\/path(?:\/(?<_>[\s\S]*))?\/suffix\/?$`                        |
-| `/**/:file`                    | `^\/?(?<_>[\s\S]*)\/(?:(?<file>[^/]+)\/?\|\/)$`                  |
-| `/a/**/:page?`                 | `^\/a(?:\/(?:(?:(?<_>[\s\S]*)\/)?(?:(?<page>[^/]+)\/?\|\/))?)?$` |
-| `/`                            | `^\/$`                                                           |
-| `/path/:id(\d*)` (look-behind) | `^\/path\/(?<id>\d*)(?:(?<=\/)\/\|(?<!\/)\/?)$`                  |
-
-Most routes compile without look-behind, so the output also works in RE2-family engines (RE2, Go `regexp`, the Rust `regex` crate). The look-behind suffix `(?:(?<=\/)\/|(?<!\/)\/?)$` remains only for:
-
-- a constraint at the end of the route whose match can end in `/` (`:name([^.]+)`, `:x(\S+)?`, `:x(.+)`),
-- a required last segment whose constraint can match empty (`/path/:id(\d*)`),
-- optional segments side by side where an earlier one can be empty and a later one can't nest in it (`/a/:x(\d*)?/:y?`, `/a/:x?{/b/c}?`),
-- optional segments side by side after a required segment that can be empty (`/a/:x/:y(\d+)?/:z?`),
-- a required catch-all right before an optional last segment (`/a/**:rest/:page?`, `/a/:rest+/:page?`),
-- a segment that can be empty right before a catch-all followed by optional segments only (`/a/:p/**/:n(\d+)?`),
-- an optional group after a catch-all and an optional segment that can be empty (`/a/**/:y?{/b}?`).
-
-Fixed-length look-behinds work in JavaScript, PCRE and Perl. RE2-family engines also reject the duplicate-name alternations in the note below (they have no `DUPNAMES` option) and constraints that use syntax they lack.
-
-The output is **PCRE-compatible**: it uses `(?<name>...)` named groups and avoids JS-only constructs, so the generated `.source` also compiles in PCRE2 engines (`grep -P`, `rg -P`, `pcre2grep`, PHP `preg_*`) and Perl — not just JavaScript. In particular, a single optional group that ends a segment is compiled inline as `(?:...)?` instead of an alternation, also when more of the route follows it, so a param is never emitted twice as a duplicate named group (which PCRE2 rejects unless `PCRE2_DUPNAMES` is set, and V8 before 12.5, i.e. Node 22, rejects outright):
-
-```js
-routeToRegExp("/blog/:id(\\d+){-:title}?");
-// /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
-routeToRegExp("/users{/:id}?/posts/:post");
-// /^\/users(?:\/(?<id>[^/]*))?\/posts\/(?:(?<post>[^/]+)\/?|\/)$/
-```
-
-When the group extends the param that ends its segment (`/files/:name{.:ext}?`, `/users/:id([\w.]+){.json}?/edit`), a look-ahead gives the param the value the router gives it (`archive.tar.gz` → `name: "archive.tar"`, `ext: "gz"`); RE2-family engines reject that output.
-
-> [!NOTE]
-> Other optionals (several groups, a group whose segment is followed by an optional one like `/{b}?/*`, a mid-segment group after a greedy capture like `/media/*{.webp}?`, a `:name*` before a `*` like `/a/:rest*/b/*`, a group right after a bare `**` like `/a/**{.png}?`) fall back to an alternation and may contain duplicate named groups. That output is valid in JavaScript engines with duplicate named groups (V8 12.5+ / Node 23+, Chrome 125+, Firefox 129+, Safari 17+) and Perl, and requires `PCRE2_DUPNAMES` on strict PCRE2 engines. On older engines (Node 22), `routeToRegExp` throws a `rou3:` `SyntaxError` for these routes.
-
-A route that declares the same param name twice (`/files/:path/**:path`; a bare `**` is the `_` param) throws a `rou3:` error, as `addRoute` does, since engines disagree on whether a duplicate named group compiles.
-
-A route with more than one `**` (a `:name+` / `:name*` before the last segment counts as one) throws the same `rou3:` error as `addRoute`. With one optional segment right after a `**`, the regex takes the route the router picks: the `**` is lazy where the optional segment wins the end of the path (`/a/**/:n(\d+)?` gives `/a/b/1` to `n`), greedy otherwise. With several, the router ranks the routes they register per path, while the regex's `**` can only be lazy or greedy as a whole: it matches the same paths but may take another of those routes (`/docs/**/:page?/:lang(en|fr)?` on `/docs/en` sets `page`, the router `lang`).
-
-`regExpToRoute(regexp)` is the inverse: it parses an anchored, PCRE-compatible `RegExp` (or its `source` string) back into a route pattern. Pass either a `RegExp` or a source string:
-
-```js
-import { regExpToRoute } from "rou3";
-
-regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
-regExpToRoute(/^\/path\/(?:(?<param>[^/]+)\/?|\/)$/); // "/path/:param"
-regExpToRoute(/^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$/); // "/path/**"
-regExpToRoute("^\\/files\\/(?<_0>[^/]*)\\.png\\/?$"); // "/files/*.png"
-regExpToRoute(/^\/?(?<_>[\s\S]*)\/_payload\.json\/?$/); // "/**/_payload.json"
-```
-
-It targets the dialect `routeToRegExp()` emits — named groups `(?<name>...)`, `[^/]*` segment matchers, `[\s\S]*` catch-alls, `(?:/...)?` optional groups and the endings above. Bare (unnamed) capturing groups such as `(\d+)` are accepted too, and arbitrary regex inside an inline constraint `(...)` is preserved verbatim. Regexes from rou3 0.9.x (a plain `\/?` ending, `.*`/`.+` catch-alls, `[^/]+` params) still convert, except those for a catch-all inside an optional group (`/a{/:w*}?`, `/a{/:w+}?`). Every reversible output round-trips exactly: `routeToRegExp(regExpToRoute(regexp)).source === regexp.source`. Routes that compile to the same regex come back in one spelling: `/base/**:path` and `/base/:path+` both become `/base/:path+` (also with segments after it), `/**.md` becomes `/**/*.md`, and `/a/:x?/:y?` becomes `/a{/:x/:y?}?`.
-
-Anything outside that dialect throws a clear error rather than returning a corrupt pattern: structural look-arounds (`(?=…)`, `(?<=…)`) and backreferences, bare regex operators outside a constraint (`|`, `.`, `+`, `[…]`, …), a regex not anchored with both `^` and `$`, match-affecting flags (`i`/`m`/`s`, and `u`/`v`, which change what a constraint like `\p{L}` means; `g`/`y`/`d` are ignored), the non-reversible alternation fallback described above, and inline constraints that can't be expressed as a route (e.g. one containing `/`).
+Pass the pattern as you registered it. Spellings that the tree can't tell apart are equivalent (`/a/` and `/a`, `/**.md` and `/**/*.md`), but `/path/*` does not remove `/path/:name`, and `/ab` does not remove `/a{b}`.
 
 ## Compiler
+
+For the fastest lookups, compile a router into a single function. The compiled function returns the same results as `findRoute` (or `findAllRoutes` with `matchAll: true`).
+
+- **`compileRouter`** compiles at runtime (JIT) with `new Function()`.
+- **`compileRouterToString`** generates code ahead of time (AOT), for example into a build output. It needs no `eval` and no rou3 at runtime.
+
+Both are imported from `rou3/compiler`.
 
 <!-- automd:jsdocs src="./src/compiler.ts" -->
 
@@ -491,23 +358,207 @@ compileRouterToString(router, { serialize: (data) => `{handler:${data.importName
 
 <!--/automd -->
 
+## Pattern utilities
+
+`findRoute` and `findAllRoutes` match a **path** against patterns. The utilities below compare **patterns against patterns**, for example to check whether two route rules can apply to the same URL. They are tree-shaken away when you don't import them.
+
+### Pattern overlap
+
+```js
+import { createRouter, addRoute, routesOverlap, compareRoutes, findOverlappingRoutes } from "rou3";
+
+// Can the two patterns match a common path?
+routesOverlap("/**", "/protected/feed/**"); // true
+routesOverlap("/a/**", "/b/**"); // false
+
+// How do the sets of paths they match relate?
+compareRoutes("/api/**", "/api/admin/**"); // "superset"
+compareRoutes("/api/admin/**", "/api/**"); // "subset"
+compareRoutes("/a/:x", "/a/:y"); // "equal" (param names don't matter)
+compareRoutes("/a/*/c", "/a/b/*"); // "partial"
+compareRoutes("/a/**", "/b/**"); // "disjoint"
+
+// Which registered routes can match a path that the pattern matches?
+const router = createRouter();
+addRoute(router, "GET", "/**", { isr: true });
+addRoute(router, "GET", "/protected/**", { basicAuth: true });
+addRoute(router, "GET", "/protected/feed/**", { isr: 60 });
+
+findOverlappingRoutes(router, "GET", "/protected/feed/**");
+// [
+//   { data: { isr: true } },       // /**
+//   { data: { basicAuth: true } }, // /protected/**
+//   { data: { isr: 60 } },         // /protected/feed/**
+// ]
+```
+
+- **`routesOverlap(a, b)`** returns `true` if at least one path is matched by both patterns.
+- **`compareRoutes(a, b)`** reads as "`a` is … of `b`":
+  - `"equal"`: both match the same paths.
+  - `"superset"`: `a` matches every path `b` matches, and more.
+  - `"subset"`: `b` matches every path `a` matches, and more.
+  - `"disjoint"`: no path matches both.
+  - `"partial"`: none of the above could be proven. The patterns may share some paths.
+- **`findOverlappingRoutes(router, method, pattern)`** works like `findAllRoutes`, but takes a pattern instead of a path. It returns every registered route that can match a path the pattern matches, in the same least to most specific order and with the same method handling. Matches only have `data` (there is no single path to extract params from). A route that was registered with optional syntax is reported once.
+
+These utilities understand the full pattern syntax (groups, modifiers, escapes) using the same rules as the router, so their answers agree with `findRoute`.
+
+<details>
+<summary>Precision and limits</summary>
+
+- **Answers are safe, not always exact.** Whenever `compareRoutes` claims containment or disjointness, it is proven. When something can't be decided, it answers with a weaker verdict (usually `"partial"`), never a wrong one.
+- **Regex constraints** are checked exactly against literal segments (`/user/:id(\d+)` does not overlap `/user/abc`). Two dynamic segments where at least one has a regex are assumed to overlap: `routesOverlap("/user/:id(\d+)", "/user/:name([a-z]+)")` returns `true` although no path matches both. For the same reason, two different regexes compare as `"partial"`, even when they are equivalent.
+- An actually equal pair that is only provable in one direction reports that containment: `/u/:id(42)` vs `/u/42` is `"superset"`.
+- **Segment counts:** `**` matches zero or more segments (so `/a/**` overlaps `/a`), `**:name` one or more, a trailing `*` zero or one, and `*` or `:name` elsewhere exactly one. Segments after a `**` are aligned to the end of the path: `compareRoutes("/**/_payload.json", "/blog/:slug/_payload.json")` is `"superset"`.
+- **Optional syntax:** a pattern with `:x?`, `:x*` or `{...}?` expands into several variants, and two patterns overlap when any pair of variants does.
+- In `findOverlappingRoutes`, different routes (another pattern or method) are always reported separately, even when they share the same `data`. Registering the same route twice with the same `data` reports it once. A route with segments after `**` comes right after the bare `**` it follows.
+
+</details>
+
+### Route node keys
+
+Different patterns can end on the **same node** of the route tree: `/users/:id` and `/users/*` both mean "any single segment under `/users`". `routeNodeKeys(pattern)` returns the node(s) a pattern lands on:
+
+```js
+import { routeNodeKeys } from "rou3";
+
+routeNodeKeys("/users/:id"); // ["/users/*"]
+routeNodeKeys("/users/*"); // ["/users/*"] (same node as /users/:id)
+routeNodeKeys("/admin/**:rest"); // ["/admin/**"]
+routeNodeKeys("/**:path/og.png"); // ["/**/og.png"]
+routeNodeKeys("/a/:x?"); // ["/a", "/a/*"] (optional syntax lands on two nodes)
+```
+
+Routes on the same node compete: for a given path, `findRoute` returns at most one of them. If you keep your own per-route metadata (route rules, middleware, auth) in a map keyed by pattern text, `/users/*` and `/users/:id` look unrelated. Key the map by `routeNodeKeys` instead, to merge metadata per node or warn when one route shadows another.
+
+> `routeNodeKeys(a)` and `routeNodeKeys(b)` share a key **if and only if** `a` and `b` share a node.
+
+- The result is a deduplicated array, since optional syntax registers on several nodes (`/x{/a}?{/b}?` registers on 4).
+- Each key is itself a valid pattern for its node: `routeNodeKeys(key)` is `[key]`.
+- Invalid patterns throw exactly like `addRoute`.
+
+> [!IMPORTANT]
+> Sharing a node does **not** mean matching the same paths. Keys drop regex constraints and widen `**:name` to `**`, so `/u/:id(\d+)` and `/u/:slug([a-z]+)` share the key `/u/*` but never match the same path. To compare which paths two patterns match, use [`compareRoutes`](#pattern-overlap).
+
+### Regular expressions
+
+`routeToRegExp(route)` converts a pattern into an anchored `RegExp` with named groups for the params:
+
+```js
+import { routeToRegExp } from "rou3";
+
+const re = routeToRegExp("/users/:id(\\d+)");
+// /^\/users\/(?<id>\d+)\/?$/
+
+"/users/123".match(re).groups; // { id: "123" }
+```
+
+The regex matches **exactly the paths `findRoute` matches** on a router that only holds that route, including the router's tolerances (one optional trailing slash, empty segments, an optional trailing `*`, segments after `**` matched from the end). That makes it safe to use as a guard or scope check outside the router. Like `findRoute` without `normalize`, it compares paths as-is.
+
+The output is **PCRE-compatible**, so its `.source` also works in `grep -P`, `rg -P`, PHP `preg_*` and Perl. Most routes also compile without look-behind, so they work in RE2-family engines (RE2, Go `regexp`, Rust `regex`).
+
+`regExpToRoute(regexp)` goes the other way. It accepts a `RegExp` or its source string:
+
+```js
+import { regExpToRoute } from "rou3";
+
+regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
+regExpToRoute(/^\/path\/(?:(?<param>[^/]+)\/?|\/)$/); // "/path/:param"
+regExpToRoute(/^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$/); // "/path/**"
+regExpToRoute("^\\/files\\/(?<_0>[^/]*)\\.png\\/?$"); // "/files/*.png"
+regExpToRoute(/^\/?(?<_>[\s\S]*)\/_payload\.json\/?$/); // "/**/_payload.json"
+```
+
+It understands the regexes `routeToRegExp` emits, and every one of them round-trips exactly: `routeToRegExp(regExpToRoute(re)).source === re.source`. Anything else throws a `rou3:` error instead of returning a wrong pattern.
+
+<details>
+<summary>What <code>routeToRegExp</code> doesn't model</summary>
+
+- A constraint that can match `/` (`:x(.+)`, `:x([^.]+)`) can span several segments in the regex (`/a/:x(.+)` matches `/a/b/c`), while the router splits the path into segments first.
+- The empty path `""`: the router treats it as `/`. The regex matches it only for root routes whose first segment is optional (`/**`, `/:x*`, `/:x?`, `/*`), not for `/` itself.
+- In PCRE and Perl, `$` also matches before a final `\n`, so there the regex also matches `<path>\n`.
+- `.` and `..` are not resolved. Normalize the path first if your router uses `normalize: true`.
+
+**Params.** The regex leaves a group **unset** where the router reports `""` in two cases: a required segment that is empty (`/a//` on `/a/:x`) and a `**` that matches no segment (`/a` on `/a/**`; at the root the regex captures `""` too). When optional segments meet a `*` or a constrained optional, or several optional segments follow a `**`, the regex can assign a segment to a different param than the router (`/a/:x?/*` on `/a/b` sets `x`, the router sets `*`). The set of matched paths is still the same.
+
+**Errors.** Patterns that `addRoute` rejects throw the same error, and so does a route that declares the same param name twice (`/files/:path/**:path`; a bare `**` is the param `_`).
+
+</details>
+
+<details>
+<summary>Regex output and engine support</summary>
+
+The trailing-slash rule (at most one trailing slash, exactly one when the last segment is empty) is built into the end of each regex:
+
+| Route                          | Regex                                                            |
+| ------------------------------ | ---------------------------------------------------------------- |
+| `/users/:id(\d+)`              | `^\/users\/(?<id>\d+)\/?$`                                       |
+| `/path/:id?`                   | `^\/path(?:\/(?<id>[^/]*))??\/?$`                                |
+| `/path/:param`                 | `^\/path\/(?:(?<param>[^/]+)\/?\|\/)$`                           |
+| `/users/:id/:tab?`             | `^\/users\/(?:(?<id>[^/]+)(?:\/\|$)\|\/)(?:(?<tab>[^/]*)\/?)??$` |
+| `/path/**`                     | `^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$`                   |
+| `/base/**:path`                | `^\/base\/(?:\/\|(?<path>(?:[\s\S]*[^/]\|\/)\/*?)\/?)$`          |
+| `/**`                          | `^\/?(?<_>(?:[\s\S]*[^/])?\/*?)\/?$`                             |
+| `/**/_payload.json`            | `^\/?(?<_>[\s\S]*)\/_payload\.json\/?$`                          |
+| `/path/**/suffix`              | `^\/path(?:\/(?<_>[\s\S]*))?\/suffix\/?$`                        |
+| `/**/:file`                    | `^\/?(?<_>[\s\S]*)\/(?:(?<file>[^/]+)\/?\|\/)$`                  |
+| `/a/**/:page?`                 | `^\/a(?:\/(?:(?:(?<_>[\s\S]*)\/)?(?:(?<page>[^/]+)\/?\|\/))?)?$` |
+| `/`                            | `^\/$`                                                           |
+| `/path/:id(\d*)` (look-behind) | `^\/path\/(?<id>\d*)(?:(?<=\/)\/\|(?<!\/)\/?)$`                  |
+
+**Look-behind.** The suffix `(?:(?<=\/)\/|(?<!\/)\/?)$` is only used when the end of the path can't be decided otherwise, for example:
+
+- a constraint at the end of the route whose match can end in `/` (`:name([^.]+)`, `:x(.+)`),
+- a required last segment whose constraint can match empty (`/path/:id(\d*)`),
+- optional segments side by side where an earlier one can be empty (`/a/:x(\d*)?/:y?`, `/a/:x?{/b/c}?`, `/a/:x/:y(\d+)?/:z?`),
+- a catch-all combined with optional segments (`/a/**:rest/:page?`, `/a/:p/**/:n(\d+)?`, `/a/**/:y?{/b}?`).
+
+Fixed-length look-behinds work in JavaScript, PCRE and Perl, but not in RE2-family engines.
+
+**Optional groups.** A single optional group that ends a segment is compiled inline as `(?:...)?`, so each param appears once:
+
+```js
+routeToRegExp("/blog/:id(\\d+){-:title}?");
+// /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
+routeToRegExp("/users{/:id}?/posts/:post");
+// /^\/users(?:\/(?<id>[^/]*))?\/posts\/(?:(?<post>[^/]+)\/?|\/)$/
+```
+
+When the group extends the param before it (`/files/:name{.:ext}?`), a look-ahead gives the param the same value as the router (`archive.tar.gz` gives `name: "archive.tar"`, `ext: "gz"`). RE2-family engines reject that output.
+
+**Duplicate named groups.** Other optional combinations (several groups, `/media/*{.webp}?`, `/a/:rest*/b/*`, `/a/**{.png}?`) compile to an alternation that repeats a named group. That works in JavaScript engines with duplicate named groups (Node.js 23+, Chrome 125+, Firefox 129+, Safari 17+) and Perl, and needs `PCRE2_DUPNAMES` in strict PCRE2 engines. On Node.js 22, `routeToRegExp` throws a `rou3:` `SyntaxError` for these routes, and `regExpToRoute` can't convert them back.
+
+**Catch-all with optional segments.** With one optional segment right after a `**`, the regex picks the same route as the router (`/a/**/:n(\d+)?` gives `/a/b/1` to `n`). With several, it matches the same paths but may assign segments differently (`/docs/**/:page?/:lang(en|fr)?` on `/docs/en` sets `page`, the router sets `lang`).
+
+</details>
+
+<details>
+<summary>What <code>regExpToRoute</code> accepts</summary>
+
+- The dialect `routeToRegExp` emits: `(?<name>...)` groups, `[^/]*` segments, `[\s\S]*` catch-alls, `(?:/...)?` optional groups and the endings shown above. Unnamed groups such as `(\d+)` work too, and the regex inside a constraint is kept verbatim.
+- Looser forms: a plain `\/?` ending, `.*` / `.+` catch-alls and `[^/]+` params. A catch-all inside an optional group is the exception: the regex for `/a{/:w*}?` throws, and the one for `/a{/:w+}?` comes back as `/a/:w(.+)?`.
+- Routes that compile to the same regex come back in one spelling: `/base/**:path` becomes `/base/:path+`, `/**.md` becomes `/**/*.md`, and `/a/:x?/:y?` becomes `/a{/:x/:y?}?`.
+
+It throws for: a regex not anchored with both `^` and `$`, look-arounds and backreferences, regex operators outside a constraint (`|`, `.`, `+`, `[…]`, …), the flags `i`, `m`, `s`, `u` and `v` (`g`, `y` and `d` are ignored), the duplicate-group alternations above, and constraints that can't be written as a route (for example one containing `/`).
+
+</details>
+
+## TypeScript
+
+Route data is typed through the router, and `InferRouteParams` gives you the params of a pattern:
+
+```ts
+import { createRouter, addRoute, findRoute, type InferRouteParams } from "rou3";
+
+const router = createRouter<{ page: string }>();
+addRoute(router, "GET", "/users/:id", { page: "user" });
+
+findRoute(router, "GET", "/users/42")?.data.page; // string
+
+type Params = InferRouteParams<"/users/:id/:tab?">;
+// { id: string; tab: string | undefined }
+```
+
 ## License
 
-<!-- automd:contributors license=MIT author="pi0" -->
-
 Published under the [MIT](https://github.com/h3js/rou3/blob/main/LICENSE) license.
-Made by [@pi0](https://github.com/pi0) and [community](https://github.com/h3js/rou3/graphs/contributors) 💛
-<br><br>
-<a href="https://github.com/h3js/rou3/graphs/contributors">
-<img src="https://contrib.rocks/image?repo=h3js/rou3" />
-</a>
-
-<!-- /automd -->
-
-<!-- automd:with-automd -->
-
----
-
-_🤖 auto updated with [automd](https://automd.unjs.io)_
-
-<!-- /automd -->

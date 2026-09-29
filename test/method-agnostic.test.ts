@@ -12,7 +12,7 @@ import {
 import { compileRouter, compileRouterToString } from "../src/compiler.ts";
 
 // A method-agnostic (`""`) route and a method-scoped one that end on the same
-// radix node are siblings: lookup must never let the method-scoped bucket hide
+// tree node are siblings: lookup must never let the method-scoped bucket hide
 // the agnostic one (it used to resolve a node with `methods[m] || methods[""]`,
 // so results depended on whether two patterns happened to share a node).
 //

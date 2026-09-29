@@ -1,0 +1,30 @@
+# Compiler (`src/compiler.ts`)
+
+## API contract
+
+Pinned in `test/compiler.test.ts` and `test/types.test-d.ts`.
+
+- `compileRouter` overloads: `{ matchAll: true }` → `CompiledMatchAll<T>`, none / `matchAll?: false` → `CompiledMatch<T>`, widened options → the union. `serialize` is accepted and ignored by the JIT (data by reference), so one options object fits both compilers.
+- `compileRouterToString(router, opts?)`. A string or `undefined` second argument is the deprecated `(router, functionName, opts?)` overload, still called as `(router, undefined, opts)` by nitro, nuxt and h3. The implementation keeps its own JSDoc copy (automd reads only it) and names the third param `legacyOpts`. `functionName` is emitted as is.
+- AOT data defaults to `JSON.stringify`. `toJSONCode()` throws `rou3: route data for "<route>" is not JSON-serializable…` for a function / symbol / bigint at any depth, a circular value, or an `undefined` result. `opts.serialize` is the raw-code hook (also called for `null`).
+- Both compilers snapshot the tree; later add/remove needs a recompile. AOT output is self-contained, ES2018, no `eval`; its exact code is not stable across versions.
+- **Open divergence:** compiled `params` is a plain object literal, the interpreter's is null-proto (null-proto construction measured slower in the matcher). Pinned by an `it.fails` ("null-prototype params").
+
+## Codegen invariants
+
+- **Static routes:** ≤ `STATIC_CHAIN_MAX` (8) paths → `else if` chain of `p === "…"`; above → a null-proto `{path: {method: data}}` map in a data slot. Both map levels are null-proto (`__proto__` / `constructor` must not match). A method miss falls through to the tree. Single-match takes `_n[m]` else `_n[""]`; matchAll collects both buckets only when some static node has both. Root is keyed `""`. The prologue strips one trailing slash; compare the stripped `p` once.
+- **Static siblings in the tree:** ≤ `SEGMENT_CHAIN_MAX` (32) → `else if(s[i]==="…")` chain; above → hoisted null-proto `{segment: index}` map + integer `switch`. The switch keeps its `l>i` bound check even after an `else` (an out-of-bounds `s[i]` would look up `"undefined"`).
+- **`propKey()`** for every object-literal key that can be `__proto__` (AOT segment map, every `params:{…}` site); ordinary keys stay plain `JSON.stringify`.
+- **End-of-path widening** (`l===c||l===c-1` + per-matcher `l>c`) only when some matcher at the node has an optional last param (`hasOptionalLastParam()`), else a single `l===c`.
+- **Method keys** are `JSON.stringify`-ed (user input; raw quotes break JIT and inject code in AOT).
+- **Data slots:** JIT passes them as parameters `$N` (faster than array reads) up to `DATA_ARGS_MAX` (32,000), then recompiles with one array argument `$[N]` (engine argument limits). `serializeData()` dedupes via `ctx.dataMap`; regexes dedupe separately via `ctx.regexpMap` (a regex must not collide with an equal-looking string) and always live in slots (an inline literal allocates per evaluation).
+- **Wildcard tails** with an all-static prefix → `p.slice(K)`; else `s.slice(i).join('/')`. Valid because the prologue keeps every segment of `p`.
+- **Regex params:** `scanRegExpGroups()` resolves group names at compile time → direct `.groups.<name>` reads with one `exec` into a `_mN` temp (declared via `ctx.regexTemps`). A whole-segment `^(?<name>…)$` uses `.test()` + `params:{name:seg}`. Unparseable names fall back to exec + spread + runtime `_normalizeGroups`.
+- **matchAll** accumulates with `r.push` and one `return r.reverse()`; ordering rules in [matching.md](matching.md#findallroutes-ordering-public-contract).
+- Routers without suffix routes, and without a node holding both `""` and method entries, must compile byte-identically (snapshots).
+
+## Suffix routes
+
+- `ctx.rank` (the tree has a suffix trie) switches matchAll to `let r=[],k=[]`: each push also pushes a deduped rank descriptor `[** index | -1, suffix length, ...(param index, kind)]`, and the return is `$RANK(r.reverse(),k.reverse(),l-1)`. `RANK` (JIT function / AOT source in a data slot) mirrors `rankFromEnd` and only sorts when a descriptor has a suffix.
+- `compileSuffix` emits the trie from the end (`if(l>c+j&&s[l-j-1]==="x")`, params `s[l-j-1]`, `**:name` guard `l>c+j` counted in the weight).
+- Single-match compiles the tree **without** suffix tries, preceded by `if(<probe>){let r=[],k=[];<matchAll in collector mode>;r=$RANK(…);return r[r.length-1]}`. The probe (`compileSuffixProbe` / `compileTrieProbe`) checks static/param structure down to a suffix trie with routes for the method and its regex params after the `**`, and drops `false` terms (no probe when no trie has routes). It may over-approximate (ignores `**:name` guards and prefix regexes): harmless, since `RANK` keeps tree order without a suffix match. Collector mode (`ctx.collector`) skips the matchAll tie pre-reverse.

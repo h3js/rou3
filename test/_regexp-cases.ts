@@ -97,7 +97,7 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/path//foo/", { "0": "" }],
     ],
   },
-  // An empty *middle* segment is a real segment: the radix tree gives it a
+  // An empty *middle* segment is a real segment: the tree gives it a
   // static node, so `/path//sub` matches only the doubled-slash path and never
   // `/path/sub`. The regex must agree (it used to drop empty segments, emitting
   // `^\/path\/sub\/?$` — matching the one path the router won't, and missing the

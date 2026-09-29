@@ -23,7 +23,7 @@ export interface RouteShape {
 }
 
 /**
- * A radix-tree edge on the path from the root to a node: a static key (already
+ * A tree edge on the path from the root to a node: a static key (already
  * decoded, so it may be a literal `*`/`**`), or a param (`0`) / wildcard (`1`)
  * branch. Carrying the node kind keeps escaped-literal static keys
  * distinguishable from dynamic segments.
