@@ -243,8 +243,8 @@ function addName(names: string[], name: string, input: string): string {
  * modifier has been expanded and its escapes encoded (`encodeEscapes`); a `\x`
  * outside a group is a literal `x`. Throws on what has no meaning (yet) there:
  * a `:` without a valid name, an empty group or one starting with `?`, a `?` /
- * `+` / `*` modifier on anything but a whole segment's `:name` (a `?` / `+` was
- * a raw regex quantifier, a `*` right after a name or group is ambiguous with
+ * `+` / `*` modifier on anything but a whole segment's `:name` (a `?` / `+` would
+ * be a raw regex quantifier, a `*` right after a name or group is ambiguous with
  * a modifier) and a mid-segment `**`. `routeToRegExp` reuses it (with its own
  * unnamed group keys), so a dynamic segment is the same regex in both.
  *
@@ -276,7 +276,7 @@ export function getParamRegexp(
       } else if (c === 40 /* ( */ && /[?)]/.test(segment[j + 1])) {
         invalidSyntax("empty or `(?` group", input);
       } else if (c === 63 /* ? */ || c === 43 /* + */ || (c === 42 /* * */ && j === _e)) {
-        // `?` / `+` here were raw quantifiers; a `*` right after a name or
+        // `?` / `+` here would be raw quantifiers; a `*` right after a name or
         // group is ambiguous with a modifier, after a `*` a mid-segment `**`
         // (an escaped `\*` is consumed below and never sets `_e`)
         invalidSyntax(MISPLACED_MODIFIER, input);

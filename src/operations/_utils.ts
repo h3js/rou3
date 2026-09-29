@@ -129,7 +129,8 @@ export const MISPLACED_MODIFIER =
  * param optional (`pre-:x?` is `pre-{:x}?`, as in URLPattern; `{pre-:x}?`
  * drops the segment). `+` / `*` repeat a whole-segment `:name` only: `input`
  * (quoted in the error) repeating a constrained param (`:x(\\d+)+`) or part
- * of a segment (`pre-:x+`) dropped the constraint / the rest of the segment.
+ * of a segment (`pre-:x+`) throws: it would drop the constraint / the rest of
+ * the segment.
  * A `?` on a `**:name` throws too (the `**` is no text before the param).
  */
 export function expandModifiers(segments: string[], input?: string): string[] | undefined {

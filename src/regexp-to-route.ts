@@ -106,9 +106,9 @@ export function regExpToRoute(regexp: RegExp | string): string {
 // - a required `*` (after `**`): `(?:(?<x>[^/]+)\/?|\/)`
 // - a required `*` before optional segments: `(?:(?<x>[^/]+)(?:\/|$)|\/)`,
 //   followed by a tail (see `plainBody`)
-// Before a `:x` / `:x+` needed a value (0.10), a `:x` ended in the `*` forms
-// and a catch-all in `(?:\/|(?<x>(?:[\s\S]*[^/]|\/)\/*?)\/?)`: read as `:x`
-// and `:x+` still.
+// 0.10 regexes (a `:x` / `:x+` could be empty there) end a `:x` in the `*`
+// forms and a catch-all in `(?:\/|(?<x>(?:[\s\S]*[^/]|\/)\/*?)\/?)`: read as
+// `:x` and `:x+`.
 const REQUIRED_PARAM = /\(\?:\(\?<(\w+)>\[\^\/\]\+\)\\\/\?\|\\\/\)$/;
 const REQUIRED_VALUE =
   /\(\?:\\\/\\\/\|\(\?<(\w+)>\(\?:\[\\s\\S\]\*\[\^\/\]\|\\\/\\\/\)\\\/\*\?\)\\\/\?\)$/;

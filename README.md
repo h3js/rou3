@@ -547,7 +547,7 @@ A param in a segment with other text is lazy (`[^/]+?`), like in the router, so 
 <summary>What <code>regExpToRoute</code> accepts</summary>
 
 - The dialect `routeToRegExp` emits: `(?<name>...)` groups, `[^/]*` segments and `[^/]+?` params inside one, `[\s\S]*` catch-alls, `(?:/...)?` optional groups and the endings shown above. Unnamed groups such as `(\d+)` work too, and the regex inside a constraint is kept verbatim.
-- Looser forms: a plain `\/?` ending, `.*` / `.+` catch-alls and `[^/]+` params (read as `:name`, which is lazy inside a segment now). A catch-all inside an optional group is the exception: the regex for `/a{/:w*}?` throws, and the one for `/a{/:w+}?` comes back as `/a/:w(.+)?`.
+- Looser forms, as older versions emitted: a plain `\/?` ending, `.*` / `.+` catch-alls and `[^/]+` params, read as `:name`. A `:name` inside a segment is lazy, so a hand-written greedy `(?<a>[^/]+)-(?<b>[^/]+)` comes back as `/:a-:b`, which splits `/x-y-z` as `x` and `y-z`. An old catch-all inside an optional group is the exception: 0.9.2's regex for `/a{/:w*}?` throws, and its regex for `/a{/:w+}?` comes back as `/a/:w(.+)?` (the current regexes come back as `/a/:w*` and `/a{/:w+}?`).
 - Routes that compile to the same regex come back in one spelling: `/base/**:path` becomes `/base/:path+`, `/**.md` becomes `/**/*.md`, `/a/pre-{:x}?` becomes `/a/pre-:x?`, and `/a/:x?/:y?` becomes `/a{/:x/:y?}?`.
 
 It throws for: a regex not anchored with both `^` and `$`, look-arounds and backreferences, regex operators outside a constraint (`|`, `.`, `+`, `[…]`, …), the flags `i`, `m`, `s`, `u` and `v` (`g`, `y` and `d` are ignored), the duplicate-group alternations above, and constraints that can't be written as a route (for example one containing `/`).
