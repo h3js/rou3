@@ -110,6 +110,33 @@ describe("types", () => {
       expectTypeOf<InferRouteParams<"/a{/**}?/b">>().toEqualTypeOf<{ _: string }>();
     });
 
+    it("should end param names at a `-` no word char follows", () => {
+      expectTypeOf<InferRouteParams<"/blog/:year-:month">>().toEqualTypeOf<{
+        year: string;
+        month: string;
+      }>();
+      expectTypeOf<InferRouteParams<"/a/:x-">>().toEqualTypeOf<{ x: string }>();
+      expectTypeOf<InferRouteParams<"/a/:test-id/b">>().toEqualTypeOf<{ "test-id": string }>();
+      expectTypeOf<InferRouteParams<"/a/get-:file.:ext">>().toEqualTypeOf<{
+        file: string;
+        ext: string;
+      }>();
+      expectTypeOf<InferRouteParams<"/blog/:id(\\d+){-:title}?">>().toEqualTypeOf<{
+        id: string;
+        title: string | undefined;
+      }>();
+      expectTypeOf<InferRouteParams<"/a/:x((?:a|b))/:y?">>().toEqualTypeOf<{
+        x: string;
+        y: string | undefined;
+      }>();
+      expectTypeOf<InferRouteParams<"/a/:x(\\)|a)/:y?">>().toEqualTypeOf<{
+        x: string;
+        y: string | undefined;
+      }>();
+      expectTypeOf<InferRouteParams<"/a/:x(\\)|a)?">>().toEqualTypeOf<{ x: string | undefined }>();
+      expectTypeOf<InferRouteParams<"/static\\:path/:id">>().toEqualTypeOf<{ id: string }>();
+    });
+
     it("should infer mixed params", () => {
       type Params = InferRouteParams<"/test/:id/*/foo/:name/**">;
       type Expected = { id: string; "0": string; name: string; _: string };

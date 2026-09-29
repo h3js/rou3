@@ -187,6 +187,32 @@ describe("regExpToRoute", () => {
     );
   });
 
+  it("escapes a literal that would extend the param name before it", () => {
+    // A name is `\w+(?:-\w+)*`: a word char, or a `-` and a word char, right
+    // after `:name` would read as more of the name.
+    expect(regExpToRoute(/^\/a\/(?<x>[^/]+)abc\/?$/)).toBe("/a/:x\\abc");
+    expect(regExpToRoute(/^\/a\/pre-(?<x>[^/]+)-suf\/?$/)).toBe("/a/pre-:x\\-suf");
+    expect(regExpToRoute(/^\/a\/(?<x>[^/]+)-\/?$/)).toBe("/a/:x-");
+    expect(regExpToRoute(/^\/a\/(?<x>[^/]+)-(?<y>[^/]+)\/?$/)).toBe("/a/:x-:y");
+    expect(regExpToRoute(/^\/a\/(?<x>\d+)abc\/?$/)).toBe("/a/:x(\\d+)abc");
+    for (const route of ["/a/:x\\abc", "/a/pre-:x\\-suf"]) {
+      expect(routeToRegExp(regExpToRoute(routeToRegExp(route))).source).toBe(
+        routeToRegExp(route).source,
+      );
+    }
+    // A group right after `:name` would read as its constraint and a `*`
+    // after a group as a modifier: no route emits these, so they throw.
+    for (const re of [
+      /^\/a\/(?<x>[^/]+)(?<_0>[^/]*)\/?$/,
+      /^\/a\/(?<x>\d+)(?<_0>[^/]*)\/?$/,
+      /^\/a\/(?<x>[^/]+)(\d+)\/?$/,
+    ]) {
+      expect(() => regExpToRoute(re), re.source).toThrow(/rou3: /);
+    }
+    // Group names no route param name decodes to are rejected.
+    expect(() => regExpToRoute(/^\/a\/(?<__rou3_esc_x_h>[^/]+)\/?$/)).toThrow(/rou3: /);
+  });
+
   it("re-escapes literal route-syntax characters", () => {
     // A literal `*` in the source must come back escaped so it stays literal.
     expect(regExpToRoute(/^\/static\/\*\/\*\*\/?$/)).toBe("/static/\\*/\\*\\*");
@@ -273,9 +299,37 @@ describe("regExpToRoute", () => {
     expect(() => regExpToRoute(/^\/path\/?$/i)).toThrow(/flag/);
     expect(() => regExpToRoute(/^\/path\/?$/m)).toThrow(/flag/);
     expect(() => regExpToRoute(/^\/path\/?$/s)).toThrow(/flag/);
-    // Flags that don't change matching semantics are accepted.
-    expect(regExpToRoute(/^\/path\/?$/u)).toBe("/path");
+    // `u` / `v` change what a constraint means (`\p{L}` is a letter class
+    // with them, the literal `p{L}` without), and routes compile theirs
+    // without flags.
+    expect(() => regExpToRoute(/^\/a\/(?<x>\p{L}+)\/?$/u)).toThrow(/^rou3: .*flag/);
+    expect(() => regExpToRoute(/^\/a\/(?<x>\p{L}+)\/?$/v)).toThrow(/^rou3: .*flag/);
+    expect(() => regExpToRoute(/^\/path\/?$/u)).toThrow(/^rou3: .*flag/);
+    // Flags that don't change what a fully-anchored regex matches are accepted.
     expect(regExpToRoute(/^\/path\/?$/g)).toBe("/path");
+    expect(regExpToRoute(/^\/path\/?$/y)).toBe("/path");
+    expect(regExpToRoute(/^\/path\/?$/d)).toBe("/path");
+    expect(regExpToRoute(/^\/path\/?$/dgy)).toBe("/path");
+  });
+
+  it("rejects regexes that are not anchored at both ends", () => {
+    // An unanchored regex matches any path containing it; a route matches
+    // whole paths only, so the result would be far narrower than the input.
+    for (const re of [
+      /\/users\/(?<id>\d+)/,
+      /\/users$/,
+      /^\/users/,
+      /\/users\/?/,
+      /^\/a\$/, // an escaped `$` is a literal, not an anchor
+      /^\/a\\\$/,
+    ]) {
+      expect(() => regExpToRoute(re), re.source).toThrow(/^rou3: .*anchored/);
+    }
+    for (const source of ["\\/users\\/?", "^\\/users\\/?", "\\/users\\/?$", ""]) {
+      expect(() => regExpToRoute(source), source).toThrow(/^rou3: .*anchored/);
+    }
+    // An escaped backslash before the `$` leaves it an anchor.
+    expect(regExpToRoute(/^\/a\\$/)).toBe("/a\\\\");
   });
 
   it("supports bare (unnamed) capturing groups", () => {

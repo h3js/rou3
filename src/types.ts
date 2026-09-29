@@ -89,20 +89,60 @@ type HasRepeatParam<TRoute extends string> = TRoute extends `${string}:${infer R
     : false
   : false;
 
-// Raw `:name(constraint)?` tokens (everything after `:` up to the next `/`)
-type ExtractParamTokens<TPath extends string> = TPath extends `${string}:${infer Rest}`
-  ? Rest extends `${infer Token}/${infer Tail}`
-    ? Token | ExtractParamTokens<`/${Tail}`>
-    : Rest
+type Digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
+type Lower = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m";
+type Lower2 = "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z";
+type WordChar = Digit | Lower | Lower2 | Uppercase<Lower | Lower2> | "_";
+
+// The param name at the start of `S`: its longest `\w+(?:-\w+)*` prefix
+type TakeName<S extends string, Name extends string = ""> = S extends `${infer C}${infer Rest}`
+  ? C extends WordChar
+    ? TakeName<Rest, `${Name}${C}`>
+    : C extends "-"
+      ? Name extends ""
+        ? Name
+        : Rest extends `${WordChar}${string}`
+          ? TakeName<Rest, `${Name}-`>
+          : Name
+      : Name
+  : Name;
+
+// `S` past the `(...)` group it starts with (escape aware)
+type SkipGroup<S extends string, Depth extends unknown[] = []> = S extends `${infer C}${infer Rest}`
+  ? C extends "\\"
+    ? SkipGroup<Rest extends `${string}${infer R}` ? R : Rest, Depth>
+    : C extends "("
+      ? SkipGroup<Rest, [...Depth, C]>
+      : C extends ")"
+        ? Depth extends [unknown, ...infer D]
+          ? D extends []
+            ? Rest
+            : SkipGroup<Rest, D>
+          : SkipGroup<Rest, Depth>
+        : SkipGroup<Rest, Depth>
+  : S;
+
+// `[name, optional]` for each `:name` (an escaped `\:` is a literal)
+type ExtractParams<TPath extends string> = TPath extends `${infer Pre}:${infer Rest}`
+  ? Pre extends `${string}\\`
+    ? ExtractParams<Rest>
+    : ParamAt<Rest, TakeName<Rest>>
   : never;
 
-type ParamName<Token extends string> = Token extends `${infer Name}(${string}` // Regex constraint
-  ? Name
-  : Token extends `${infer Name}${"?" | "*" | "+"}` // Modifier
-    ? Name
-    : Token;
+type ParamAt<Rest extends string, Name extends string> = Rest extends `${Name}${infer After}`
+  ? AfterConstraint<After> extends infer Tail extends string
+    ? (Name extends "" ? never : [Name, OptionalParam<Tail>]) | ExtractParams<Tail>
+    : never
+  : never;
 
-type OptionalParam<Token extends string> = Token extends `${string}${"?" | "*"}` ? true : false;
+type AfterConstraint<S extends string> = S extends `(${string}` ? SkipGroup<S> : S;
+
+// A `?` / `*` modifier ending the segment, or the `}?` of an optional group
+type OptionalParam<Tail extends string> = Tail extends
+  | `${"?" | "*"}${"" | `/${string}`}`
+  | `}?${string}`
+  ? true
+  : false;
 
 // Remove `:name...` tokens so a modifier `*` is never counted as a wildcard capture
 type StripParams<TPath extends string> = TPath extends `${infer Prefix}**:${infer Rest}`
@@ -116,9 +156,7 @@ type StripParams<TPath extends string> = TPath extends `${infer Prefix}**:${infe
     : TPath;
 
 export type InferRouteParams<TPath extends string> = {
-  [Token in ExtractParamTokens<TPath> as ParamName<Token>]: OptionalParam<Token> extends true
-    ? string | undefined
-    : string;
+  [Param in ExtractParams<TPath> as Param[0]]: Param[1] extends true ? string | undefined : string;
 } & {
   [Key in ExtractWildcards<StripParams<TPath>>]: Key extends ExtractTrailingWildcard<
     StripParams<TPath>,

@@ -162,7 +162,7 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 | `/book{s}?`                 | `/book` or `/books`                      | `{}`                                                 |
 | `/blog/:id(\\d+){-:title}?` | `/blog/123` or `/blog/123-my-post`       | `{ id: "123" }` or `{ id: "123", title: "my-post" }` |
 
-- **Named params** (`:name`) match a single segment.
+- **Named params** (`:name`) match a single segment. A name is word characters (`[A-Za-z0-9_]`), with a `-` allowed between them (`:test-id`); any other character ends it, so `/blog/:year-:month` has two params and `/files/:name-` a literal trailing `-`. Escape the character after a name to end it there: `/files/:name\\-v2` (params `{ name }`, literal `-v2`).
 - **Single-segment wildcards** (`*`) capture unnamed params (`0`, `1`, ...) and can be used as full or mid-segment tokens (for example `/*` or `/*.png`).
 - **Wildcards** (`**`) match zero or more segments. Use `**:name` to capture (one or more segments).
 - **Segments after a wildcard** (`/**/_payload.json`, `/blog/**:path/og.png`) are matched from the **end** of the path; the `**` takes whatever is between. `**<rest>` is short for `**/*<rest>`: `/**.md` matches any path whose last segment ends in `.md`. A route can have one `**` (a `:name+` / `:name*` before the last segment counts as one: `/files/:path+/meta` is `/files/**:path/meta`), and a `*` after it always takes a segment. On paths such a route matches, routes are ranked from the end of the path — see [Result ordering](#result-ordering).
@@ -187,7 +187,7 @@ rou3 aims for URLPattern-compatible syntax but has intentional differences due t
 | Path normalization (`.`/`..`) | Resolves `.`/`..` in input paths   | Not done by default (opt-in with `{ normalize: true }`)       |
 | Case sensitivity              | Can be case-insensitive            | Always case-sensitive                                         |
 | Non-`/`-prefixed paths        | Supported                          | Paths must start with `/`                                     |
-| Unicode param names           | Supports Unicode identifiers       | Params use `\w` (ASCII word chars only)                       |
+| Param names                   | Unicode identifiers (no `-`)       | ASCII word chars, `-` allowed between them (`:test-id`)       |
 | Percent-encoding              | Normalizes `%xx` sequences         | Does not decode percent-encoded input                         |
 
 ### Trailing slashes and empty segments
@@ -440,7 +440,7 @@ regExpToRoute(/^\/?(?<_>[\s\S]*)\/_payload\.json\/?$/); // "/**/_payload.json"
 
 It targets the dialect `routeToRegExp()` emits — named groups `(?<name>...)`, `[^/]*` segment matchers, `[\s\S]*` catch-alls, `(?:/...)?` optional groups and the endings above. Bare (unnamed) capturing groups such as `(\d+)` are accepted too, and arbitrary regex inside an inline constraint `(...)` is preserved verbatim. Regexes from rou3 0.9.x (a plain `\/?` ending, `.*`/`.+` catch-alls, `[^/]+` params) still convert, except those for a catch-all inside an optional group (`/a{/:w*}?`, `/a{/:w+}?`). Every reversible output round-trips exactly: `routeToRegExp(regExpToRoute(regexp)).source === regexp.source`. Routes that compile to the same regex come back in one spelling: `/base/**:path` and `/base/:path+` both become `/base/:path+` (also with segments after it), `/**.md` becomes `/**/*.md`, and `/a/:x?/:y?` becomes `/a{/:x/:y?}?`.
 
-Anything outside that dialect throws a clear error rather than returning a corrupt pattern: structural look-arounds (`(?=…)`, `(?<=…)`) and backreferences, bare regex operators outside a constraint (`|`, `.`, `+`, `[…]`, …), match-affecting flags (`i`/`m`/`s`), the non-reversible alternation fallback described above, and inline constraints that can't be expressed as a route (e.g. one containing `/`).
+Anything outside that dialect throws a clear error rather than returning a corrupt pattern: structural look-arounds (`(?=…)`, `(?<=…)`) and backreferences, bare regex operators outside a constraint (`|`, `.`, `+`, `[…]`, …), a regex not anchored with both `^` and `$`, match-affecting flags (`i`/`m`/`s`, and `u`/`v`, which change what a constraint like `\p{L}` means; `g`/`y`/`d` are ignored), the non-reversible alternation fallback described above, and inline constraints that can't be expressed as a route (e.g. one containing `/`).
 
 ## Compiler
 

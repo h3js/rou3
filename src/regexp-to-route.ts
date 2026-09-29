@@ -32,31 +32,43 @@ const ROUTE_SPECIAL = new Set([
  * Convert an anchored {@link RegExp} (or its source string) produced by
  * {@link routeToRegExp} back into a rou3 route pattern.
  *
+ * Throws a `rou3:` error for input it can't represent exactly: a regex not
+ * anchored with `^` and `$`, the flags `i`/`m`/`s`/`u`/`v` (`g`/`y`/`d` are
+ * ignored), and constructs outside the dialect `routeToRegExp` emits.
+ *
  * @example
  * regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
  * regExpToRoute(/^\/path\/(?:(?<param>[^/]+)\/?|\/)$/); // "/path/:param"
  * regExpToRoute(/^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$/); // "/path/**"
  */
 export function regExpToRoute(regexp: RegExp | string): string {
-  // Routes carry no flags, so a match-affecting flag (`i`/`m`/`s`) would be
-  // silently dropped and change matching semantics. Reject rather than lie;
-  // `g`/`y`/`u`/`v`/`d` don't affect a fully-anchored match and are ignored.
-  if (typeof regexp !== "string" && /[ims]/.test(regexp.flags)) {
+  // Routes carry no flags, so a match-affecting flag would be silently dropped
+  // and change matching semantics. Reject rather than lie: `i`/`m`/`s`, and
+  // `u`/`v`, which change what a constraint means (`\p{L}` is a letter class
+  // with them, the literal `p{L}` without; route constraints compile without
+  // flags). `g`/`y`/`d` don't affect a fully-anchored match and are ignored.
+  if (typeof regexp !== "string" && /[imsuv]/.test(regexp.flags)) {
     throw new Error(`rou3: cannot represent regexp flag(s) "${regexp.flags}" as a route`);
   }
 
   let src = typeof regexp === "string" ? regexp : regexp.source;
 
+  // A route matches whole paths, so the regex must be anchored at both ends
+  // (an unanchored one matches any path containing it). A `$` after an odd
+  // run of backslashes is an escaped literal, not an anchor.
+  if (!src.startsWith("^") || !src.endsWith("$") || /(?:^|[^\\])(?:\\\\)*\\\$$/.test(src)) {
+    throw new Error(`rou3: regexp must be anchored with \`^\` and \`$\` (${src})`);
+  }
+
   // Strip anchors and the trailing-slash suffix `routeToRegExp` appends (or the
   // plain optional slash older versions and hand-written regexes use).
-  if (src.startsWith("^")) src = src.slice(1);
-  if (src.endsWith("$")) src = src.slice(0, -1);
+  src = src.slice(1, -1);
   // Look-behind-free endings (see `withTrailingSlash`) back to their plain
   // forms. Only these exact shapes are rewritten; anything else, a lazy
   // quantifier inside a constraint included, is parsed as written.
   const rootRepeat = ROOT_REPEAT.exec(src);
   if (rootRepeat) {
-    return `/:${fromGroupName(rootRepeat[1])}*`;
+    return `/:${paramName(rootRepeat[1])}*`;
   }
   // Endings with the rule built in back to the plain body and `\/?`.
   const closed = { dot: false };
@@ -281,19 +293,37 @@ function reverseSegment(seg: string): string {
 
   let out = "";
   let i = 0;
+  // After a bare `:name`, a word char (or a `-` and one) would extend the
+  // name: escape it. A `(pat)` would read as its constraint and, after any
+  // group, a `*` as a modifier: no route emits these.
+  let afterName = false;
+  const literal = (ch: string, next = "") => {
+    out +=
+      afterName && (/\w/.test(ch) || (ch === "-" && /\w/.test(next)))
+        ? `\\${ch}`
+        : escapeLiteral(ch);
+    afterName = false;
+  };
+  const param = (token: string, name?: string) => {
+    if ((afterName && token[0] !== ":") || (token === "*" && out.endsWith(")"))) {
+      throw new Error(`rou3: no route has a param followed by a group in "${seg}"`);
+    }
+    out += token;
+    afterName = token === `:${name}`;
+  };
   while (i < seg.length) {
     const c = seg[i];
     if (c === "(") {
       const g = matchNamedGroup(seg, i);
       if (g) {
-        out += paramToken(g.name, g.body);
+        param(paramToken(g.name, g.body), g.name);
         i = g.end;
         continue;
       }
       if (!seg.startsWith("(?", i)) {
         // Bare capturing group `(...)` -> unnamed param (route `(pat)` / `*`).
         const end = readGroup(seg, i);
-        out += paramToken("_0", seg.slice(i + 1, end - 1));
+        param(paramToken("_0", seg.slice(i + 1, end - 1)));
         i = end;
         continue;
       }
@@ -312,7 +342,7 @@ function reverseSegment(seg: string): string {
       if (/[a-z0-9]/i.test(next)) {
         throw new Error(`rou3: unsupported escape "\\${next}" in "${seg}"`);
       }
-      out += escapeLiteral(next);
+      literal(next, seg[i + 2]);
       i += 2;
       continue;
     }
@@ -323,7 +353,7 @@ function reverseSegment(seg: string): string {
     if (BARE_META.has(c)) {
       throw new Error(`rou3: unsupported metacharacter "${c}" in "${seg}"`);
     }
-    out += escapeLiteral(c);
+    literal(c, seg[i + 1]);
     i += 1;
   }
   return out;
@@ -355,7 +385,7 @@ function applyOptional(
     // `pushCatchAll` in regexp.ts): `(?:/(?:(?<x>[\s\S]*)/)?(?<y>[^/]*))?`.
     const nested = NESTED_CATCH_ALL.exec(rest);
     if (nested) {
-      const [, catchAll, last] = nested.map((name) => name && fromGroupName(name));
+      const [catchAll, last] = nested.slice(1).map(paramName);
       const unnamed = /^_\d+$/.test(last);
       segments.push(catchAll === "_" && !unnamed ? "**" : `:${catchAll}*`);
       segments.push(unnamed ? "*" : `:${last}?`);
@@ -514,10 +544,19 @@ function matchNamedGroup(src: string, start: number): NamedGroup | undefined {
   }
   const end = readGroup(src, start);
   return {
-    name: fromGroupName(src.slice(start + 3, gt)),
+    name: paramName(src.slice(start + 3, gt)),
     body: src.slice(gt + 1, end - 1),
     end,
   };
+}
+
+/** Decode a capture-group name into a route param name (`\w+(?:-\w+)*`). */
+function paramName(key: string): string {
+  const name = fromGroupName(key);
+  if (!/^\w+(?:-\w+)*$/.test(name)) {
+    throw new Error(`rou3: "${name}" is not a valid param name`);
+  }
+  return name;
 }
 
 /** Index just past the `)` matching the `(` at `start`, class/escape aware. */
