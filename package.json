@@ -2,6 +2,15 @@
   "name": "rou3",
   "version": "0.10.2",
   "description": "Lightweight and fast router for JavaScript.",
+  "keywords": [
+    "router",
+    "radix-tree",
+    "http",
+    "routing",
+    "url-pattern",
+    "path-matching"
+  ],
+  "homepage": "https://github.com/h3js/rou3#readme",
   "license": "MIT",
   "repository": "h3js/rou3",
   "files": [
@@ -12,7 +21,8 @@
   "types": "./dist/index.d.mts",
   "exports": {
     ".": "./dist/index.mjs",
-    "./compiler": "./dist/compiler.mjs"
+    "./compiler": "./dist/compiler.mjs",
+    "./package.json": "./package.json"
   },
   "scripts": {
     "bench:bun": "bun ./test/bench",
@@ -44,5 +54,8 @@
     "typescript": "^6",
     "vitest": "^5.0.1"
   },
-  "packageManager": "pnpm@11.26.0"
+  "packageManager": "pnpm@11.26.0",
+  "engines": {
+    "node": ">=20.19.0"
+  }
 }
