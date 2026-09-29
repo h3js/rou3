@@ -164,6 +164,7 @@ rou3 matches paths segment by segment in a tree, which leads to a few intentiona
 | Feature                       | URLPattern                         | rou3                                            |
 | ----------------------------- | ---------------------------------- | ----------------------------------------------- |
 | `*` (single star)             | Greedy catch-all `(.*)` across `/` | One segment (or part of one), `([^/]*)`         |
+| Trailing `*`                  | Required (`/foo/*` doesn't match `/foo`) | Optional (`/foo/*` matches `/foo`), so `use("/api/*")`-style scopes cover `/api` too |
 | `**` (double star)            | Literal `**`                       | Catch-all, zero or more segments, one per route |
 | `(.*)` in a segment           | Greedy match across `/`            | Stays within the segment                        |
 | `{...}+` / `{...}*` groups    | Group repetition                   | Not supported (throws)                          |
