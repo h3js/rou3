@@ -1488,6 +1488,15 @@ function allSweepPatterns(): string[] {
     "/a/**{/b/:c?}?",
     "/a/**{.png}?",
     "/a/:r*/:y?{/b}?",
+    // An unnamed optional segment mid-route (a `*` is optional alone only at
+    // the end).
+    "/a{/*}?/b",
+    "/a{/*}?/:q",
+    "/a/*{/*}?/b",
+    "/{/*}?/b",
+    "/a{/(\\d+)}?/b",
+    "/a{/(\\d+)}?/:q",
+    "/a/:x{/(\\d+)}?/b",
     ...Object.keys(regexpCases),
     // Removed from `regexpCases` without duplicate named groups.
     ...PCRE2_DUPLICATE_NAME_ROUTES,

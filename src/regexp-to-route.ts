@@ -412,9 +412,16 @@ function applyOptional(
     const g = matchNamedGroup(rest, 0);
     if (g && g.end === rest.length) {
       // An unnamed capture has no `:name?` form (`:_0(…)?` is a param named
-      // `_0`): `{/(pat)}?` on the previous segment. A `*` is optional alone.
-      if (g.unnamed && g.body !== "[^/]*") {
-        mergeGroup(segments, `/${constraint(g.body)}`);
+      // `_0`): `{/(pat)}?` on the previous segment. A `*` is optional alone
+      // only at the end of the route, `{/*}?` elsewhere. Inside a group that
+      // would nest `{…}`, which `addRoute` rejects.
+      if (g.unnamed && (g.body !== "[^/]*" || !last)) {
+        if (inGroup) {
+          throw new Error(
+            `rou3: no route has an optional unnamed capture in a group in "${inner}"`,
+          );
+        }
+        mergeGroup(segments, `/${paramToken(g.name, g.body, true)}`);
         return;
       }
       // A greedy `(?:/(?<_>[\s\S]*))?` is the `**` catch-all, and so is a lazy
@@ -504,8 +511,10 @@ function paramToken(name: string, body: string, unnamed: boolean): string {
 }
 
 /**
- * Classify a param inside an optional group (`:name?`, `:name*`, ...). The only
- * unnamed one is a `*`: the callers write other unnamed captures as `{/(pat)}?`.
+ * Classify a param inside an optional group (`:name?`, `:name*`, ...). An
+ * unnamed one is a `*` where that is optional (ending the route, or with the
+ * next optionals nested in its group): the callers write other unnamed
+ * captures, and a `*` elsewhere, as `{/…}?`.
  */
 function optionalParam({ name, body, unnamed }: NamedGroup, dot: boolean): string {
   // `(?:/(?<_N>[^/]*))?` is a trailing `*` (optional in the tree).

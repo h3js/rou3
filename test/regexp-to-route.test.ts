@@ -449,6 +449,25 @@ describe("regExpToRoute", () => {
     expect(() => regExpToRoute(/^\/a(?:\/(?:(?<_0>[\s\S]*)\/)?(?<y>[^/]*))?\/?$/)).toThrow(
       /^rou3: /,
     );
+    // Nor one inside an optional group: `{…}` can't nest.
+    for (const re of [
+      /^\/a(?:\/(?<x>[^/]+)(?:\/(?<_0>\d+))?)?\/?$/,
+      /^\/a(?:\/b(?:\/(?<_0>\d+))?)?\/?$/,
+      /^\/a(?:\/b(?:\/(?<_0>[^/]*))??\/c)?\/?$/,
+    ]) {
+      expect(() => regExpToRoute(re), re.source).toThrow(/^rou3: /);
+    }
+  });
+
+  it("keeps a mid-route optional `*` optional", () => {
+    // A bare `*` is optional only at the end of the route: `{/*}?` elsewhere.
+    for (const route of ["/a{/*}?/b", "/a{/*}?/:q", "/a/*{/*}?/b", "/{/*}?/b"]) {
+      const re = routeToRegExp(route);
+      const back = regExpToRoute(re);
+      expect(back, route).toBe(route);
+      expect(routeToRegExp(back).source, route).toBe(re.source);
+    }
+    expect(regExpToRoute(routeToRegExp("/a{/*}?"))).toBe("/a/*");
   });
 });
 
