@@ -990,3 +990,128 @@ describe("end-of-path optional fallback with mixed same-node siblings", () => {
     });
   }
 });
+
+describe("match results are fresh objects (static fast path, params: false)", () => {
+  // Every lookup must hand out a new `{ data, params? }` object: the
+  // interpreter used to return the router's internal entry for static hits
+  // and `params: false` (internal keys exposed, one shared object, mutations
+  // leaking into later lookups). The compiled matcher always returned fresh.
+  const router = createEmptyRouter<{ path: string }>();
+  addRoute(router, "GET", "/static", { path: "STATIC" });
+  addRoute(router, "GET", "/param/:id", { path: "PARAM" });
+  addRoute(router, "GET", "/wild/**", { path: "WILD" });
+  addRoute(router, "GET", "/sfx/**/end", { path: "SUFFIX" });
+  const compiledLookup = compileRouter(router);
+  const compiledMatchAll = compileRouter(router, { matchAll: true });
+  const paths = ["/static", "/static/", "/param/1", "/wild/a/b", "/sfx/a/end"];
+  const internal = ["paramsRegexp", "paramsMap", "route", "suffix"];
+
+  it("results carry no internal keys", () => {
+    for (const path of paths) {
+      for (const params of [undefined, false]) {
+        const one = findRoute(router, "GET", path, { params })!;
+        expect(
+          Object.keys(one).filter((k) => internal.includes(k)),
+          path,
+        ).toEqual([]);
+        for (const m of findAllRoutes(router, "GET", path, { params })) {
+          expect(
+            Object.keys(m).filter((k) => internal.includes(k)),
+            path,
+          ).toEqual([]);
+        }
+      }
+    }
+  });
+
+  it("params: false returns only `data`", () => {
+    for (const path of paths) {
+      expect(Object.keys(findRoute(router, "GET", path, { params: false })!)).toEqual(["data"]);
+      for (const m of findAllRoutes(router, "GET", path, { params: false })) {
+        expect(Object.keys(m)).toEqual(["data"]);
+      }
+    }
+  });
+
+  it("mutating a result does not leak into later lookups", () => {
+    for (const path of paths) {
+      for (const params of [undefined, false]) {
+        const before = findRoute(router, "GET", path)!;
+        const expected = { ...before };
+        const one = findRoute(router, "GET", path, { params }) as any;
+        one.params = { evil: "1" };
+        one.data = { path: "EVIL" };
+        for (const m of findAllRoutes(router, "GET", path, { params }) as any[]) {
+          m.params = { evil: "1" };
+          m.data = { path: "EVIL" };
+        }
+        expect(findRoute(router, "GET", path), path).toStrictEqual(expected);
+        expect(findRoute(router, "GET", path)).not.toBe(findRoute(router, "GET", path));
+        expect(findAllRoutes(router, "GET", path).at(-1), path).toStrictEqual(expected);
+      }
+    }
+  });
+
+  it("interpreter results have the compiled shape", () => {
+    // Same keys (a static hit has no `params` key) and values; the params
+    // objects differ only in prototype (null-proto in the interpreter)
+    const shape = (r: any) => [Object.keys(r), { ...r, params: r.params && { ...r.params } }];
+    for (const path of paths) {
+      expect(shape(findRoute(router, "GET", path)), path).toStrictEqual(
+        shape(compiledLookup("GET", path)),
+      );
+      expect(findAllRoutes(router, "GET", path).map(shape), path).toStrictEqual(
+        compiledMatchAll("GET", path).map(shape),
+      );
+    }
+  });
+});
+
+describe("falsy route data is kept", () => {
+  // `addRoute` used to store `data || null`, so `0`, `""` and `false` came
+  // back as `null`; missing data is still `null`.
+  const values = [0, "", false, null] as const;
+  // Few static routes compile to an `if` chain, more than STATIC_CHAIN_MAX to a map
+  for (const extra of [0, 10]) {
+    const router = createEmptyRouter<unknown>();
+    for (let i = 0; i < extra; i++) addRoute(router, "GET", `/filler${i}`, i + 1);
+    values.forEach((v, i) => {
+      addRoute(router, "GET", `/s${i}`, v);
+      addRoute(router, "GET", `/p${i}/:id`, v);
+      addRoute(router, "GET", `/w${i}/**`, v);
+    });
+    addRoute(router, "GET", "/none");
+    addRoute(router, "GET", "/none/:id", undefined);
+    const compiledLookup = compileRouter(router);
+    const compiledMatchAll = compileRouter(router, { matchAll: true });
+    // eslint-disable-next-line no-new-func
+    const aotLookup = new Function(
+      `return ${compileRouterToString(router)}`,
+    )() as typeof compiledLookup;
+    // eslint-disable-next-line no-new-func
+    const aotMatchAll = new Function(
+      `return ${compileRouterToString(router, "", { matchAll: true })}`,
+    )() as typeof compiledMatchAll;
+
+    const lookups = [
+      { name: "findRoute", match: (p: string) => findRoute(router, "GET", p)?.data },
+      { name: "findAllRoutes", match: (p: string) => findAllRoutes(router, "GET", p)[0]?.data },
+      { name: "compiledLookup", match: (p: string) => compiledLookup("GET", p)?.data },
+      { name: "compiledMatchAll", match: (p: string) => compiledMatchAll("GET", p)[0]?.data },
+      { name: "aotLookup", match: (p: string) => aotLookup("GET", p)?.data },
+      { name: "aotMatchAll", match: (p: string) => aotMatchAll("GET", p)[0]?.data },
+    ];
+
+    for (const { name, match } of lookups) {
+      it(`returns 0, "", false as registered (${name}, ${extra} extra static routes)`, () => {
+        values.forEach((v, i) => {
+          expect(match(`/s${i}`)).toBe(v);
+          expect(match(`/p${i}/x`)).toBe(v);
+          expect(match(`/w${i}/x/y`)).toBe(v);
+        });
+        expect(match("/none")).toBe(null);
+        expect(match("/none/x")).toBe(null);
+      });
+    }
+  }
+});

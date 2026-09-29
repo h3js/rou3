@@ -24,7 +24,8 @@ export function findRoute<T = unknown>(
   if (staticNode && staticNode.methods) {
     const staticMatch = staticNode.methods[method] || staticNode.methods[""];
     if (staticMatch !== undefined) {
-      return staticMatch[0];
+      // A fresh object: the stored entry is internal (and shared)
+      return { data: staticMatch[0].data };
     }
   }
 
@@ -46,7 +47,7 @@ export function findRoute<T = unknown>(
   }
 
   if (opts?.params === false) {
-    return match;
+    return { data: match.data };
   }
 
   return {

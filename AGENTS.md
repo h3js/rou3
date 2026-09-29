@@ -101,6 +101,10 @@ interface Node<T> {
 
 ... except on paths a route with **segments after `**`** matches, where every match is ranked from the end (see below).
 
+### Match results
+
+Every lookup returns **fresh** `{ data, params? }` objects, never the stored `MethodData` entry (internal keys `paramsRegexp`/`paramsMap`/`route`/`suffix`, one shared object per route: a caller mutating a result used to change every later lookup). This covers `findRoute`'s static fast path and `params: false` in both APIs, which returned the entry itself (~+13 ns per static `findRoute` hit, one allocation; the compiled matcher always allocated). The shape matches compiled: static matches and `params: false` have **no** `params` key, dynamic ones `params` (null-proto in the interpreter). `addRoute` stores `data ?? null`, so falsy data (`0`, `""`, `false`) round-trips; only missing data is `null`. Pinned in `find.test.ts` "match results are fresh objects" and "falsy route data is kept".
+
 ### Segments after `**` (#212)
 
 `/**/_payload.json`, `/blog/**:path/og.png`, `/**/*.png`: the segments after a `**` are matched from the **end** of the path and the `**` takes what is between (zero or more segments, one or more for `**:name`). Before this, `**` was terminal and anything after it was silently dropped (`/a/**/b` ≡ `/a/**`): **breaking**, as is that a mid-route `:x+` / `:x*` (which `expandModifiers` turns into `**:x`) now keeps the segments after it (`/a/:x+/b` requires the `/b`, as in URLPattern).
