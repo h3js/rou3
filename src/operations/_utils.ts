@@ -45,15 +45,16 @@ export function segmentKey(segment: string): string | 1 | 2 {
  * Throws when a `(...)` group in `route` never closes (`/files/(2024`, #199)
  * or contains a `/` (`:id([^/]+)`): the pattern is split on `/` before groups
  * are read, which cut it in two. Either way `new RegExp` threw a raw
- * `SyntaxError` naming internal group names. Shared by `addRoute` and
- * `routeToRegExp`. A stray `)` stays a literal.
+ * `SyntaxError` naming internal group names. Also throws on a `{` / `}` that
+ * does not pair up or a nested `{...}` (literals or mis-parsed before). Called
+ * by `addRoute` (and so by `routeToRegExp`). A stray `)` stays a literal.
  *
  * Escapes are dropped first (`\(` is no group; `\/` stays, the split cuts
  * there too), then balanced `/`-free groups innermost-out, so any `(` left
- * does not close in its own segment.
+ * does not close in its own segment. Braces inside a group are regex.
  */
 export function checkConstraints(route: string): void {
-  if (!route.includes("(")) return;
+  if (!/[({}]/.test(route)) return;
   let s = route.replace(/\\[^/]/g, "");
   while (s !== (s = s.replace(/\([^()/]*\)/g, "")));
   if (s.includes("(")) {
@@ -61,9 +62,29 @@ export function checkConstraints(route: string): void {
       `rou3: a \`(\` must close in its own segment, escape a literal one as \`\\(\` (${route})`,
     );
   }
+  if (/[{}]/.test(s.replace(/\{[^{}]*\}/g, ""))) {
+    invalidSyntax("unbalanced or nested `{}`", route);
+  }
 }
 
-export function expandModifiers(segments: string[]): string[] | undefined {
+/**
+ * Throws a `rou3:` error for pattern syntax with no meaning (yet), quoting the
+ * route as written.
+ */
+export function invalidSyntax(what: string, route: string): never {
+  throw new Error(`rou3: ${what} (${route})`);
+}
+
+/** `?` / `+` / `*` anywhere but after a whole-segment `:name` (see README). */
+export const MISPLACED_MODIFIER = "a `?` / `+` / `*` modifier must follow a whole-segment `:name`";
+
+/**
+ * Expand the first `?` / `+` / `*` modifier of a param into the routes it
+ * stands for. `+` / `*` repeat a whole-segment `:name` only: `input` (quoted
+ * in the error) repeating a constrained param (`:x(\\d+)+`) or part of a
+ * segment (`pre-:x+`) dropped the constraint / the rest of the segment.
+ */
+export function expandModifiers(segments: string[], input?: string): string[] | undefined {
   for (let i = 0; i < segments.length; i++) {
     const last = segments[i].charCodeAt(segments[i].length - 1);
     if (last !== 63 /* ? */ && last !== 43 /* + */ && last !== 42 /* * */) continue;
@@ -74,7 +95,10 @@ export function expandModifiers(segments: string[]): string[] | undefined {
     if (m[2] === "?") {
       return ["/" + pre.concat(m[1]).concat(suf).join("/"), "/" + pre.concat(suf).join("/")];
     }
-    const name = m[1].match(/:(\w+(?:-\w+)*)/)?.[1] || "_";
+    if (!/^:\w+(?:-\w+)*$/.test(m[1])) {
+      invalidSyntax(MISPLACED_MODIFIER, input!);
+    }
+    const name = m[1].slice(1);
     const wc = "/" + [...pre, `**:${name}`, ...suf].join("/");
     const without = "/" + [...pre, ...suf].join("/");
     return m[2] === "+" ? [wc] : [wc, without];

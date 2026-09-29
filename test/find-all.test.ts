@@ -324,14 +324,14 @@ describe("matcher: ordering contract: optional-syntax carve-out", () => {
   });
 
   it("A3: matched entries in different nodes, traversal order decides (both orders)", () => {
-    expect(compareRoutes("/p/:id/:id*", "/p/:id/*")).toBe("superset");
+    expect(compareRoutes("/p/:id/:rest*", "/p/:id/*")).toBe("superset");
     for (const routes of [
-      ["/p/:id/:id*", "/p/:id/*"],
-      ["/p/:id/*", "/p/:id/:id*"],
+      ["/p/:id/:rest*", "/p/:id/*"],
+      ["/p/:id/*", "/p/:id/:rest*"],
     ]) {
       expect(_findAllRoutes(createRouter(routes), "GET", "/p/a")).toEqual([
         "/p/:id/*",
-        "/p/:id/:id*",
+        "/p/:id/:rest*",
       ]);
     }
   });

@@ -6,7 +6,9 @@ import {
   resolveEscapePlaceholders,
 } from "./_escape.ts";
 import { hasSegmentWildcard, replaceSegmentWildcards } from "./_segment-wildcards.ts";
-import { checkConstraints, expandModifiers, splitRoute } from "./operations/_utils.ts";
+import { createRouter } from "./context.ts";
+import { addRoute } from "./operations/add.ts";
+import { expandModifiers, splitRoute } from "./operations/_utils.ts";
 import { canBeEmpty, isOptionalGroups } from "./_regexp-scan.ts";
 import { openOptionals, withTrailingSlash } from "./_trailing-slash.ts";
 
@@ -33,8 +35,8 @@ const LAZY_ANY = "[\\s\\S]*?";
  * only `route` — including the router's tolerances: one optional trailing slash,
  * empty segments for `:name` / `*` params, and an optional trailing `*` — so it
  * can stand in for the router as a guard or scope check. Not modeled: param
- * constraints that can match `/` (the tree splits on `/` first), repeated
- * constrained params (`:id(\d+)+`), the empty path, and `normalize: true`.
+ * constraints that can match `/` (the tree splits on `/` first), the empty
+ * path, and `normalize: true`.
  *
  * Most routes also compile to RE2-compatible output (RE2, Go, Rust `regex`):
  * the trailing-slash rule is encoded without look-behinds, except for the few
@@ -58,9 +60,10 @@ const LAZY_ANY = "[\\s\\S]*?";
  * router picks (see `lazyCatchAll`); with several, it matches the same paths
  * but may capture like another of the routes the pattern registers.
  *
- * @throws a `rou3:` error, the one `addRoute` throws, when an expansion of
- * `route` has more than one `**` (`/**\/**`, `/a/:x+/b/:y+`), or a `(` that
- * does not close in its own segment (`/files/(2024`, `/a/:id([^/]+)`).
+ * @throws a `rou3:` error, the one `addRoute` throws, for every pattern
+ * `addRoute` rejects: more than one `**` (`/**\/**`, `/a/:x+/b/:y+`), a `(`
+ * that does not close in its own segment (`/files/(2024`, `/a/:id([^/]+)`),
+ * and syntax with no meaning yet (see `addRoute`).
  *
  * @example
  * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)\/?$/
@@ -70,7 +73,9 @@ export function routeToRegExp(route: string = "/"): RegExp {
   if (route.charCodeAt(0) !== 47 /* '/' */) {
     route = `/${route}`;
   }
-  checkConstraints(route);
+  // Validate with the router itself: every pattern it rejects (see
+  // `addRoute`) throws here with the same error.
+  addRoute(createRouter(), "", route);
   return toRegExp(route, route);
 }
 
@@ -464,22 +469,13 @@ function routeToRegExpSegments(
     catchAll = true;
   };
 
-  // Every param name emitted for this expansion. A name declared twice would
-  // be a duplicate named group, which engines disagree on: V8 (Node 24)
-  // accepts one when a copy sits inside an alternative (the `**:name` /
-  // `:name+` ending), while other runtimes, PCRE2 and RE2 reject it. Throw the
-  // same error everywhere instead. Generated unnamed captures (`_N`) are not
-  // params and never pass through here; the alternation fallback checks each
-  // expansion on its own, so it may still repeat a name across branches.
-  // Named groups inside a constraint body (`:x((?<y>a))`) are not tracked.
-  const names = new Set<string>();
-  const groupName = (name: string): string => {
-    if (names.has(name)) {
-      throw new Error(`rou3: duplicate param name "${name}" in "${route}"`);
-    }
-    names.add(name);
-    return toGroupName(name);
-  };
+  // A param name declared twice in an expansion would be a duplicate named
+  // group, which engines disagree on: V8 (Node 24) accepts one when a copy
+  // sits inside an alternative (the `**:name` / `:name+` ending), while other
+  // runtimes, PCRE2 and RE2 reject it. `addRoute` rejects such routes, so none
+  // reach here. The alternation fallback may still repeat a name across
+  // branches.
+  const groupName = toGroupName;
 
   // Optional segments (`:x?`, a trailing `*`, `:x*`, `**`) are appended to the
   // previous segment as `(?:/…)?`. After a whole-segment `:x?` / `*`, the
@@ -512,13 +508,7 @@ function routeToRegExpSegments(
   // at the root, where the leading slash doubles as it so that `_` is `""`
   // on `/b` as in the router. With optional segments after it, the router
   // registers several routes; `lazyCatchAll` picks between them.
-  const pushCatchAll = (
-    id: string,
-    required: boolean,
-    i: number,
-    pattern?: string,
-    repeat = false,
-  ): boolean => {
+  const pushCatchAll = (id: string, required: boolean, i: number, repeat = false): boolean => {
     // `**` / `:x*` then a lone `:y?` (or a `*`, which is optional in the
     // route `:x*` registers without it): the router takes the route with the
     // last segment wherever it matches, and the one without only where
@@ -527,7 +517,6 @@ function routeToRegExpSegments(
     const tail = segments.slice(i + 1);
     if (
       !required &&
-      !pattern &&
       extra.length === 0 &&
       tail.length === 1 &&
       (/^:\w+(?:-\w+)*\?$/.test(tail[0]) || (repeat && tail[0] === "*"))
@@ -550,8 +539,7 @@ function routeToRegExpSegments(
       tail.every((s) => paramModifier(s) === "?") &&
       !(reSegments.length > 0 && canBeEmpty(reSegments[reSegments.length - 1]));
     const name = groupName(id);
-    const body = pattern ? `${pattern}(?:/${pattern})*${lazy ? "?" : ""}` : lazy ? LAZY_ANY : ANY;
-    const group = `(?<${name}>${body})`;
+    const group = `(?<${name}>${lazy ? LAZY_ANY : ANY})`;
     if (open) {
       openTail = nest === 0 ? `(?:/${group})??` : true;
     }
@@ -638,35 +626,28 @@ function routeToRegExpSegments(
           continue;
         }
 
-        // + or * (preserve inline constraint when present). `modMatch` ensures
-        // `base` holds a `:name`; only the first one is emitted.
-        const [, id, pattern] = base.match(/:(\w+(?:-\w+)*)(?:\(([^)]*)\))?/)!;
+        // + or *: `addRoute` accepts them on a whole-segment `:name` only.
+        const id = base.slice(1);
         oneCatchAll();
         if (i < segments.length - 1) {
           // The tree has `**:name` here (`:name*` also registers the route
           // without it), with segments after it.
-          if (pushCatchAll(id, mod === "+", i, pattern, mod === "*")) {
+          if (pushCatchAll(id, mod === "+", i, mod === "*")) {
             break;
           }
           continue;
         }
         const name = groupName(id);
         if (reSegments.length > 0) {
-          const repeated = pattern ? `${pattern}(?:/${pattern})*` : ANY;
           if (mod === "*") {
-            pushOptional(`(?<${name}>${repeated})`, false);
+            pushOptional(`(?<${name}>${ANY})`, false);
           } else {
-            reSegments.push(`${reSegments.pop()}/(?<${name}>${repeated})`);
+            reSegments.push(`${reSegments.pop()}/(?<${name}>${ANY})`);
             nest = 0;
           }
         } else {
-          if (pattern) {
-            const repeated = `${pattern}(?:/${pattern})*`;
-            reSegments.push(mod === "+" ? `?(?<${name}>${repeated})` : `?(?<${name}>${repeated})?`);
-          } else {
-            // `+` needs at least one segment, so its separator is required.
-            reSegments.push(mod === "+" ? `(?<${name}>${ANY})` : `?(?<${name}>${ANY})`);
-          }
+          // `+` needs at least one segment, so its separator is required.
+          reSegments.push(mod === "+" ? `(?<${name}>${ANY})` : `?(?<${name}>${ANY})`);
           nest = 0;
         }
 

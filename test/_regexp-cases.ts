@@ -293,20 +293,6 @@ export const regexpCases: Record<string, RegExpCase> = {
     regex: /^\/path\/(?<_0>png|jpg|gif)\/?$/,
     match: [["/path/png", { "0": "png" }]],
   },
-  "/path/:id(\\d+)+": {
-    regex: /^\/path\/(?<id>\d+(?:\/\d+)*)\/?$/,
-    match: [
-      ["/path/123", { id: "123" }],
-      ["/path/123/456", { id: "123/456" }],
-    ],
-  },
-  "/path/:id(\\d+)*": {
-    regex: /^\/path(?:\/(?<id>\d+(?:\/\d+)*))?\/?$/,
-    match: [
-      ["/path/123", { id: "123" }],
-      ["/path", { id: undefined }],
-    ],
-  },
   "/book{s}?": {
     regex: /^\/book(?:s)?\/?$/,
     match: [["/book"], ["/books"]],
@@ -1191,9 +1177,7 @@ function allSweepPatterns(): string[] {
       patterns.add(t ? `/a/${u}/${t}` : `/a/${u}`);
     }
   }
-  // Known router limitation, not a regex bug: the tree drops the constraint of
-  // a repeated param (`:id(\d+)+` is stored as `**:id`).
-  return [...patterns].filter((pattern) => !/\)[+*]$/.test(pattern));
+  return [...patterns];
 }
 
 /**
@@ -1236,6 +1220,78 @@ export const UNCLOSED_GROUP_ROUTES: readonly string[] = [
   "/files/(2024/x",
   "/a/(b/(c)",
   "/a{/(b}?",
+];
+
+/**
+ * Pattern syntax with no meaning yet: `addRoute` (and `routeToRegExp`,
+ * `routeNodeKeys`, which share its pipeline) reject it with a `rou3:` error
+ * quoting the route, so it can be given one later. Each was accepted with a
+ * wrong or silent meaning, or threw a raw `SyntaxError`.
+ */
+export const RESERVED_SYNTAX_ROUTES: readonly string[] = [
+  // A repeat modifier on a constrained param dropped the constraint in the
+  // tree (`/a/b/c` matched with `x: "b/c"`, the regex kept it).
+  "/a/:x(\\d+)+",
+  "/a/:x(\\d+)*",
+  "/a/:x(\\d+)+/b",
+  // ... and on a param in a mixed segment dropped the rest of it
+  // (`/a/pre-:x+` matched `/a/b` with `x: "b"`).
+  "/a/pre-:x+",
+  "/a/pre-:x*",
+  "/a/:x.:y+",
+  // A modifier on an unnamed group: `(\d+)+` backtracks exponentially,
+  // `(\d+)*` read as a group then a `*`, `(\d+)?` did not match `/a`.
+  "/a/(\\d+)+",
+  "/a/(\\d+)*",
+  "/a/(\\d+)?",
+  "/a/x(\\d+)?y",
+  // Anything after `**:name` in its segment was part of the name.
+  "/a/**:x(\\d+)",
+  "/a/**:x:y",
+  "/a/**:x.json",
+  // A `:` without a name was a literal `:` (a `\\:` still is).
+  "/a/:",
+  "/a/**:",
+  "/a/x:",
+  "/a/:\u00e9",
+  "/a/:(\\d+)",
+  // A name can't start or end with `-` (`:x-?` is `:x`, `-` and a stray `?`)
+  "/a/:-x",
+  "/a/**:x-",
+  "/a/:x-?",
+  // A modifier where none applies was a raw regex quantifier.
+  "/a/**?",
+  "/a/**+",
+  "/a/*?",
+  "/a/*+",
+  "/a/:x??",
+  "/a/:x?+",
+  "/a/:x+?",
+  "/a/:x.png?",
+  "/a/:x+b",
+  "/a/:x*.png",
+  "/a/:x(\\d+)?.png",
+  // `{…}+` / `{…}*` always threw an invalid-regex `SyntaxError`.
+  "/a/{b}+",
+  "/a/{b}*",
+  "/a{/b}+",
+  "/a/:x{-:y}*",
+  // Unbalanced or nested braces were literals, or mis-parsed (`{{b}?}?`
+  // matched `/a/}?`).
+  "/a/{b",
+  "/a/b}",
+  "/a/{b}}",
+  "/a/{{b}}",
+  "/a/{{b}?}?",
+  "/a{/b{/c}?}?",
+  // Empty groups and `(?` at segment level (`(?<n>x)` was an undocumented
+  // named param, `(?:x)` threw a raw `SyntaxError`).
+  "/a/()",
+  "/a/:x()",
+  "/a/(?<n>x)",
+  "/a/(?:x)",
+  "/a/:x(?:a|b)",
+  "/a/x(?=y)",
 ];
 
 /** Whether `addRoute` accepts `pattern`. */

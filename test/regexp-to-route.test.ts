@@ -214,6 +214,13 @@ describe("regExpToRoute", () => {
     expect(() => regExpToRoute(/^\/a\/(?<__rou3_esc_x_h>[^/]+)\/?$/)).toThrow(/rou3: /);
   });
 
+  it("rejects the constrained repeat form older versions emitted", () => {
+    // `:id(\d+)+` / `:id(\d+)*` are rejected by `addRoute` now (the tree
+    // dropped the constraint), so their old regexes have no route form.
+    expect(() => regExpToRoute(/^\/path\/(?<id>\d+(?:\/\d+)*)\/?$/)).toThrow(/^rou3: /);
+    expect(() => regExpToRoute(/^\/path(?:\/(?<id>\d+(?:\/\d+)*))?\/?$/)).toThrow(/^rou3: /);
+  });
+
   it("re-escapes literal route-syntax characters", () => {
     // A literal `*` in the source must come back escaped so it stays literal.
     expect(regExpToRoute(/^\/static\/\*\/\*\*\/?$/)).toBe("/static/\\*/\\*\\*");

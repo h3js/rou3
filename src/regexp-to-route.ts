@@ -279,16 +279,12 @@ function parseSegments(src: string, atEnd: boolean, dot: boolean, inGroup = fals
 
 /** Reverse a single segment (no top-level separators) into route syntax. */
 function reverseSegment(seg: string): string {
-  // Whole-segment repeat forms: `:name+` / `:name(pat)+`.
+  // Whole-segment repeat form `:name+` (a constrained one, `PAT(?:/PAT)*`
+  // as older versions emitted for `:name(pat)+`, has no route form: its `/`
+  // makes `constraint()` throw).
   const whole = matchNamedGroup(seg, 0);
-  if (whole && whole.end === seg.length) {
-    if (whole.body === ".+") {
-      return `:${whole.name}+`;
-    }
-    const rep = matchRepeat(whole.body);
-    if (rep) {
-      return `:${whole.name}${constraint(rep)}+`;
-    }
+  if (whole && whole.end === seg.length && whole.body === ".+") {
+    return `:${whole.name}+`;
   }
 
   let out = "";
@@ -483,22 +479,12 @@ function optionalParam(name: string, body: string, dot: boolean): string {
   if (isCatchAll(body, dot)) {
     return `:${name}*`;
   }
-  const rep = matchRepeat(body);
-  if (rep) {
-    return `:${name}${constraint(rep)}*`;
-  }
   return `:${name}${constraint(body)}?`;
 }
 
 // `(?:(?<x>[\s\S]*)\/)?(?<y>[^/]*)`: a catch-all and a lone optional last
 // segment in one optional group.
 const NESTED_CATCH_ALL = /^\(\?:\(\?<(\w+)>\[\\s\\S\]\*\)\\\/\)\?\(\?<(\w+)>\[\^\/\]\*\)$/;
-
-/** Detect `PAT(?:/PAT)*` (the `+`/`*` repeat form) and return `PAT`. */
-function matchRepeat(body: string): string | undefined {
-  const m = body.match(/^(.+)\(\?:\\\/(.+)\)\*$/);
-  return m && m[1] === m[2] ? m[1] : undefined;
-}
 
 /**
  * Wrap an inline param constraint as `(body)`, rejecting bodies that contain a
