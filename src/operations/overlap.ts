@@ -2,6 +2,7 @@ import { mayMatchAt, routeToShapes, shapeOf, shapesOverlap, visitSuffixTrie } fr
 import { shapeSubsumes } from "../_subsume.ts";
 import type { Edge, RouteShape } from "../_overlap.ts";
 import type { MatchedRoute, Node, RouterContext } from "../types.ts";
+import { methodEntries } from "./_utils.ts";
 
 /**
  * How the match-sets of two route patterns relate. See {@link compareRoutes}.
@@ -98,9 +99,9 @@ export function compareRoutes(patternA: string, patternB: string): RouteComparis
  * Results are ordered least- to most-specific (same traversal order as
  * `findAllRoutes`; a route with segments after `**` comes right after the bare
  * `**` it follows, as a scope has no last segment to rank from) and method
- * handling mirrors `findAllRoutes` (`method`, falling back to the
- * method-agnostic `""` bucket). Overlap semantics are identical to
- * {@link routesOverlap}.
+ * handling mirrors `findAllRoutes`: routes registered for `method` and
+ * method-agnostic (`""`) ones are both reported, the `""` ones first on a
+ * shared node. Overlap semantics are identical to {@link routesOverlap}.
  *
  * Returned matches carry only `data` — a pattern describes a whole scope rather
  * than one concrete path, so no `params` can be resolved. A route registered
@@ -186,7 +187,9 @@ function _collectEntries<T>(
   seen: Set<unknown>,
   matches: MatchedRoute<T>[],
 ): void {
-  const data = node.methods![method] || node.methods![""];
+  // The node's method-agnostic ("") entries, then the method's own (siblings,
+  // as in findAllRoutes)
+  const data = methodEntries(node.methods!, method);
   if (data) {
     for (const entry of data) {
       const d = entry.data;

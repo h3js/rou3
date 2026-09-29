@@ -314,9 +314,9 @@ describe("param names end before a `-` that no word char follows", () => {
 });
 
 describe("method-agnostic fallback (compiled parity)", () => {
-  // Runtime resolves `methods[m] || methods[""]` per node: when a
-  // method-scoped entry exists, the agnostic sibling is never consulted for
-  // that method — even if the scoped matcher's conditions (regex) fail.
+  // A node's method-agnostic (`""`) entries are siblings of its method-scoped
+  // ones: when every method-scoped matcher fails (regex), the `""` one still
+  // matches (it used to be hidden, see test/method-agnostic.test.ts).
   const router = createEmptyRouter<{ path: string }>();
   addRoute(router, "GET", "/x/:id(\\d+)", { path: "GET-DATA" });
   addRoute(router, "", "/x/:id", { path: "AGN" });
@@ -328,9 +328,9 @@ describe("method-agnostic fallback (compiled parity)", () => {
   ];
 
   for (const { name, match } of lookups) {
-    it(`agnostic sibling is not a fallback for a failed method-scoped matcher (${name})`, () => {
+    it(`agnostic sibling is a fallback for a failed method-scoped matcher (${name})`, () => {
       expect(match("GET", "/x/42")).toMatchObject({ data: { path: "GET-DATA" } });
-      expect(match("GET", "/x/abc")).toBeUndefined();
+      expect(match("GET", "/x/abc")).toMatchObject({ data: { path: "AGN" } });
       expect(match("POST", "/x/abc")).toMatchObject({ data: { path: "AGN" } });
     });
   }

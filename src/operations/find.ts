@@ -118,6 +118,11 @@ function _lookupTree<T>(
  * fails is skipped entirely, so lookup falls through to less specific
  * siblings or other node kinds instead of aborting.
  *
+ * The method's entries and the method-agnostic (`""`) ones are siblings: a
+ * `""` entry is chosen when it is strictly more specific, or when no entry of
+ * the method fully matches (a method-scoped entry never hides it). On equal
+ * weight the method-scoped entry wins.
+ *
  * `optionalOnly` implements the end-of-path fallback: one param/wildcard node
  * can hold both required (`:id`, `**:name`) and optional (`*`, `**`) routes,
  * in any insertion order — only the optional ones match zero segments.
@@ -129,13 +134,18 @@ function _selectMatcher<T>(
   dynamicTerminal: boolean,
   optionalOnly: boolean,
 ): MethodData<T> | undefined {
-  const match = methods[method] || methods[""];
+  let any = methods[""];
+  const match = methods[method] || any;
   if (!match) {
     return;
   }
+  // The `""` entries when they are not `match` already
+  if (match === any) {
+    any = undefined;
+  }
   // Fast path: a single sibling with no regex constraints (the common case)
   const first = match[0];
-  if (match.length === 1 && first.paramsRegexp.length === 0) {
+  if (!any && match.length === 1 && first.paramsRegexp.length === 0) {
     if (!optionalOnly) {
       return first;
     }
@@ -144,28 +154,33 @@ function _selectMatcher<T>(
   }
   let best: MethodData<T> | undefined;
   let bestWeight = -1;
-  for (const m of match) {
-    const pMap = m.paramsMap;
-    const lastOptional = pMap?.[pMap.length - 1]?.[2];
-    if (optionalOnly && !lastOptional) {
-      continue;
-    }
-    // Required last param on a dynamic terminal weighs one point; a failed
-    // regex drops the entry below any candidate (bestWeight starts at -1)
-    let weight = dynamicTerminal && pMap && !lastOptional ? 1 : 0;
-    const regexps = m.paramsRegexp;
-    for (let i = 0; i < regexps.length; i++) {
-      if (regexps[i]) {
-        if (!regexps[i].test(segments[i])) {
-          weight = -1;
-          break;
-        }
-        weight++;
+  // `""` entries after the method's, so they only win on a higher weight (two
+  // passes instead of a concat: no allocation per lookup)
+  let list: MethodData<T>[] | undefined = match;
+  for (; list; list = list === any ? undefined : any) {
+    for (const m of list) {
+      const pMap = m.paramsMap;
+      const lastOptional = pMap?.[pMap.length - 1]?.[2];
+      if (optionalOnly && !lastOptional) {
+        continue;
       }
-    }
-    if (weight > bestWeight) {
-      best = m;
-      bestWeight = weight;
+      // Required last param on a dynamic terminal weighs one point; a failed
+      // regex drops the entry below any candidate (bestWeight starts at -1)
+      let weight = dynamicTerminal && pMap && !lastOptional ? 1 : 0;
+      const regexps = m.paramsRegexp;
+      for (let i = 0; i < regexps.length; i++) {
+        if (regexps[i]) {
+          if (!regexps[i].test(segments[i])) {
+            weight = -1;
+            break;
+          }
+          weight++;
+        }
+      }
+      if (weight > bestWeight) {
+        best = m;
+        bestWeight = weight;
+      }
     }
   }
   return best;

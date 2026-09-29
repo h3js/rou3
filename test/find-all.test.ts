@@ -502,38 +502,55 @@ describe("matcher: out-of-bounds segment vs literal 'undefined' key", () => {
   });
 });
 
-describe("matcher: method-agnostic fallback", () => {
+describe("matcher: method-agnostic entries", () => {
   // `_findAllRoutes` asserts interpreter and compiled matchAll agree.
-  // Runtime resolves `methods[m] || methods[""]` per node: a method-scoped
-  // registration fully shadows the method-agnostic one for that method. The
-  // compiled output must not emit both layers (duplicate agnostic layer bug).
+  // A node's method-agnostic (`""`) entries and its method-scoped ones are
+  // siblings: both are returned, the `""` ones first on equal weight (a
+  // method-scoped registration used to hide them, see
+  // test/method-agnostic.test.ts). Each entry is emitted once.
 
-  it("method-scoped entry shadows the agnostic sibling on a wildcard node", () => {
+  it("the agnostic sibling on a wildcard node is kept", () => {
     const router = createEmptyRouter<{ path: string }>();
     addRoute(router, "", "/api/**", { path: "AGN" });
     addRoute(router, "GET", "/api/**", { path: "GET-DATA" });
-    expect(_findAllRoutes(router, "GET", "/api/x")).toEqual(["GET-DATA"]);
+    expect(_findAllRoutes(router, "GET", "/api/x")).toEqual(["AGN", "GET-DATA"]);
     expect(_findAllRoutes(router, "POST", "/api/x")).toEqual(["AGN"]);
   });
 
-  it("shadowing is independent of registration order", () => {
+  it("the order is independent of registration order", () => {
     const router = createEmptyRouter<{ path: string }>();
     addRoute(router, "GET", "/api/**", { path: "GET-DATA" });
     addRoute(router, "", "/api/**", { path: "AGN" });
-    expect(_findAllRoutes(router, "GET", "/api/x")).toEqual(["GET-DATA"]);
+    expect(_findAllRoutes(router, "GET", "/api/x")).toEqual(["AGN", "GET-DATA"]);
     expect(_findAllRoutes(router, "POST", "/api/x")).toEqual(["AGN"]);
   });
 
-  it("static and param nodes shadow the same way", () => {
+  it("static and param nodes behave the same way", () => {
     const router = createEmptyRouter<{ path: string }>();
     addRoute(router, "", "/api", { path: "S-AGN" });
     addRoute(router, "GET", "/api", { path: "S-GET" });
     addRoute(router, "", "/api/:id", { path: "P-AGN" });
     addRoute(router, "GET", "/api/:id", { path: "P-GET" });
-    expect(_findAllRoutes(router, "GET", "/api")).toEqual(["S-GET"]);
+    expect(_findAllRoutes(router, "GET", "/api")).toEqual(["S-AGN", "S-GET"]);
     expect(_findAllRoutes(router, "POST", "/api")).toEqual(["S-AGN"]);
-    expect(_findAllRoutes(router, "GET", "/api/1")).toEqual(["P-GET"]);
+    expect(_findAllRoutes(router, "GET", "/api/1")).toEqual(["P-AGN", "P-GET"]);
     expect(_findAllRoutes(router, "POST", "/api/1")).toEqual(["P-AGN"]);
+    expect(_findAllRoutes(router, "", "/api/1")).toEqual(["P-AGN"]);
+  });
+
+  it("orders both buckets by specificity (ordering contract)", () => {
+    // `/api/*` is a superset of `/api/:id(\d+)`, so it comes first whichever
+    // bucket each is in
+    expect(compareRoutes("/api/*", "/api/:id(\\d+)")).toBe("superset");
+    for (const [broad, narrow] of [
+      ["", "GET"],
+      ["GET", ""],
+    ]) {
+      const router = createEmptyRouter<{ path: string }>();
+      addRoute(router, narrow, "/api/:id(\\d+)", { path: "narrow" });
+      addRoute(router, broad, "/api/*", { path: "broad" });
+      expect(_findAllRoutes(router, "GET", "/api/1")).toEqual(["broad", "narrow"]);
+    }
   });
 });
 

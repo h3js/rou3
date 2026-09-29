@@ -113,6 +113,21 @@ The result ordering is a documented contract — see [Result ordering](#result-o
 > [!IMPORTANT]
 > Method should **always be UPPERCASE**.
 
+**Method-agnostic routes:** a route registered with the method `""` matches every method. A lookup for a method sees both the routes registered for that method and the method-agnostic ones, whichever patterns they use:
+
+```js
+addRoute(router, "", "/users/*", { auth: true }); // any method
+addRoute(router, "GET", "/users/:id(\\d+)", { handler: "user" });
+
+findAllRoutes(router, "GET", "/users/42").map((m) => m.data);
+// [{ auth: true }, { handler: "user" }]
+findRoute(router, "GET", "/users/42")?.data; // { handler: "user" }
+findRoute(router, "GET", "/users/me")?.data; // { auth: true }
+findRoute(router, "POST", "/users/42")?.data; // { auth: true }
+```
+
+`findRoute` returns the most specific match as usual (see [Result ordering](#result-ordering)); only between **equally specific** routes does the method-scoped one win over the method-agnostic one (and comes after it in `findAllRoutes`). A lookup with the method `""` sees the method-agnostic routes only.
+
 > [!TIP]
 > If you need to register a pattern containing literal `:` or `*`, you can escape them with `\\`. For example, `/static\\:path/\\*\\*` matches only the static `/static:path/**` route.
 
@@ -229,7 +244,7 @@ findAllRoutes(router, "GET", "/api/v1/users/42").map((m) => m.data.name);
 Precisely:
 
 - **Across the tree:** at each level, wildcard (`**`) matches are emitted first, then single-segment params (`*`, `:name`), then static segments — so wilder/shallower routes come before more-static/deeper ones.
-- **Same-node siblings** (multiple routes ending on the same dynamic node, e.g. `/foo/*` and `/foo/:id(\d+)`): ordered by ascending specificity — optional/unconstrained entries before required/regex-constrained ones — with **insertion order preserved on ties**.
+- **Same-node siblings** (multiple routes ending on the same dynamic node, e.g. `/foo/*` and `/foo/:id(\d+)`): ordered by ascending specificity — optional/unconstrained entries before required/regex-constrained ones — with **insertion order preserved on ties**. Method-agnostic (`""`) routes and the method's own routes on a node are ordered together by this rule; on a tie the method-agnostic one comes first (so `findRoute` picks the method-scoped one).
 - **Subsumption consistency (patterns without optional syntax):** when the registered patterns use **no** optional syntax and are strictly ordered by containment (each a `"superset"` of the next per [`compareRoutes`](#pattern-overlap)), the result order agrees with the subsumption order (broader first).
 - **Carve-out — optional syntax:** a pattern containing `:name?`, `:name*` or `{...}?` registers **several** entries (one per expansion), and results are ordered by the specificity of the **entry that matched**, not by the breadth of the whole pattern. A pattern that is a `"superset"` of another can therefore come **last**:
 
@@ -307,7 +322,7 @@ findOverlappingRoutes(router, "GET", "/protected/feed/**");
 
   Useful for ordering patterns by specificity and detecting ambiguous pairs where "most specific match" is undefined. Every verdict's containment claims are proofs, and undecidable cases degrade to a **weaker verdict, never a wrong claim**: containment between two different regex constraints falls back to `"partial"` (even when the sets are actually disjoint — see the over-approximation note below — or actually equal), and an actually-equal pair whose equality is only provable in one direction (e.g. `/u/:id(42)` vs `/u/42`) reports the proven containment instead of `"equal"`.
 
-- **`findOverlappingRoutes(router, method, pattern)`** — like `findAllRoutes`, but the query is a **pattern** instead of a concrete path. Returns every registered route whose match-set intersects the pattern, ordered least → most specific, with the same method handling as `findAllRoutes` (falls back to the method-agnostic bucket). Matches carry only `data` — a scope has no single concrete path, so no `params` are resolved. A single route registered with optional/group syntax expands into several tree entries sharing one `data` reference and is reported once; distinct routes are always reported separately, even when they share an equal primitive `data` value (or none).
+- **`findOverlappingRoutes(router, method, pattern)`** — like `findAllRoutes`, but the query is a **pattern** instead of a concrete path. Returns every registered route whose match-set intersects the pattern, ordered least → most specific, with the same method handling as `findAllRoutes` (routes for the method and method-agnostic ones). Matches carry only `data` — a scope has no single concrete path, so no `params` are resolved. A single route registered with optional/group syntax expands into several tree entries sharing one `data` reference and is reported once; distinct routes are always reported separately, even when they share an equal primitive `data` value (or none).
 
 **Overlap semantics** are computed with rou3's own segment/radix rules, so they stay consistent with `findRoute`/`findAllRoutes`:
 
@@ -329,24 +344,16 @@ routeNodeKeys("/**:path/og.png"); // ["/**/og.png"]
 routeNodeKeys("/a/:x?"); // ["/a", "/a/*"]  -> optional syntax lands on two nodes
 ```
 
-**Why it matters:** routes on the same node share one bucket of handlers, and lookup takes `methods[method]` first, falling back to `methods[""]` only if there is none. So a method-scoped route hides a method-agnostic one registered on the same node:
-
-```js
-const router = createRouter();
-addRoute(router, "", "/users/*", { basicAuth: true }); // method-agnostic gate
-addRoute(router, "GET", "/users/:id", { handler }); // different text, same node
-
-findAllRoutes(router, "GET", "/users/42").map((m) => m.data);
-// [{ handler }] — the gate is gone
-```
-
-If you keep your own per-route metadata (route rules, middleware, auth gates) in a map keyed by **pattern text**, `"/users/*"` and `"/users/:id"` look like two entries while rou3 has only one — and one of them silently disappears. Key that map by `routeNodeKeys` instead, and merge entries that share a key. The guarantee runs both ways:
+**Why it matters:** routes on the same node are same-node siblings — for one lookup, `findRoute` returns at most one of them (the most specific, see [Result ordering](#result-ordering)), and the tree cannot tell `"/users/*"` and `"/users/:id"` apart beyond their param names and constraints. If you keep your own per-route metadata (route rules, middleware, auth gates) in a map keyed by **pattern text**, those look like two unrelated entries while rou3 has one slot; key that map by `routeNodeKeys` to see which registrations compete (e.g. to warn about a route that another one shadows, or to merge per-node metadata). The guarantee runs both ways:
 
 > `routeNodeKeys(a)` and `routeNodeKeys(b)` intersect **⟺** `a` and `b` share a node (hence one bucket).
 
 - The result is an array because optional syntax (`:x?`, `:x*`, `{...}?`) registers on several nodes (`/x{/a}?{/b}?` registers 4). It is deduplicated.
 - Each key is itself a valid route pattern for exactly the node it names, so keys work directly as ids: `routeNodeKeys(k)` is `[k]`.
 - Invalid patterns throw exactly as `addRoute` does.
+
+> [!NOTE]
+> Up to rou3 0.10, lookup resolved a node with `methods[method] || methods[""]`, so a method-scoped route **hid** a method-agnostic one on the same node (`""` `/users/*` + `GET` `/users/:id`: `findAllRoutes(router, "GET", "/users/42")` dropped the `""` gate, and `findRoute(router, "GET", "/users")` found nothing). Method-agnostic routes are now siblings of the method's own (see [Method-agnostic routes](#usage)), so node sharing no longer changes which routes a lookup returns.
 
 > [!IMPORTANT]
 > Sharing a node does **not** mean matching the same paths. The key drops regex constraints and widens `**:name` to `**`, so `/u/:id(\d+)` and `/u/:slug([a-z]+)` share the key `/u/*` but match **disjoint** paths. Merging too much is the safe direction for metadata, but to ask which paths two patterns share, use [`compareRoutes`](#pattern-overlap) — the two answers are independent in both directions (`"equal"` patterns need not share a node either).

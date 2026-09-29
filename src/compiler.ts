@@ -182,12 +182,18 @@ function compileStaticMatch(ctx: CompilerContext): string {
   const matchAll = ctx.opts?.matchAll;
 
   const entries: [nk: string, node: Node<any>][] = [];
+  // Some path has both method-agnostic ("") and method-scoped routes: matchAll
+  // must collect both (static entries all weigh the same, the "" ones first)
+  let mixed = false;
   for (const key in ctx.router.static) {
     const node = ctx.router.static[key];
     if (node?.methods) {
       // Keys are already in the stripped lookup form (root is ""), mirroring
       // the interpreter's `ctx.static` fast path
       entries.push([key, node]);
+      if (node.methods[""]?.length && Object.keys(node.methods).length > 1) {
+        mixed = true;
+      }
     }
   }
 
@@ -238,6 +244,11 @@ function compileStaticMatch(ctx: CompilerContext): string {
   const push = ctx.rank
     ? `{r.push({data:_a[_i]});k.push(${rankDescriptor(ctx)})}`
     : `r.push({data:_a[_i]});`;
+  if (mixed) {
+    // Emit order is reversed at the end: the method's entries, then the "" ones
+    const loop = `if(_a!==void 0)for(let _i=_a.length-1;_i>=0;_i--)${push}`;
+    return `${lookup}if(_n!==void 0){let _a=_n[m];${loop}if(m!==""){_a=_n[""];${loop}}}`;
+  }
   return `${lookup}if(_n!==void 0){let _a=_n[m];if(_a===void 0)_a=_n[""];if(_a!==void 0)for(let _i=_a.length-1;_i>=0;_i--)${push}}`;
 }
 
@@ -249,37 +260,37 @@ function compileMethodMatch(
   // Suffix trie node: `l>…` when the `**` still has a segment (for `**:name`)
   suffixGuard?: string,
 ): string {
+  // Emit order: the most specific matcher first. matchAll emits via `r.push`
+  // + one final `r.reverse()` (final array least->most specific); the reverse
+  // flips emit order, so pre-reverse to keep equal-weight siblings in
+  // insertion order (issue #187). Single-match returns on the first hit, so
+  // ties stay in insertion order (mirrors findRoute).
+  const compile = (matchers: MethodData<any>[]) => {
+    const compiled = matchers.map((m) =>
+      compileFinalMatch(ctx, m, currentIdx, params, suffixGuard),
+    );
+    return ctx.opts?.matchAll && !ctx.collector ? compiled.reverse() : compiled;
+  };
+  const emit = (compiled: { code: string; weight: number }[]) =>
+    compiled
+      .sort((a, b) => b.weight - a.weight)
+      .map((m) => m.code)
+      .join("");
+  // Method-agnostic ("") entries are siblings of each method's entries (a
+  // method-scoped entry never hides them): emitted after them, so on equal
+  // weight the method-scoped one is tried first (single-match) and comes last
+  // (matchAll), mirroring `methodEntries` / `_selectMatcher`.
+  const any = methods[""]?.length ? compile(methods[""]) : undefined;
   let code = "";
-  let fallback = "";
   for (const key in methods) {
     const matchers = methods[key];
-    if (matchers && matchers.length > 0) {
-      // Sort descending by weight so the most specific matcher is tried first.
-      // matchAll emits via `r.push` + one final `r.reverse()` (final array
-      // least->most specific); the reverse flips emit order, so pre-reverse to
-      // keep equal-weight siblings in insertion order (issue #187).
-      // Single-match returns on the first hit, so ties stay in insertion
-      // order (mirrors findRoute).
-      const compiled = matchers.map((m) =>
-        compileFinalMatch(ctx, m, currentIdx, params, suffixGuard),
-      );
-      if (ctx.opts?.matchAll && !ctx.collector) {
-        compiled.reverse();
-      }
-      const body = compiled
-        .sort((a, b) => b.weight - a.weight)
-        .map((m) => m.code)
-        .join("");
-      if (key === "") {
-        fallback = body;
-      } else {
-        code += `${code ? "else " : ""}if(m===${JSON.stringify(key)}){${body}}`;
-      }
+    if (key !== "" && matchers && matchers.length > 0) {
+      const own = compile(matchers);
+      const body = emit(any ? own.concat(any) : own);
+      code += `${code ? "else " : ""}if(m===${JSON.stringify(key)}){${body}}`;
     }
   }
-  // Method-agnostic ("") entries are a fallback only — runtime resolves
-  // `methods[m] || methods[""]`, so a method-scoped entry shadows them even
-  // when its own conditions fail. Emit behind `else`, not unconditionally.
+  const fallback = any ? emit(any) : "";
   return fallback ? (code ? `${code}else{${fallback}}` : fallback) : code;
 }
 

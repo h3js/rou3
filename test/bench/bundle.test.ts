@@ -79,8 +79,12 @@ describe("benchmark", () => {
     // its own segment (`/files/(2024`, #199, or a `/` inside a constraint:
     // `:id([^/]+)`) with a `rou3:` error; `new RegExp` threw a raw
     // `SyntaxError` naming internal group names.
-    expect(bytes).toBeLessThanOrEqual(9025); // <9.025kb
-    expect(gzipSize).toBeLessThanOrEqual(3620); // <3.62kb
+    // +~66B raw / +~71B gzip: a node's method-agnostic ("") entries are
+    // siblings of its method-scoped ones (`methodEntries`, `_selectMatcher`
+    // with an allocation-free two-pass loop): a method-scoped entry no longer
+    // hides them from findRoute or findAllRoutes.
+    expect(bytes).toBeLessThanOrEqual(9090); // <9.09kb
+    expect(gzipSize).toBeLessThanOrEqual(3690); // <3.69kb
   });
 });
 
