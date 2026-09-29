@@ -127,8 +127,11 @@ describe("benchmark", () => {
     // (`/a/**:x{s}?` named `x\s`, an escape `scanFirstGroup` added).
     // +32B raw / +17B gzip: the modifier error names `:name(…)` and says no
     // modifier follows a `**:name` (it read as wrong for `/p/**:i?`).
-    expect(bytes).toBeLessThanOrEqual(10511); // <10.52kb
-    expect(gzipSize).toBeLessThanOrEqual(4392); // <4.40kb
+    // +39B raw / +18B gzip: the quoted name drops only the `\` a group put
+    // before a name char outside a constraint (`**:x(\d+)` read `x(d+)`) and
+    // decodes the escape placeholders (`**:x\:y` read `x\uFFFD0y`).
+    expect(bytes).toBeLessThanOrEqual(10550); // <10.56kb
+    expect(gzipSize).toBeLessThanOrEqual(4410); // <4.41kb
   });
 });
 

@@ -708,6 +708,13 @@ describe("reserved pattern syntax", () => {
       // No `\` the route doesn't hold (`scanFirstGroup` escapes the `s`)
       ["/a/**:x{s}?", "xs"],
       ["/a/**:x{s}", "xs"],
+      ["/a/**:x{s}{t}?", "xst"],
+      // ... but the ones it holds, as written
+      ["/a/**:x(\\d+)", "x(\\d+)"],
+      ["/a/**:x(a){s}", "x(a)s"],
+      ["/a/**:x\\:y", "x\\:y"],
+      ["/a/**:x\\.json", "x\\.json"],
+      ["/a/**:x\\(y\\)", "x\\(y\\)"],
     ]) {
       expect(() => addRoute(createRouter(), "", route), route).toThrow(
         `rou3: invalid param name "${name}" (${route})`,

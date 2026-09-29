@@ -228,13 +228,15 @@ function _add<T>(
 /**
  * Record param `name` of an expansion of `input`, throwing on a repeat or on
  * a name that is not `[A-Za-z_]\w*` (`:0`, `:café`, `**:x(\\d+)`, `**:x.json`:
- * a `**:name` ends its segment). The quoted name drops `\`s: a `**:name` runs
- * to its segment's end, where a group may have escaped a char (`**:x{s}?`).
+ * a `**:name` ends its segment). A `**:name` runs to its segment's end, so
+ * the quoted name drops the `\` a group put before a name char outside a
+ * constraint (`**:x{s}?` names `xs`) and decodes `encodeEscapes`' placeholders
+ * (`**:x\:y` names `x\:y`).
  */
 function addName(names: string[], name: string, input: string): string {
   if (names.includes(name) || !/^[A-Za-z_]\w*$/.test(name)) {
     invalidSyntax(
-      `${names.includes(name) ? "duplicate" : "invalid"} param name "${name.replace(/\\/g, "")}"`,
+      `${names.includes(name) ? "duplicate" : "invalid"} param name "${decodeEscapes(name.replace(/\\(?=[\w$\x80-\ufffc])(?![^(]*\))/g, ""), "\\")}"`,
       input,
     );
   }
