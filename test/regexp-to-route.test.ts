@@ -205,6 +205,21 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(/^\/a\/(?<x>[(]\(a)\/?$/)).toBe("/a/:x([(]\\(a)");
   });
 
+  it("writes a lone optional param ending its segment as `:x?`", () => {
+    expect(regExpToRoute(/^\/a\/pre-(?:(?<x>[^/]+?))?\/?$/)).toBe("/a/pre-:x?");
+    expect(regExpToRoute(/^\/a\/pre-(?:(?<x>\d+))?\/b\/?$/)).toBe("/a/pre-:x(\\d+)?/b");
+    // Only where the group ends the segment: `b:x?{.:y}?` is no route.
+    const cases: [RegExp, string][] = [
+      [/^\/a\/b(?:(?<x>[^/]+))?(?:\.(?<y>[^/]+))?\/?$/, "/a/b{:x}?{.:y}?"],
+      [/^\/a\/b(?:(?<x>[^/]+))?(?:(?<y>[^/]+))?\/?$/, "/a/b{:x}?{:y}?"],
+      [/^\/a\/b(?:-(?<x>[^/]+))?(?:(?<y>[^/]+))?\/?$/, "/a/b{-:x}?{:y}?"],
+    ];
+    for (const [re, route] of cases) {
+      expect(regExpToRoute(re), re.source).toBe(route);
+      expect(() => addRoute(createRouter(), "", route)).not.toThrow();
+    }
+  });
+
   it("escapes a literal that would extend the param name before it", () => {
     // A name is `[A-Za-z_]\w*`: a word char right after `:name` would read as
     // more of the name, and a non-ASCII one is rejected there. A `-` ends it.

@@ -496,6 +496,82 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/f/a", "/f"],
   },
+  // After a lone `:a`, the route without `b` is the whole-segment `/:a`,
+  // which takes an empty segment.
+  "/:a:b?": {
+    regex: /^\/(?:(?<a>[^/]+?)(?:(?<b>[^/]+?))?\/?|\/)$/,
+    match: [
+      ["/xyz", { a: "x", b: "yz" }],
+      ["/x", { a: "x", b: undefined }],
+      ["//", { a: undefined, b: undefined }, { a: "" }],
+    ],
+    noMatch: ["/", "///"],
+  },
+  "/a/:a:b?/z": {
+    regex: /^\/a\/(?<a>[^/]+?|)(?:(?<b>[^/]+?))?\/z\/?$/,
+    match: [
+      ["/a//z", { a: "", b: undefined }],
+      ["/a/xy/z", { a: "x", b: "y" }],
+    ],
+    noMatch: ["/a/z"],
+  },
+  "/:a:b(\\d+)?": {
+    regex: /^\/(?:(?<a>[^/]+?)(?:(?<b>\d+))?\/?|\/)$/,
+    match: [
+      ["/x12", { a: "x", b: "12" }],
+      ["/x1y", { a: "x1y", b: undefined }],
+      ["//", { a: undefined, b: undefined }, { a: "" }],
+    ],
+  },
+  // Captures before the group that can't take the char right after them split
+  // the segment one way only, and so do a segment and its extension that
+  // can't end in the same char: both stay inline.
+  "/:id(\\d+)-x{.png}?": {
+    regex: /^\/(?<id>\d+)-x(?:\.png)?\/?$/,
+    match: [
+      ["/1-x", { id: "1" }],
+      ["/1-x.png", { id: "1" }],
+    ],
+    noMatch: ["/1-x.gif", "/a-x"],
+  },
+  "/img/:w(\\d+)x:h(\\d+){.png}?": {
+    regex: /^\/img\/(?<w>\d+)x(?<h>\d+)(?:\.png)?\/?$/,
+    match: [
+      ["/img/1x2", { w: "1", h: "2" }],
+      ["/img/10x20.png", { w: "10", h: "20" }],
+    ],
+  },
+  "/:a(png|jpg)-x{.gz}?": {
+    regex: /^\/(?<a>png|jpg)-x(?:\.gz)?\/?$/,
+    match: [
+      ["/png-x", { a: "png" }],
+      ["/jpg-x.gz", { a: "jpg" }],
+    ],
+  },
+  "/*-x{.png}?": {
+    regex: /^\/(?<_0>[^/]*)-x(?:\.png)?\/?$/,
+    match: [
+      ["/a-x-x", { "0": "a-x" }],
+      ["/a-x.png", { "0": "a" }],
+      ["/a-x.png-x", { "0": "a-x.png" }],
+    ],
+  },
+  "/blog/:id(\\d+)-:slug?": {
+    regex: /^\/blog\/(?<id>\d+)-(?:(?<slug>[^/]+?))?\/?$/,
+    match: [
+      ["/blog/1-", { id: "1", slug: undefined }],
+      ["/blog/1-a-b", { id: "1", slug: "a-b" }],
+    ],
+  },
+  // ... but not where both can end the same way: the greedy `*` would take
+  // the group's text (the router's `*-x-x` gives `x`).
+  "/*-x{-x}?": {
+    regex: duplicateNames(String.raw`^(?:\/(?<_0>[^/]*)-x-x\/?|\/(?<_0>[^/]*)-x\/?)$`),
+    match: [
+      ["/x-x-x", { "0": "x" }],
+      ["/x-x", { "0": "x" }],
+    ],
+  },
   // Lazy `:name`s before the group: the shortest `x` leaves the group room.
   "/a/:x.a{.a}?/m": {
     regex: /^\/a\/(?<x>[^/]+?)\.a(?:\.a)?\/m\/?$/,
@@ -1077,6 +1153,7 @@ export const LOOKAHEAD_ROUTES: ReadonlySet<string> = new Set(["/files/*{.:ext}?/
 export const PCRE2_DUPLICATE_NAME_ROUTES: ReadonlySet<string> = new Set([
   "/media/*{.webp}?",
   "/f/*-:x?",
+  "/*-x{-x}?",
   "/docs/{v2}?/:page?",
 ]);
 
@@ -1152,9 +1229,31 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   // Two groups.
   "/:x{.:e}?/b{.json}?",
   "/a/:x{.:e}?/b{.json}?",
-  // A mid-segment optional after a greedy capture.
+  // A mid-segment optional after a greedy capture, also where both can end
+  // the same way (`-x` / `-x-x`).
   "/media/*{.webp}?",
   "/f/*-:x?",
+  "/*-x{-x}?",
+  "/*-:e?",
+  "/a/*-:e?",
+  "/*-:e?/a",
+  "/a/*-:e?/a",
+  "/*-:e?/:y",
+  "/a/*-:e?/:y",
+  "/*-:e?/*",
+  "/a/*-:e?/*",
+  "/*-:e?/:y?",
+  "/a/*-:e?/:y?",
+  "/*-:e?/**",
+  "/a/*-:e?/**",
+  "/*-:e?/*.png",
+  "/a/*-:e?/*.png",
+  "/*-:e?/x-:y",
+  "/a/*-:e?/x-:y",
+  "/*-:e?/x-:y?",
+  "/a/*-:e?/x-:y?",
+  "/*-:e?/b{.json}?",
+  "/a/*-:e?/b{.json}?",
   // A `:x*` before a `*` that is optional in the route without it.
   "/a/:r*/b/*",
   "/:r*/*.png/*",
@@ -1247,6 +1346,11 @@ function allSweepPatterns(): string[] {
     ":x.:e",
     "x-:x?",
     "x-:x(\\d+)?",
+    // ... after a lone `:x` (whose route without the param takes an empty
+    // segment), a greedy `*` or a constraint.
+    ":x:e?",
+    "*-:e?",
+    ":x(\\d+)-:e?",
   ];
   const tails = ["", "a", ":y", "*", ":y?", "**", "*.png", "x-:y", "x-:y?", "b{.json}?"];
   const patterns = new Set([

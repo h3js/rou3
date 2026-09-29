@@ -9,6 +9,7 @@ import {
   segmentKey,
   splitRoute,
 } from "./operations/_utils.ts";
+import { appendsCleanly } from "./_optional-append.ts";
 import { canBeEmpty, isOptionalGroups } from "./_regexp-scan.ts";
 import { openOptionals, withTrailingSlash } from "./_trailing-slash.ts";
 
@@ -84,10 +85,10 @@ export function routeToRegExp(route: string = "/"): RegExp {
 /** `routeToRegExp` of `route`, an expansion of `input` (quoted in errors). */
 function toRegExp(route: string, input: string): RegExp {
   // A `?` on a param that does not start its segment makes only the param
-  // optional (see `expandModifiers`): after a `*` or group, `*-:x?` is
-  // `*-{:x}?`. In a route with groups already, it is read once they are
-  // expanded.
-  const inSegment = inSegmentOptional(route);
+  // optional (see `expandModifiers`). Where it can't compile in place,
+  // `*-:x?` is `*-{:x}?`; in a route with groups already, it is read once
+  // they are expanded.
+  const inSegment = inSegmentOptional(route, input);
   if (inSegment !== route && !route.includes("{")) {
     route = inSegment;
   }
@@ -139,21 +140,46 @@ function toRegExp(route: string, input: string): RegExp {
 }
 
 /**
- * `route` with every in-segment optional param after a `*` or a group in its
- * segment (`*-:x?`, `:a(\\d+)-:x?`) written as the group it stands for
- * (`*-{:x}?`, see `expandModifiers`), read with escapes encoded. Captures
- * there may be greedy, so only a group can tell whether the rest of the
- * segment fits the param (`inlineOptionalGroup`). Other `pre-:x?` compile
- * in place (`routeToRegExpSegments`).
+ * `route` with every in-segment optional param (`pre-:x?`, see
+ * `expandModifiers`) that can't compile in place written as the group it
+ * stands for (`*-:x?` as `*-{:x}?`, see `inPlaceOptional`), read with escapes
+ * encoded. In a route with groups already, `toRegExp` expands them first.
  */
-function inSegmentOptional(route: string): string {
+function inSegmentOptional(route: string, input: string): string {
   if (!route.includes("?")) return route;
   const encoded = encodeEscapes(route);
   const out = encoded.replace(
-    /((?:^|\/)[^/]*[*(][^/]*)(:[A-Za-z_]\w*(?:\([^)]*\))?)\?(?=[/{}]|$)/g,
-    "$1{$2}?",
+    /(^|\/)([^/]*?)(:[A-Za-z_]\w*(?:\([^)]*\))?)\?(?=[/{}]|$)/g,
+    (all, sep, pre, param) =>
+      !pre || (!/[{}]/.test(pre) && inPlaceOptional(pre, param, input, 0))
+        ? all
+        : `${sep}${pre}{${param}}?`,
   );
   return out === encoded ? route : decodeEscapes(out, "\\");
+}
+
+/**
+ * The regex of an in-segment optional param `pre` + `param` + `?` (encoded),
+ * `pre(?:param)?`, or `undefined` where earlier captures could take the
+ * param's text (see `appendsCleanly`). After a lone `:name`, the route without
+ * the param ends in a whole `:name`, empty only on an empty segment
+ * (`(?<a>[^/]+?|)`, see `mergeCapture`). `[regex, next unnamed index]`.
+ */
+function inPlaceOptional(
+  pre: string,
+  param: string,
+  input: string,
+  unnamed: number,
+): [string, number] | undefined {
+  const [regexp, next] = getParamRegexp(pre + param, unnamed, [], input, toRegExpUnnamedKey);
+  const source = regexp.source.slice(1, -1);
+  const at = source.lastIndexOf(`(?<${toGroupName(/\w+/.exec(param)![0])}>`);
+  const head = source.slice(0, at);
+  const tail = source.slice(at);
+  if (/^:[A-Za-z_]\w*$/.test(pre)) {
+    return [`${head.slice(0, -1)}|)(?:${tail})?`, next];
+  }
+  return appendsCleanly(head, tail) ? [`${head}(?:${tail})?`, next] : undefined;
 }
 
 /**
@@ -246,13 +272,9 @@ function inlineOptionalGroup(route: string, input: string): RegExp | undefined {
         [merged, lookahead] = capture;
       } else if (
         last.startsWith(prefix) &&
-        // Every capture before the group must be a lazy `:name`: tried
-        // shortest first, it leaves the group the most room, and a later
-        // value only moves text into the next capture, so the first split
-        // that fits is the router's. A greedy `*` (`/media/*{.webp}?`,
-        // `*-{:x}?` on `a-b-`: the router's `*-:x` gives `a` + `b-`) or a
-        // constraint could take the optional part instead.
-        !hasGroup(prefix.replace(/\(\?<\w+>\[\^\/\]\+\?\)/g, ""))
+        // Earlier captures must not take the appended part where the router's
+        // longer route matches (`/media/*{.webp}?`, see `appendsCleanly`).
+        appendsCleanly(prefix, last.slice(k))
       ) {
         merged = `${prefix}(?:${last.slice(k)})?`;
       }
@@ -335,11 +357,6 @@ function mergeCapture(base: string, full: string): [string, boolean] | undefined
   // retrying shorter matches.
   const ahead = rest.replace(/\(\?<\w+>/g, "(?:");
   return [`${head}${wrap(fullBody)}(?=${ahead}(?:/|$))|${wrap(body)}(?![^/]))(?:${rest})?`, true];
-}
-
-/** Whether a regex fragment holds a group (escaped parens aside). */
-function hasGroup(re: string): boolean {
-  return re.replace(/\\[\s\S]/g, "").includes("(");
 }
 
 /**
@@ -671,12 +688,11 @@ function routeToRegExpSegments(
 
         if (mod === "?") {
           if (pre) {
-            // `pre-:x?`: only the param is optional, `pre-(?:(?<x>…))?`. The
-            // text before it holds lazy `:name`s at most (see
-            // `inSegmentOptional`), so the split is the router's.
-            const full = dynamic(pre + base);
-            const at = full.lastIndexOf(`(?<${groupName(/\w+/.exec(base)![0])}>`);
-            reSegments.push(`${full.slice(0, at)}(?:${full.slice(at)})?`);
+            // `pre-:x?`: only the param is optional, `pre-(?:(?<x>…))?`
+            // (`inSegmentOptional` made the others groups).
+            const [regex, next] = inPlaceOptional(pre, base, input, idCtr)!;
+            idCtr = next;
+            reSegments.push(regex);
             nest = 0;
             continue;
           }

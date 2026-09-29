@@ -1040,6 +1040,10 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/a/x-:x?/**",
     "/x-:x(\\d+)?/**",
     "/a/x-:x(\\d+)?/**",
+    "/:x:e?/**",
+    "/a/:x:e?/**",
+    "/*-:e?/**",
+    "/a/*-:e?/**",
   ].map((pattern) => [pattern, ZERO_SEGMENT_CATCH_ALL] as const),
   ...[
     "/**/:y?/:z?",

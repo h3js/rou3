@@ -288,7 +288,11 @@ function parseSegments(src: string, atEnd: boolean, dot: boolean, inGroup = fals
     throw new Error(`rou3: cannot parse "${src}" at index ${i}`);
   }
 
-  return segments;
+  // A lone param group ending a segment after text is `pre-:x?`, which means
+  // `pre-{:x}?` (not before more groups: `b:x?{.:y}?` is no route).
+  return segments.map((segment) =>
+    segment.replace(/^([^{]+)\{(:[A-Za-z_]\w*(?:\([^)]*\))?)\}\?$/, "$1$2?"),
+  );
 }
 
 /** Reverse a single segment (no top-level separators) into route syntax. */
@@ -462,9 +466,7 @@ function mergeGroup(segments: string[], body: string): void {
   if (segments.length === 0) {
     throw new Error(`rou3: optional group "{${body}}?" has no preceding segment`);
   }
-  // A lone param after text in its segment: `pre-:x?` means `pre-{:x}?`.
-  segments[segments.length - 1] +=
-    segments[segments.length - 1] && /^:\w+(?:\([^)]*\))?$/.test(body) ? `${body}?` : `{${body}}?`;
+  segments[segments.length - 1] += `{${body}}?`;
 }
 
 /** Classify a param group inside a segment (`:name`, `*`, `(pat)`, ...). */

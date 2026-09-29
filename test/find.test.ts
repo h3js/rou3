@@ -269,6 +269,9 @@ describe("params sharing a segment (URLPattern)", () => {
     "/d/pre-:x(\\d+)?",
     "/m/pre-:x?/end",
     "/s/{pre-:x}?",
+    "/e/:a:b?",
+    "/g/*-:x?",
+    "/h/:a(\\d+)-:x?",
   ]);
   const compiledLookup = compileRouter(router);
   // eslint-disable-next-line no-new-func
@@ -308,6 +311,16 @@ describe("params sharing a segment (URLPattern)", () => {
       expect(match("/s")?.data).toEqual({ path: "/s/{pre-:x}?" });
       expect(match("/s/pre-a")?.params).toEqual({ x: "a" });
       expect(match("/s/pre-")).toBeUndefined();
+      // The route without `b` is `/e/:a`, which takes an empty segment.
+      expect(match("/e/")).toBeUndefined();
+      expect(match("/e//")?.params).toEqual({ a: "" });
+      expect(match("/e/xyz")?.params).toEqual({ a: "x", b: "yz" });
+      // A greedy `*` or a constraint before it: the route with the param wins.
+      expect(match("/g/a-b-")?.params).toEqual({ "0": "a", x: "b-" });
+      expect(match("/g/a-")?.params).toEqual({ "0": "a" });
+      expect(match("/g/--")?.params).toEqual({ "0": "", x: "-" });
+      expect(match("/h/1-")?.params).toEqual({ a: "1" });
+      expect(match("/h/1-a")?.params).toEqual({ a: "1", x: "a" });
     });
   }
 });

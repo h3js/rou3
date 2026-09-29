@@ -121,7 +121,7 @@ const KNOWN_DIFFS = new Set([
   // `*` catch-all vs single-segment — URLPattern `*` = `(.*)`, rou3 `*` = `([^/]*)`
   "/foo/* → /foo/bar/baz [match]",
 
-  // Trailing slash — rou3 ignores up to two trailing slashes, so `/foo/` is
+  // Trailing slash — rou3 ignores at most one trailing slash, so `/foo/` is
   // `/foo` (no empty last segment), and a trailing `*` is optional. URLPattern
   // matches `/foo/` with an empty capture and rejects `/foo` for `/foo/*`.
   // routeToRegExp reproduces the router here (#200).
