@@ -123,8 +123,10 @@ describe("benchmark", () => {
     // +1B: a `$` right after a name throws (part of it in URLPattern).
     // +~20B raw / +~2B gzip: the modifier error says where `?` and `+` / `*`
     // go (it said a whole-segment `:name` for all three, wrong for `pre-:x?`).
-    expect(bytes).toBeLessThanOrEqual(10461); // <10.47kb
-    expect(gzipSize).toBeLessThanOrEqual(4369); // <4.37kb
+    // +18B raw / +6B gzip: an invalid param name is quoted without `\`s
+    // (`/a/**:x{s}?` named `x\s`, an escape `scanFirstGroup` added).
+    expect(bytes).toBeLessThanOrEqual(10479); // <10.48kb
+    expect(gzipSize).toBeLessThanOrEqual(4375); // <4.38kb
   });
 });
 

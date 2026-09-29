@@ -700,6 +700,9 @@ describe("reserved pattern syntax", () => {
       ["/a/:id$", "id$"],
       ["/:$x", "$x"],
       ["/:café", "café"],
+      // No `\` the route doesn't hold (`scanFirstGroup` escapes the `s`)
+      ["/a/**:x{s}?", "xs"],
+      ["/a/**:x{s}", "xs"],
     ]) {
       expect(() => addRoute(createRouter(), "", route), route).toThrow(
         `rou3: invalid param name "${name}" (${route})`,
