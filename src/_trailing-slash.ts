@@ -53,7 +53,8 @@ function tails(body: string): readonly [any: string, some: string] {
  * the top or after a separator inside a group (`{/sub/:id}?`). The path must
  * not stop right after the segment's separator, so the segment splits into a
  * non-empty branch and one that is just the next slash: `(?:(?<x>[^/]+)/?|/)`
- * at the end, and before optional segments `(?:(?<x>[^/]+)(?:/|$)|/)`,
+ * at the end, and before optional segments `(?:(?<x>[^/]+)(?:/|$)|/)`
+ * (a `:x` merged with a group in its segment likewise, see `nonEmpty`),
  * followed by the optionals without their leading slash (`$` inside an
  * alternation is an anchor, which RE2 has, not a look-around).
  *
@@ -159,12 +160,12 @@ function closedEnding(level: string, starStar: boolean): string | undefined {
   const parsed = parseLevel(level);
   if (!parsed || parsed[2].length > 1) return;
   const [prefix, last, [inner]] = parsed;
+  const some = nonEmpty(last);
   if (inner === undefined) {
-    const param = /^\(\?<(\w+)>(\[\^\/\]\*|\[\\s\\S\]\*|\.\*)\)$/.exec(last);
-    if (!prefix || !param) return;
-    return param[2] === "[^/]*"
-      ? `${prefix}(?:(?<${param[1]}>[^/]+)/?|/)`
-      : `${prefix}(?:/|(?<${param[1]}>${tails(param[2])[1]})/?)`;
+    if (!prefix) return;
+    if (some) return `${prefix}(?:${some}/?|/)`;
+    const param = /^\(\?<(\w+)>(\[\\s\\S\]\*|\.\*)\)$/.exec(last);
+    return param ? `${prefix}(?:/|(?<${param[1]}>${tails(param[2])[1]})/?)` : undefined;
   }
   const tail = optionalTail(inner, starStar);
   if (tail === undefined) return;
@@ -175,8 +176,20 @@ function closedEnding(level: string, starStar: boolean): string | undefined {
   if (last === "") {
     return `${prefix}/${tail}`;
   }
-  const param = /^\(\?<(\w+)>\[\^\/\]\*\)$/.exec(last);
-  return param ? `${prefix}(?:(?<${param[1]}>[^/]+)(?:/|$)|/)${tail}` : undefined;
+  return some ? `${prefix}(?:${some}(?:/|$)|/)${tail}` : undefined;
+}
+
+/**
+ * A last segment that is empty only on an empty path segment, without that
+ * empty match: a whole `:x` (`[^/]*`), or one merged with an optional group
+ * in its segment (`(?<x>[^/]+?|)(?:…)?`, see `mergeCapture` in regexp.ts).
+ */
+function nonEmpty(last: string): string | undefined {
+  const param = /^\(\?<(\w+)>(?:\[\^\/\]\*\)$|\[\^\/\]\+\?\|\)\(\?:)/.exec(last);
+  if (!param) return;
+  return param[0].endsWith("*)")
+    ? `(?<${param[1]}>[^/]+)`
+    : `(?<${param[1]}>[^/]+?)${last.slice(param[0].length - 3)}`;
 }
 
 /**

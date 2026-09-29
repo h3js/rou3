@@ -19,7 +19,8 @@ import {
  * Add a route to the router context.
  *
  * Param names are `[A-Za-z_]\w*`: a `-` ends one (`:test-id` is `:test` and a
- * literal `-id`), as in URLPattern.
+ * literal `-id`), as in URLPattern. Also as there, a `:name` sharing its
+ * segment takes as little as it can (`/:a-:b` on `/x-y-z` is `x` and `y-z`).
  *
  * @throws a `rou3:` error for pattern syntax with no meaning (yet), quoting
  * the pattern: an unclosed `(`, unbalanced or nested `{}`, `{…}+` / `{…}*`,
@@ -239,6 +240,10 @@ function addName(names: string[], name: string, input: string): string {
  * a raw regex quantifier, a `*` right after a name or group is ambiguous with
  * a modifier) and a mid-segment `**`. `routeToRegExp` reuses it (with its own
  * unnamed group keys), so a dynamic segment is the same regex in both.
+ *
+ * A `:name` here shares its segment, so it takes as little as possible
+ * (`[^/]+?`, as in URLPattern: `:a-:b` on `x-y-z` is `x` and `y-z`); a `*`
+ * stays greedy (URLPattern's `*` is a greedy `(.*)`).
  */
 export function getParamRegexp(
   segment: string,
@@ -300,7 +305,7 @@ export function getParamRegexp(
       // Names were checked and recorded above; a `\uFFFE:` is inside a group
       .replace(
         /(?<!\uFFFE):([A-Za-z_]\w*)(?:\(([^)]*)\))?/g,
-        (_, id, p) => `(?<${toGroupName(id)}>${p || "[^/]+"})`,
+        (_, id, p) => `(?<${toGroupName(id)}>${p || "[^/]+?"})`,
       )
       .replace(/\((?![?<])/g, () => `(?<${groupKey(_i++)}>`),
     "\uFFFE",

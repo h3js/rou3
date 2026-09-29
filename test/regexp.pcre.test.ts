@@ -7,6 +7,7 @@ import { ripgrep } from "ripgrep";
 import { routeToRegExp } from "../src/index.ts";
 import {
   regexpCases,
+  LOOKAHEAD_ROUTES,
   LOOKBEHIND_ROUTES,
   PCRE2_DUPLICATE_NAME_ROUTES,
   SWEEP_DUPLICATE_NAME_PATTERNS,
@@ -218,7 +219,11 @@ describe("routeToRegExp RE2 compatibility (ripgrep, Rust regex)", () => {
 
   for (const [route, { match, noMatch = [] }] of Object.entries(regexpCases)) {
     const source = routeToRegExp(route).source;
-    if (LOOKBEHIND_ROUTES.has(route) || PCRE2_DUPLICATE_NAME_ROUTES.has(route)) {
+    if (
+      LOOKBEHIND_ROUTES.has(route) ||
+      LOOKAHEAD_ROUTES.has(route) ||
+      PCRE2_DUPLICATE_NAME_ROUTES.has(route)
+    ) {
       it(`rejects "${route}"`, async () => {
         expect((await re2(source)).code).toBe(2);
       });

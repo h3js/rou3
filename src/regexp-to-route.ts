@@ -1,6 +1,6 @@
 // Inverse of `routeToRegExp()`: parse an anchored, PCRE-compatible RegExp back
 // into a rou3 route pattern. Targets the dialect emitted by `routeToRegExp()`
-// (named groups `(?<name>...)`, `[^/]+`/`[^/]*` segment matchers, `[\s\S]*`
+// (named groups `(?<name>...)`, `[^/]+?`/`[^/]*` segment matchers, `[\s\S]*`
 // catch-alls (`.*`/`.+` in older versions), `(?:/...)?` optional groups, the
 // trailing-slash suffix). Hand-written regexes that follow the same
 // conventions convert too; constructs outside the dialect throw.
@@ -103,6 +103,8 @@ export function regExpToRoute(regexp: RegExp | string): string {
 // - a trailing optional one, possibly inside optional groups: `(?:\/(?<x>.*?))??`
 // - a required `:x` before optional segments: `(?:(?<x>[^/]+)(?:\/|$)|\/)`,
 //   followed by a tail (see `plainBody`)
+// - a required `:x` merged with an optional group in its segment:
+//   `(?:(?<x>[^/]+?)(?:…)?\/?|\/)`, back to `(?<x>[^/]+?|)(?:…)?`
 const REQUIRED_PARAM = /\(\?:\(\?<(\w+)>\[\^\/\]\+\)\\\/\?\|\\\/\)$/;
 const REQUIRED_CATCH_ALL =
   /\(\?:\\\/\|\(\?<(\w+)>\(\?:\[\\s\\S\]\*\[\^\/\]\|\\\/\)\\\/\*\?\)\\\/\?\)$/;
@@ -111,6 +113,7 @@ const TRAILING_CATCH_ALL =
 const ROOT_REPEAT = /^\(\?:\\\/\?\(\?<(\w+)>\(\?:\[\\s\\S\]\*\[\^\/\]\)\?\\\/\*\?\)\)\?\?\\\/\?$/;
 const REQUIRED_DOT = /\(\?:\\\/\|\(\?<(\w+)>\.\+\?\)\\\/\?\)$/;
 const TRAILING_DOT = /(?<=\(\?:\\\/)\(\?<(\w+)>\.\*\?\)(\)\?\?(?:\)\?\??)*)\\\/\?$/;
+const MERGED_PARAM = /^\(\?:\(\?<(\w+)>\[\^\/\]\+\?\)(\(\?:[\s\S]*\)\?)\\\/\?\|\\\/\)$/;
 const REQUIRED_HEAD = /\(\?:\(\?<(\w+)>\[\^\/\]\+\)\(\?:\\\/\|\$\)\|\\\/\)$/;
 const REQUIRED_ENDINGS = [
   [REQUIRED_PARAM, "[^/]*"],
@@ -129,6 +132,16 @@ const REQUIRED_ENDINGS = [
  * with `C` one of these endings.
  */
 function plainBody(src: string, closed: { dot: boolean }): string | undefined {
+  // A required `:x` merged with an optional group in its segment:
+  // `(?:(?<x>[^/]+?)(?:…)?\/?|\/)`.
+  for (let i = src.indexOf("(?:(?<"); i !== -1; i = src.indexOf("(?:(?<", i + 1)) {
+    if (readGroup(src, i) !== src.length) continue;
+    const merged = MERGED_PARAM.exec(src.slice(i));
+    if (merged && readGroup(merged[2], 0) === merged[2].length - 1) {
+      return `${src.slice(0, i)}(?<${merged[1]}>[^/]+?|)${merged[2]}`;
+    }
+    break;
+  }
   for (const [ending, body] of REQUIRED_ENDINGS) {
     const required = ending.exec(src);
     if (required) {
@@ -455,14 +468,15 @@ function mergeGroup(segments: string[], body: string): void {
 /** Classify a param group inside a segment (`:name`, `*`, `(pat)`, ...). */
 function paramToken(name: string, body: string): string {
   const unnamed = /^_\d+$/.test(name);
-  // `*` (unnamed `[^/]*`) and `:name` (named `[^/]*`, or `[^/]+` as older
+  // `*` (unnamed `[^/]*`) and `:name` (named `[^/]*`, `[^/]+?` sharing its
+  // segment, `[^/]+?|` merged with a group after it, or `[^/]+` as older
   // versions emitted) are the only single-segment matchers with dedicated
   // syntax. Every other body becomes an inline `(pat)` constraint, which
   // `constraint()` rejects if it can't survive path splitting.
   if (unnamed && body === "[^/]*") {
     return "*";
   }
-  if (!unnamed && (body === "[^/]*" || body === "[^/]+")) {
+  if (!unnamed && /^\[\^\/\](?:\*|\+|\+\?\|?)$/.test(body)) {
     return `:${name}`;
   }
   return unnamed ? constraint(body) : `:${name}${constraint(body)}`;

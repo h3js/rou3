@@ -126,20 +126,19 @@ export function expandModifiers(segments: string[], input?: string): string[] | 
   for (let i = 0; i < segments.length; i++) {
     const last = segments[i].charCodeAt(segments[i].length - 1);
     if (last !== 63 /* ? */ && last !== 43 /* + */ && last !== 42 /* * */) continue;
-    const m = segments[i].match(/^(.*:[A-Za-z_]\w*(?:\([^)]*\))?)([?+*])$/);
+    const m = segments[i].match(/^(.*)(:[A-Za-z_]\w*(?:\([^)]*\))?)([?+*])$/);
     if (!m) continue;
     const pre = segments.slice(0, i);
     const suf = segments.slice(i + 1);
-    if (m[2] === "?") {
-      return ["/" + pre.concat(m[1]).concat(suf).join("/"), "/" + pre.concat(suf).join("/")];
+    const without = "/" + pre.concat(suf).join("/");
+    if (m[3] === "?") {
+      return ["/" + pre.concat(m[1] + m[2], suf).join("/"), without];
     }
-    if (!/^:[A-Za-z_]\w*$/.test(m[1])) {
+    if (m[1] || m[2].includes("(")) {
       invalidSyntax(MISPLACED_MODIFIER, input!);
     }
-    const name = m[1].slice(1);
-    const wc = "/" + [...pre, `**:${name}`, ...suf].join("/");
-    const without = "/" + [...pre, ...suf].join("/");
-    return m[2] === "+" ? [wc] : [wc, without];
+    const wc = "/" + pre.concat(`**${m[2]}`, suf).join("/");
+    return m[3] === "+" ? [wc] : [wc, without];
   }
 }
 

@@ -96,13 +96,14 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 | `/**.md`                    | `/docs/intro.md`                         | `{ _: "docs", "0": "intro" }`                        |
 | `/book{s}?`                 | `/book` or `/books`                      | `{}`                                                 |
 | `/blog/:id(\\d+){-:title}?` | `/blog/123` or `/blog/123-my-post`       | `{ id: "123" }` or `{ id: "123", title: "my-post" }` |
+| `/files/:name.:ext`         | `/files/a.tar.gz`                        | `{ name: "a", ext: "tar.gz" }`                       |
 
 > [!NOTE]
 > In JavaScript strings a regex backslash is written twice: `"/users/:id(\\d+)"` is the pattern `/users/:id(\d+)`.
 
 ### Params
 
-- **Named params** `:name` match one segment: `/users/:name`. They can also sit inside a segment: `/blog/:year-:month`.
+- **Named params** `:name` match one segment: `/users/:name`. They can also sit inside a segment: `/blog/:year-:month`. When several params share a segment, each one takes as little as it can, as in URLPattern: `/:a-:b` on `/x-y-z` gives `{ a: "x", b: "y-z" }`, and `/:name.:ext` on `/a.tar.gz` gives `{ name: "a", ext: "tar.gz" }`. A `*` takes as much as it can: `/*-:a` on `/x-y-z` gives `{ "0": "x-y", a: "z" }`.
 - **Regex constraints** `:name(regex)` only match when the regex does: `/users/:id(\\d+)`. The regex applies to one segment and can't contain `/`.
 - **Unnamed groups** `(regex)` capture into numbered keys `"0"`, `"1"`, …: `/path/(\\d+)`. Inside a regex, group with `(?:…)`: a capturing group there throws (`/:x((a))`, `/:x((?<n>a))`).
 - **Modifiers** go at the end of a whole-segment param:
@@ -522,14 +523,16 @@ Fixed-length look-behinds work in JavaScript, PCRE and Perl, but not in RE2-fami
 
 ```js
 routeToRegExp("/blog/:id(\\d+){-:title}?");
-// /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
+// /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+?))?\/?$/
+routeToRegExp("/files/:name{.:ext}?");
+// /^\/files\/(?:(?<name>[^/]+?)(?:\.(?<ext>[^/]+?))?\/?|\/)$/
 routeToRegExp("/users{/:id}?/posts/:post");
 // /^\/users(?:\/(?<id>[^/]*))?\/posts\/(?:(?<post>[^/]+)\/?|\/)$/
 ```
 
-When the group extends the param before it (`/files/:name{.:ext}?`), a look-ahead gives the param the same value as the router (`archive.tar.gz` gives `name: "archive.tar"`, `ext: "gz"`). RE2-family engines reject that output.
+A param in a segment with other text is lazy (`[^/]+?`), like in the router, so `/files/:name{.:ext}?` splits `archive.tar.gz` into `name: "archive"` and `ext: "tar.gz"`. When the group follows a `*` or a regex constraint in its segment (`/files/*{.:ext}?/raw`), a look-ahead gives the capture the same value as the router. RE2-family engines reject that output.
 
-**Duplicate named groups.** Other optional combinations (several groups, `/media/*{.webp}?`, `/a/:rest*/b/*`, `/a/**{.png}?`) compile to an alternation that repeats a named group. That works in JavaScript engines with duplicate named groups (Node.js 23+, Chrome 125+, Firefox 129+, Safari 17+) and Perl, and needs `PCRE2_DUPNAMES` in strict PCRE2 engines. On Node.js 22, `routeToRegExp` throws a `rou3:` `SyntaxError` for these routes, and `regExpToRoute` can't convert them back.
+**Duplicate named groups.** Other optional combinations (several groups, `/media/*{.webp}?`, `*-{:x}?`, `/a/:rest*/b/*`, `/a/**{.png}?`) compile to an alternation that repeats a named group. That works in JavaScript engines with duplicate named groups (Node.js 23+, Chrome 125+, Firefox 129+, Safari 17+) and Perl, and needs `PCRE2_DUPNAMES` in strict PCRE2 engines. On Node.js 22, `routeToRegExp` throws a `rou3:` `SyntaxError` for these routes, and `regExpToRoute` can't convert them back.
 
 **Catch-all with optional segments.** With one optional segment right after a `**`, the regex picks the same route as the router (`/a/**/:n(\d+)?` gives `/a/b/1` to `n`). With several, it matches the same paths but may assign segments differently (`/docs/**/:page?/:lang(en|fr)?` on `/docs/en` sets `page`, the router sets `lang`).
 
@@ -538,8 +541,8 @@ When the group extends the param before it (`/files/:name{.:ext}?`), a look-ahea
 <details>
 <summary>What <code>regExpToRoute</code> accepts</summary>
 
-- The dialect `routeToRegExp` emits: `(?<name>...)` groups, `[^/]*` segments, `[\s\S]*` catch-alls, `(?:/...)?` optional groups and the endings shown above. Unnamed groups such as `(\d+)` work too, and the regex inside a constraint is kept verbatim.
-- Looser forms: a plain `\/?` ending, `.*` / `.+` catch-alls and `[^/]+` params. A catch-all inside an optional group is the exception: the regex for `/a{/:w*}?` throws, and the one for `/a{/:w+}?` comes back as `/a/:w(.+)?`.
+- The dialect `routeToRegExp` emits: `(?<name>...)` groups, `[^/]*` segments and `[^/]+?` params inside one, `[\s\S]*` catch-alls, `(?:/...)?` optional groups and the endings shown above. Unnamed groups such as `(\d+)` work too, and the regex inside a constraint is kept verbatim.
+- Looser forms: a plain `\/?` ending, `.*` / `.+` catch-alls and `[^/]+` params (read as `:name`, which is lazy inside a segment now). A catch-all inside an optional group is the exception: the regex for `/a{/:w*}?` throws, and the one for `/a{/:w+}?` comes back as `/a/:w(.+)?`.
 - Routes that compile to the same regex come back in one spelling: `/base/**:path` becomes `/base/:path+`, `/**.md` becomes `/**/*.md`, and `/a/:x?/:y?` becomes `/a{/:x/:y?}?`.
 
 It throws for: a regex not anchored with both `^` and `$`, look-arounds and backreferences, regex operators outside a constraint (`|`, `.`, `+`, `[…]`, …), the flags `i`, `m`, `s`, `u` and `v` (`g`, `y` and `d` are ignored), the duplicate-group alternations above, and constraints that can't be written as a route (for example one containing `/`).

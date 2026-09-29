@@ -818,10 +818,12 @@ describe("routeToRegExp: optional group before more of the route (#213)", () => 
     "/a/:x(\\w+){s}?/b",
     "/a/:x(\\d+){1}?/b",
     "/a/:x(png|jpg){g}?/b",
+    // A lazy `:name` earlier in the segment leaves the group its text.
+    "/f/:x.a{.a}?/m",
   ];
-  // These keep the alternation: a capture earlier in the segment could take
-  // the group's text, or the head can span a varying number of segments.
-  const fallbacks = ["/f/:x.a{.a}?/m", "/:h?/:x{/:id}?/", "/:h?{/b}?/b", "/:h?/*{/b}?/b"];
+  // These keep the alternation: a greedy capture earlier in the segment could
+  // take the group's text, or the head can span a varying number of segments.
+  const fallbacks = ["/f/*.a{.a}?/m", "/:h?/:x{/:id}?/", "/:h?{/b}?/b", "/:h?/*{/b}?/b"];
   const paths = [
     ...sweepPaths(),
     "/files/a.b",
@@ -1028,6 +1030,11 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/a/:p/**/:n(\\d+)?",
     "/*/**/:n(\\d+)?",
     "/a//**/:n(\\d+)?",
+    "/a/**/x-:y",
+    "/:x-:e/**",
+    "/a/:x-:e/**",
+    "/:x.:e/**",
+    "/a/:x.:e/**",
   ].map((pattern) => [pattern, ZERO_SEGMENT_CATCH_ALL] as const),
   ...[
     "/**/:y?/:z?",

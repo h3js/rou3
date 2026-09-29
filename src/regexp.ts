@@ -62,7 +62,7 @@ const LAZY_ANY = "[\\s\\S]*?";
  *
  * @example
  * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)\/?$/
- * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
+ * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+?))?\/?$/
  */
 export function routeToRegExp(route: string = "/"): RegExp {
   if (route.charCodeAt(0) !== 47 /* '/' */) {
@@ -213,14 +213,13 @@ function inlineOptionalGroup(route: string, input: string): RegExp | undefined {
         [merged, lookahead] = capture;
       } else if (
         last.startsWith(prefix) &&
-        // Past a capture elsewhere in the segment, the appended part could be
-        // taken by it (`/f/:x.a{.a}?/m`): only trailing groups keep the old
-        // inline form there.
-        (suf === "" || !hasGroup(prefix)) &&
-        // A greedy, open-ended capture (`[^/]*` from a `*` wildcard /
-        // unconstrained param, or `.*`/`.+`/`[\s\S]*`) would swallow the
-        // optional literal instead of leaving it out (`/media/*{.webp}?`).
-        !/(?:\[\^\/\]|\[\\s\\S\]|\.)[*+]\)?$/.test(prefix)
+        // Every capture before the group must be a lazy `:name`: tried
+        // shortest first, it leaves the group the most room, and a later
+        // value only moves text into the next capture, so the first split
+        // that fits is the router's. A greedy `*` (`/media/*{.webp}?`,
+        // `*-{:x}?` on `a-b-`: the router's `*-:x` gives `a` + `b-`) or a
+        // constraint could take the optional part instead.
+        !hasGroup(prefix.replace(/\(\?<\w+>\[\^\/\]\+\?\)/g, ""))
       ) {
         merged = `${prefix}(?:${last.slice(k)})?`;
       }
@@ -253,14 +252,18 @@ function inlineOptionalGroup(route: string, input: string): RegExp | undefined {
 }
 
 /**
- * Merge a segment ending in its only capture (`(?<name>[^/]*)` from `:name` /
- * `*`, or a constraint `(?<name>C)`, after static text) with the same segment
- * extended by the group (`(?<name>[^/]+)\.(?<ext>[^/]+)`). The capture must
- * take the extended form's value where that one matches, and the whole value
- * otherwise, as the router (`archive.tar.gz` gives `name: "archive.tar"`).
- * That needs a look-ahead to the rest of the segment, unless the capture is a
- * `\d` / `\w` run and the group starts with a char it can't match
- * (`/blog/:id(\d+){-:title}?`). Returns `[merged, lookahead]`.
+ * Merge a segment ending in its only capture (`(?<name>[^/]*)` from a whole
+ * `:name` or `*`, `(?<name>[^/]+?)` from a `:name` after text, or a
+ * constraint `(?<name>C)`) with the same segment extended by the group
+ * (`(?<name>[^/]+?)\.(?<ext>[^/]+?)`). The capture must take the extended
+ * form's value where that one matches, and the whole value otherwise, as the
+ * router. A `:name` in the extended form is lazy, so trying it shortest first
+ * with the group before without it finds the same split (`archive.tar.gz`
+ * gives `archive` + `tar.gz`); a whole `:name` is empty only on an empty
+ * segment (`[^/]+?|`). A greedy `*` or a constraint needs a look-ahead to the
+ * rest of the segment, unless the capture is a `\d` / `\w` run and the group
+ * starts with a char it can't match (`/blog/:id(\d+){-:title}?`). Returns
+ * `[merged, lookahead]`.
  */
 function mergeCapture(base: string, full: string): [string, boolean] | undefined {
   const match = /^([^(]*\(\?<\w+>)([\s\S]*)\)$/.exec(base);
@@ -275,15 +278,19 @@ function mergeCapture(base: string, full: string): [string, boolean] | undefined
   let fullBody = body;
   let rest = full.slice(head.length + body.length + 1);
   if (!full.startsWith(`${head}${body})`)) {
-    // A whole `:name` is `[^/]*`, `:name` in a mixed segment `[^/]+`.
-    const capture = /^(\[\^\/\][*+])\)([\s\S]+)$/.exec(full.slice(head.length));
-    if (!capture || !/^\[\^\/\][*+]$/.test(body)) {
+    // A whole `:name` is `[^/]*`, `:name` in a mixed segment `[^/]+?`.
+    const capture = /^\[\^\/\]\+\?\)([\s\S]+)$/.exec(full.slice(head.length));
+    if (!capture || body !== "[^/]*") {
       return;
     }
-    [, fullBody, rest] = capture;
+    fullBody = "[^/]+?";
+    rest = capture[1];
   }
   if (!rest) {
     return;
+  }
+  if (fullBody === "[^/]+?") {
+    return [`${head}[^/]+?${body === "[^/]*" ? "|" : ""})(?:${rest})?`, false];
   }
   const first = rest.charCodeAt(0) === 92 /* \ */ ? rest[1] : rest[0];
   if (/^\\[dw][*+]?$/.test(body) && !/[\w([|.?*+{^$]/.test(first)) {

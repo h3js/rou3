@@ -257,6 +257,39 @@ describe("a `-` ends a param name", () => {
   }
 });
 
+describe("params sharing a segment (URLPattern)", () => {
+  const router = createRouter([
+    "/a/:a-:b",
+    "/n/:name.:ext",
+    "/c/:a:b",
+    "/w/:a-*",
+    "/v/*-:a",
+    "/f/:name{.:ext}?",
+  ]);
+  const compiledLookup = compileRouter(router);
+  // eslint-disable-next-line no-new-func
+  const aotLookup = new Function(
+    `return ${compileRouterToString(router)}`,
+  )() as typeof compiledLookup;
+  const lookups = [
+    { name: "findRoute", match: (p: string) => findRoute(router, "GET", p) },
+    { name: "compiledLookup", match: (p: string) => compiledLookup("GET", p) },
+    { name: "aotLookup", match: (p: string) => aotLookup("GET", p) },
+  ];
+  for (const { name, match } of lookups) {
+    it(`the first param takes as little as possible (${name})`, () => {
+      expect(match("/a/x-y-z")?.params).toEqual({ a: "x", b: "y-z" });
+      expect(match("/n/a.tar.gz")?.params).toEqual({ name: "a", ext: "tar.gz" });
+      expect(match("/c/xyz")?.params).toEqual({ a: "x", b: "yz" });
+      // A `*` stays greedy (URLPattern's `(.*)`).
+      expect(match("/w/x-y-z")?.params).toEqual({ a: "x", "0": "y-z" });
+      expect(match("/v/x-y-z")?.params).toEqual({ "0": "x-y", a: "z" });
+      expect(match("/f/archive.tar.gz")?.params).toEqual({ name: "archive", ext: "tar.gz" });
+      expect(match("/f/archive")?.params).toEqual({ name: "archive" });
+    });
+  }
+});
+
 describe("method-agnostic fallback (compiled parity)", () => {
   // A node's method-agnostic (`""`) entries are siblings of its method-scoped
   // ones: when every method-scoped matcher fails (regex), the `""` one still
