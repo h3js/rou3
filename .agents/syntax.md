@@ -26,7 +26,7 @@ Syntax with no defined meaning throws `rou3: <what> (<route as written>)` (`inva
 - `_add`, static segment: an unescaped `?` (`/foo?`, `/a/b?/c`, `\:x?`): lookup paths never hold a query string, so it could never match. `\?` is a literal; `+` / `*` stay literal in a static segment (`/c++`). Shares `MISPLACED_MODIFIER` (which names the escape) with the modifier errors and the mid-segment `**` (one message, bundle size).
 - `addName()`: a name that is not `[A-Za-z_]\w*`; a name repeated within one expansion (a bare `**` counts as `_`): `rou3: duplicate param name "x" (…)`. `getParamRegexp` records its names here while scanning, before any regex is built.
 
-`routeToRegExp` validates by calling `addRoute` on a throwaway router, so every error is the router's. Deliberately accepted: `pre-:x?` (drops the whole segment), stray `)`, `+` / `*` in static segments (`/c++`), `\b` / `\B` in a constraint (a segment end and a `/` are both non-word). Known gap: `(`/`)` inside a class in a constraint (`:x([(])`) is mis-parsed.
+`routeToRegExp` validates by calling `addRoute` on a throwaway router, so every error is the router's. Deliberately accepted: stray `)`, `+` / `*` in static segments (`/c++`), `\b` / `\B` in a constraint (a segment end and a `/` are both non-word). Known gap: `(`/`)` inside a class in a constraint (`:x([(])`) is mis-parsed.
 
 Pinned by `RESERVED_SYNTAX_ROUTES` (`test/_regexp-cases.ts`, against `addRoute`, `routeToRegExp`, `routeNodeKeys`), the accepted list in `regexp.test.ts`, and WPT `RESERVED_PATTERNS`.
 
@@ -35,6 +35,7 @@ Pinned by `RESERVED_SYNTAX_ROUTES` (`test/_regexp-cases.ts`, against `addRoute`,
 URLPattern semantics, so the same pattern splits a segment the same way everywhere:
 
 - **Lazy `:name`:** `getParamRegexp` emits `[^/]+?` for an unconstrained `:name` (it only sees segments that aren't a lone `:name`), so the first of several params takes as little as possible: `:a-:b` on `x-y-z` is `x` + `y-z`, `:name.:ext` on `a.tar.gz` is `a` + `tar.gz`, `:a:b` on `xyz` is `x` + `yz`. With one param the literals around it fix its value, so lazy vs greedy only shows with several. A `*` stays greedy `[^/]*` (URLPattern's `*` is a greedy `(.*)`): `*-:a` on `x-y-z` is `x-y` + `z`. A constraint keeps the user's quantifiers. The compiler reuses the tree's RegExps and `routeToRegExp` the same `getParamRegexp` source.
+- **`pre-:x?`** (a `?` on a param that does not start its segment, `pre-:x(\d+)?` too) makes only the param optional: `expandModifiers` expands it to `pre-:x` and `pre-` (the text before the param, not a dropped segment), as `pre-{:x}?` would. A whole-segment `:x?` keeps its meaning (an optional segment); `/{pre-:x}?` is the way to drop the whole segment. `+` / `*` there still throw. `routeToRegExp` compiles it in place (see [regexp.md](regexp.md#emission-rules)).
 
 ## Param names and capture-group names
 

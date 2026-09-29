@@ -62,6 +62,13 @@ describe("types", () => {
       expectTypeOf<InferRouteParams<"/test/:id*">>().toEqualTypeOf<Optional>();
       expectTypeOf<InferRouteParams<"/test/:id(\\d+)?">>().toEqualTypeOf<Optional>();
       expectTypeOf<InferRouteParams<"/test/:id?/x">>().toEqualTypeOf<Optional>();
+      // `pre-:id?` makes only the param optional (`pre-{:id}?`)
+      expectTypeOf<InferRouteParams<"/test/pre-:id?">>().toEqualTypeOf<Optional>();
+      expectTypeOf<InferRouteParams<"/test/pre-:id(\\d+)?/x">>().toEqualTypeOf<Optional>();
+      expectTypeOf<InferRouteParams<"/test/:a-:id?">>().toEqualTypeOf<{
+        a: string;
+        id: string | undefined;
+      }>();
       // a modifier `*` is not a wildcard capture; a real trailing `*` still is
       expectTypeOf<InferRouteParams<"/test/:id*/x/*">>().toEqualTypeOf<{
         id: string | undefined;

@@ -118,9 +118,11 @@ export const MISPLACED_MODIFIER =
 
 /**
  * Expand the first `?` / `+` / `*` modifier of a param into the routes it
- * stands for. `+` / `*` repeat a whole-segment `:name` only: `input` (quoted
- * in the error) repeating a constrained param (`:x(\\d+)+`) or part of a
- * segment (`pre-:x+`) dropped the constraint / the rest of the segment.
+ * stands for. A `?` on a param that does not start its segment makes only the
+ * param optional (`pre-:x?` is `pre-{:x}?`, as in URLPattern; `{pre-:x}?`
+ * drops the segment). `+` / `*` repeat a whole-segment `:name` only: `input`
+ * (quoted in the error) repeating a constrained param (`:x(\\d+)+`) or part
+ * of a segment (`pre-:x+`) dropped the constraint / the rest of the segment.
  */
 export function expandModifiers(segments: string[], input?: string): string[] | undefined {
   for (let i = 0; i < segments.length; i++) {
@@ -130,7 +132,8 @@ export function expandModifiers(segments: string[], input?: string): string[] | 
     if (!m) continue;
     const pre = segments.slice(0, i);
     const suf = segments.slice(i + 1);
-    const without = "/" + pre.concat(suf).join("/");
+    // Without the param: the text before it in its segment, or no segment
+    const without = "/" + pre.concat(m[1] || [], suf).join("/");
     if (m[3] === "?") {
       return ["/" + pre.concat(m[1] + m[2], suf).join("/"), without];
     }

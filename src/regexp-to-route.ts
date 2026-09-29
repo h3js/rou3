@@ -462,7 +462,9 @@ function mergeGroup(segments: string[], body: string): void {
   if (segments.length === 0) {
     throw new Error(`rou3: optional group "{${body}}?" has no preceding segment`);
   }
-  segments[segments.length - 1] += `{${body}}?`;
+  // A lone param after text in its segment: `pre-:x?` means `pre-{:x}?`.
+  segments[segments.length - 1] +=
+    segments[segments.length - 1] && /^:\w+(?:\([^)]*\))?$/.test(body) ? `${body}?` : `{${body}}?`;
 }
 
 /** Classify a param group inside a segment (`:name`, `*`, `(pat)`, ...). */

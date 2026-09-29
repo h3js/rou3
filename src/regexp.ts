@@ -2,7 +2,13 @@ import { expandGroupDelimiters, scanFirstGroup } from "./_group-delimiters.ts";
 import { toGroupName } from "./_group-names.ts";
 import { createRouter } from "./context.ts";
 import { addRoute, getParamRegexp } from "./operations/add.ts";
-import { encodeEscapes, expandModifiers, segmentKey, splitRoute } from "./operations/_utils.ts";
+import {
+  decodeEscapes,
+  encodeEscapes,
+  expandModifiers,
+  segmentKey,
+  splitRoute,
+} from "./operations/_utils.ts";
 import { canBeEmpty, isOptionalGroups } from "./_regexp-scan.ts";
 import { openOptionals, withTrailingSlash } from "./_trailing-slash.ts";
 
@@ -63,6 +69,7 @@ const LAZY_ANY = "[\\s\\S]*?";
  * @example
  * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)\/?$/
  * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+?))?\/?$/
+ * routeToRegExp("/v:version?"); // /^\/v(?:(?<version>[^/]+?))?\/?$/
  */
 export function routeToRegExp(route: string = "/"): RegExp {
   if (route.charCodeAt(0) !== 47 /* '/' */) {
@@ -76,11 +83,19 @@ export function routeToRegExp(route: string = "/"): RegExp {
 
 /** `routeToRegExp` of `route`, an expansion of `input` (quoted in errors). */
 function toRegExp(route: string, input: string): RegExp {
+  // A `?` on a param that does not start its segment makes only the param
+  // optional (see `expandModifiers`): after a `*` or group, `*-:x?` is
+  // `*-{:x}?`. In a route with groups already, it is read once they are
+  // expanded.
+  const inSegment = inSegmentOptional(route);
+  if (inSegment !== route && !route.includes("{")) {
+    route = inSegment;
+  }
   // Compile a single optional group (`{...}?`) inline as `(?:...)?`
   // instead of expanding it into an alternation of full routes. The alternation
   // form re-emits every param before the group in both branches, producing
   // duplicate named groups that PCRE2-family engines reject.
-  const inlineOptional = inlineOptionalGroup(route, input);
+  const inlineOptional = inSegment === route && inlineOptionalGroup(route, input);
   if (inlineOptional) {
     return inlineOptional;
   }
@@ -121,6 +136,24 @@ function toRegExp(route: string, input: string): RegExp {
   }
 
   return _routeToRegExp(route, input);
+}
+
+/**
+ * `route` with every in-segment optional param after a `*` or a group in its
+ * segment (`*-:x?`, `:a(\\d+)-:x?`) written as the group it stands for
+ * (`*-{:x}?`, see `expandModifiers`), read with escapes encoded. Captures
+ * there may be greedy, so only a group can tell whether the rest of the
+ * segment fits the param (`inlineOptionalGroup`). Other `pre-:x?` compile
+ * in place (`routeToRegExpSegments`).
+ */
+function inSegmentOptional(route: string): string {
+  if (!route.includes("?")) return route;
+  const encoded = encodeEscapes(route);
+  const out = encoded.replace(
+    /((?:^|\/)[^/]*[*(][^/]*)(:[A-Za-z_]\w*(?:\([^)]*\))?)\?(?=[/{}]|$)/g,
+    "$1{$2}?",
+  );
+  return out === encoded ? route : decodeEscapes(out, "\\");
 }
 
 /**
@@ -394,11 +427,12 @@ function segmentKind(segment: string): number {
 }
 
 /**
- * The `?`/`+`/`*` modifier of a param segment (`:x?`, `pre-:x(\\d+)+`), read
- * like `expandModifiers` with escapes encoded (`\:x?` has none).
+ * The `?`/`+`/`*` modifier of a whole-segment param (`:x?`, `:x(\\d+)?`),
+ * read like `expandModifiers` with escapes encoded (`\:x?` has none). An
+ * in-segment `pre-:x?` is a required segment (only its param is optional).
  */
 function paramModifier(segment: string): string | undefined {
-  return /:[A-Za-z_]\w*(?:\([^)]*\))?([?+*])$/.exec(encodeEscapes(segment))?.[1];
+  return /^:[A-Za-z_]\w*(?:\([^)]*\))?([?+*])$/.exec(encodeEscapes(segment))?.[1];
 }
 
 function _routeToRegExp(route: string, input: string): RegExp {
@@ -631,11 +665,21 @@ function routeToRegExpSegments(
       break;
     } else if (segmentKey(encodeEscapes(segment)) === 1) {
       // Read like `expandModifiers`, with escapes encoded (`\:x?` has none)
-      const modMatch = encodeEscapes(segment).match(/^(.*:[A-Za-z_]\w*(?:\([^)]*\))?)([?+*])$/);
+      const modMatch = encodeEscapes(segment).match(/^(.*)(:[A-Za-z_]\w*(?:\([^)]*\))?)([?+*])$/);
       if (modMatch) {
-        const [, base, mod] = modMatch;
+        const [, pre, base, mod] = modMatch;
 
         if (mod === "?") {
+          if (pre) {
+            // `pre-:x?`: only the param is optional, `pre-(?:(?<x>…))?`. The
+            // text before it holds lazy `:name`s at most (see
+            // `inSegmentOptional`), so the split is the router's.
+            const full = dynamic(pre + base);
+            const at = full.lastIndexOf(`(?<${groupName(/\w+/.exec(base)![0])}>`);
+            reSegments.push(`${full.slice(0, at)}(?:${full.slice(at)})?`);
+            nest = 0;
+            continue;
+          }
           // Append optional group to previous segment: /foo(?:/<inner>)?
           pushOptional(dynamic(base), /^:[A-Za-z_]\w*$/.test(base));
           continue;

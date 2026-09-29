@@ -265,6 +265,10 @@ describe("params sharing a segment (URLPattern)", () => {
     "/w/:a-*",
     "/v/*-:a",
     "/f/:name{.:ext}?",
+    "/p/pre-:x?",
+    "/d/pre-:x(\\d+)?",
+    "/m/pre-:x?/end",
+    "/s/{pre-:x}?",
   ]);
   const compiledLookup = compileRouter(router);
   // eslint-disable-next-line no-new-func
@@ -286,6 +290,24 @@ describe("params sharing a segment (URLPattern)", () => {
       expect(match("/v/x-y-z")?.params).toEqual({ "0": "x-y", a: "z" });
       expect(match("/f/archive.tar.gz")?.params).toEqual({ name: "archive", ext: "tar.gz" });
       expect(match("/f/archive")?.params).toEqual({ name: "archive" });
+    });
+
+    it(`\`pre-:x?\` makes only the param optional (${name})`, () => {
+      // The route without the param is static (no `params`).
+      expect(match("/p/pre-")?.data).toEqual({ path: "/p/pre-:x?" });
+      expect(match("/p/pre-a")?.params).toEqual({ x: "a" });
+      expect(match("/p")).toBeUndefined();
+      expect(match("/d/pre-")?.data).toEqual({ path: "/d/pre-:x(\\d+)?" });
+      expect(match("/d/pre-12")?.params).toEqual({ x: "12" });
+      expect(match("/d/pre-a")).toBeUndefined();
+      expect(match("/d")).toBeUndefined();
+      expect(match("/m/pre-/end")?.data).toEqual({ path: "/m/pre-:x?/end" });
+      expect(match("/m/pre-1/end")?.params).toEqual({ x: "1" });
+      expect(match("/m/end")).toBeUndefined();
+      // `{pre-:x}?` makes the whole segment optional.
+      expect(match("/s")?.data).toEqual({ path: "/s/{pre-:x}?" });
+      expect(match("/s/pre-a")?.params).toEqual({ x: "a" });
+      expect(match("/s/pre-")).toBeUndefined();
     });
   }
 });

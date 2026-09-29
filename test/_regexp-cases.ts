@@ -447,9 +447,45 @@ export const regexpCases: Record<string, RegExpCase> = {
     regex: /^\/(?<_0>[^/]*)-(?<a>[^/]+?)\/?$/,
     match: [["/x-y-z", { "0": "x-y", a: "z" }]],
   },
+  // A `?` on a param that does not start its segment makes only the param
+  // optional (`pre-{:x}?`, as in URLPattern); `/{pre-:x}?` drops the segment.
+  "/pre-:x?": {
+    regex: /^\/pre-(?:(?<x>[^/]+?))?\/?$/,
+    match: [
+      ["/pre-", { x: undefined }],
+      ["/pre-a", { x: "a" }],
+      ["/pre-a-b/", { x: "a-b" }],
+    ],
+    noMatch: ["/", "/pre", "/pre-a/b"],
+  },
+  "/a/pre-:x(\\d+)?": {
+    regex: /^\/a\/pre-(?:(?<x>\d+))?\/?$/,
+    match: [
+      ["/a/pre-", { x: undefined }],
+      ["/a/pre-12", { x: "12" }],
+    ],
+    noMatch: ["/a", "/a/pre-x", "/a/pre"],
+  },
+  "/a/pre-:x?/b": {
+    regex: /^\/a\/pre-(?:(?<x>[^/]+?))?\/b\/?$/,
+    match: [
+      ["/a/pre-/b", { x: undefined }],
+      ["/a/pre-1/b", { x: "1" }],
+    ],
+    noMatch: ["/a/b", "/a/pre/b"],
+  },
+  "/a/:x-:y?": {
+    regex: /^\/a\/(?<x>[^/]+?)-(?:(?<y>[^/]+?))?\/?$/,
+    match: [
+      ["/a/1-", { x: "1", y: undefined }],
+      ["/a/1-2-3", { x: "1", y: "2-3" }],
+      ["/a/1-2-", { x: "1", y: "2-" }],
+    ],
+    noMatch: ["/a/1", "/a"],
+  },
   // After a greedy `*` (or a constraint) only an alternation splits the
   // segment like the router (`*-:x` wins on `a-b-` with `0: "a"`).
-  "/f/*-{:x}?": {
+  "/f/*-:x?": {
     regex: duplicateNames(
       String.raw`^(?:\/f\/(?<_0>[^/]*)-(?<x>[^/]+?)\/?|\/f\/(?<_0>[^/]*)-\/?)$`,
     ),
@@ -469,6 +505,14 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/a/b.a.a.a/m", { x: "b.a" }],
     ],
     noMatch: ["/a/b/m"],
+  },
+  "/a/{pre-:x}?": {
+    regex: /^\/a(?:\/pre-(?<x>[^/]+?))?\/?$/,
+    match: [
+      ["/a", { x: undefined }],
+      ["/a/pre-b", { x: "b" }],
+    ],
+    noMatch: ["/a/pre-"],
   },
   // A param name is `[A-Za-z_]\w*`, so a `-` ends it, as in URLPattern:
   // `:test-id` is `:test` then a literal `-id` (it was a param `test-id`).
@@ -1032,7 +1076,7 @@ export const LOOKAHEAD_ROUTES: ReadonlySet<string> = new Set(["/files/*{.:ext}?/
 // that fallback and are asserted to be rejected by strict PCRE2 engines.
 export const PCRE2_DUPLICATE_NAME_ROUTES: ReadonlySet<string> = new Set([
   "/media/*{.webp}?",
-  "/f/*-{:x}?",
+  "/f/*-:x?",
   "/docs/{v2}?/:page?",
 ]);
 
@@ -1110,7 +1154,7 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   "/a/:x{.:e}?/b{.json}?",
   // A mid-segment optional after a greedy capture.
   "/media/*{.webp}?",
-  "/f/*-{:x}?",
+  "/f/*-:x?",
   // A `:x*` before a `*` that is optional in the route without it.
   "/a/:r*/b/*",
   "/:r*/*.png/*",
@@ -1197,11 +1241,14 @@ function allSweepPatterns(): string[] {
     ":x(\\d+)?",
     // A param extended by an optional group in its own segment (#213).
     ":x{.:e}?",
-    // Params sharing a segment (the first takes as little as possible).
+    // Params sharing a segment (the first takes as little as possible), and
+    // an optional param after text in its segment (only the param is).
     ":x-:e",
     ":x.:e",
+    "x-:x?",
+    "x-:x(\\d+)?",
   ];
-  const tails = ["", "a", ":y", "*", ":y?", "**", "*.png", "x-:y", "b{.json}?"];
+  const tails = ["", "a", ":y", "*", ":y?", "**", "*.png", "x-:y", "x-:y?", "b{.json}?"];
   const patterns = new Set([
     "/",
     "/a{/b}?",
@@ -1499,9 +1546,9 @@ function routerAccepts(pattern: string): boolean {
 export function sweepPaths(): string[] {
   const paths = new Set(["/", "//", "///"]);
   const walk = (prefix: string, depth: number) => {
-    // `x-a-b.c.d` for params sharing a segment (`:x-:e`, `:x.:e`: the first
-    // param takes as little as possible).
-    for (const seg of ["a", "b", "1", "x.png", "", "x-a-b.c.d"]) {
+    // `x-` and `x-a-b.c.d` for params sharing a segment (`x-:y?`, `:x-:e`,
+    // `:x.:e`: the first param takes as little as possible).
+    for (const seg of ["a", "b", "1", "x.png", "", "x-", "x-a-b.c.d"]) {
       const path = `${prefix}/${seg}`;
       paths.add(path).add(`${path}/`).add(`${path}//`).add(`${path}///`);
       if (depth > 1) walk(path, depth - 1);

@@ -20,7 +20,9 @@ import {
  *
  * Param names are `[A-Za-z_]\w*`: a `-` ends one (`:test-id` is `:test` and a
  * literal `-id`), as in URLPattern. Also as there, a `:name` sharing its
- * segment takes as little as it can (`/:a-:b` on `/x-y-z` is `x` and `y-z`).
+ * segment takes as little as it can (`/:a-:b` on `/x-y-z` is `x` and `y-z`),
+ * and a `?` on one after text makes only the param optional (`/pre-:x?`
+ * matches `/pre-` and `/pre-a`; `/{pre-:x}?` drops the segment).
  *
  * @throws a `rou3:` error for pattern syntax with no meaning (yet), quoting
  * the pattern: an unclosed `(`, unbalanced or nested `{}`, `{…}+` / `{…}*`,
