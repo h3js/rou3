@@ -104,7 +104,7 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 
 - **Named params** `:name` match one segment: `/users/:name`. They can also sit inside a segment: `/blog/:year-:month`.
 - **Regex constraints** `:name(regex)` only match when the regex does: `/users/:id(\\d+)`. The regex applies to one segment and can't contain `/`.
-- **Unnamed groups** `(regex)` capture into numbered keys `"0"`, `"1"`, …: `/path/(\\d+)`.
+- **Unnamed groups** `(regex)` capture into numbered keys `"0"`, `"1"`, …: `/path/(\\d+)`. Inside a regex, group with `(?:…)`: another unnamed group there throws (`/:x((a))`).
 - **Modifiers** go at the end of a whole-segment param:
   - `:name?` optional (also works with a regex: `:id(\\d+)?`)
   - `:name+` one or more segments
@@ -113,8 +113,9 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 <details>
 <summary>Param naming rules</summary>
 
-- A name is word characters (`[A-Za-z0-9_]`), with `-` allowed between them (`:test-id`). Any other character ends it, so `/blog/:year-:month` has two params and `/files/:name-` has a literal trailing `-`.
-- To end a name early, escape the next character: `/files/:name\\-v2` gives `{ name }` followed by a literal `-v2`.
+- A name starts with a letter or `_` and goes on with word characters (`[A-Za-z_][A-Za-z0-9_]*`), as in URLPattern: `:v2` and `:_0` are names, `:0` and `:1st` throw.
+- Any other ASCII character ends a name, `-` included: `/blog/:year-:month` has two params, and `/users/:user-id` is the param `user` followed by a literal `-id` (write `:user_id` for one param).
+- A non-ASCII character right after a name throws (`/:café`). To end a name early, escape the next character: `/:caf\\é` gives `{ caf }` followed by a literal `é`.
 - A name can appear only once per route: `/a/:x/:x` throws.
 - A `:` must start a name. Write a literal colon as `\\:`.
 - `+` and `*` only repeat a whole-segment `:name` (`:id(\d+)+` and `pre-:x+` throw).
@@ -127,7 +128,7 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 - **`**`** matches zero or more segments and captures them into `_`: `/docs/**`.
 - **`**:name`** matches one or more segments and captures them into `name`: `/docs/**:path`.
 - **Segments after `**`** are matched from the **end** of the path, and the `**` takes whatever is in between. `/**/_payload.json` matches `_payload.json` in any directory, and `/blog/**:path/og.png` matches `og.png` anywhere under `/blog`.
-- **`**` followed by text** is short for `**/*<text>`: `/**.md` matches any path whose last segment ends in `.md`.
+- **`**` followed by text** is short for `**/*<text>`: `/**.md` matches any path whose last segment ends in `.md`. Anywhere else in a segment, `**` throws (`/a**b`, `/a/x**`): write `*` for one capture or `\\*\\*` for a literal.
 
 A route can have only one catch-all. `**`, `**:name`, and a `:name+` / `:name*` that is not the last segment all count as one.
 
@@ -151,23 +152,23 @@ addRoute(router, "GET", "/files/\\(2024\\)", {}); // matches only "/files/(2024)
 
 ### Invalid patterns
 
-`addRoute` throws a `rou3:` error that quotes the pattern when the syntax has no meaning, instead of silently matching something unexpected. For example: an unclosed `(` or `{`, a nested group, an empty group `()`, a modifier in the wrong place (`*?`, `**+`, `:x.png?`), a repeated param name, a second catch-all, a `\/`, or an anchor (`^`, `$`), look-around or numbered backreference (`\1`) in a regex constraint. The router tests a constraint against its segment alone, while `routeToRegExp` puts it inline, where it would see the rest of the path, so the two would match different paths.
+`addRoute` throws a `rou3:` error that quotes the pattern when the syntax has no meaning, instead of silently matching something unexpected. For example: an unclosed `(` or `{`, a nested group, an empty group `()`, a modifier in the wrong place (`*?`, `**+`, `:x.png?`), a `?` after plain text (`/foo?`: lookup paths have no query string, escape a literal one as `\\?`), a `**` in the middle of a segment (`/a**b`), an invalid or repeated param name (`/:0`, `/:café`, `/a/:x/:x`), a second catch-all, a `\/`, an unnamed group inside a regex constraint (`/:x((a))`, use `(?:…)`), or an anchor (`^`, `$`), look-around or numbered backreference (`\1`) in a regex constraint. The router tests a constraint against its segment alone, while `routeToRegExp` puts it inline, where it would see the rest of the path, so the two would match different paths.
 
 ### Differences from URLPattern
 
 rou3 matches paths segment by segment in a tree, which leads to a few intentional differences:
 
-| Feature                       | URLPattern                         | rou3                                                    |
-| ----------------------------- | ---------------------------------- | ------------------------------------------------------- |
-| `*` (single star)             | Greedy catch-all `(.*)` across `/` | One segment (or part of one), `([^/]*)`                 |
-| `**` (double star)            | Literal `**`                       | Catch-all, zero or more segments, one per route         |
-| `(.*)` in a segment           | Greedy match across `/`            | Stays within the segment                                |
-| `{...}+` / `{...}*` groups    | Group repetition                   | Not supported (throws)                                  |
-| Path normalization (`.`/`..`) | Resolved in input paths            | Opt-in with `{ normalize: true }`                       |
-| Case sensitivity              | Can be case-insensitive            | Always case-sensitive                                   |
-| Non-`/`-prefixed paths        | Supported                          | Paths must start with `/`                               |
-| Param names                   | Unicode identifiers (no `-`)       | ASCII word characters, `-` allowed between (`:test-id`) |
-| Percent-encoding              | Normalizes `%xx` sequences         | Input is not decoded                                    |
+| Feature                       | URLPattern                         | rou3                                            |
+| ----------------------------- | ---------------------------------- | ----------------------------------------------- |
+| `*` (single star)             | Greedy catch-all `(.*)` across `/` | One segment (or part of one), `([^/]*)`         |
+| `**` (double star)            | Literal `**`                       | Catch-all, zero or more segments, one per route |
+| `(.*)` in a segment           | Greedy match across `/`            | Stays within the segment                        |
+| `{...}+` / `{...}*` groups    | Group repetition                   | Not supported (throws)                          |
+| Path normalization (`.`/`..`) | Resolved in input paths            | Opt-in with `{ normalize: true }`               |
+| Case sensitivity              | Can be case-insensitive            | Always case-sensitive                           |
+| Non-`/`-prefixed paths        | Supported                          | Paths must start with `/`                       |
+| Param names                   | Unicode identifiers                | ASCII identifiers (`[A-Za-z_]\w*`)              |
+| Percent-encoding              | Normalizes `%xx` sequences         | Input is not decoded                            |
 
 ## Matching
 

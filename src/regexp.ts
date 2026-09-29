@@ -379,8 +379,8 @@ function lazyCatchAll(after: string[], extra: string[]): boolean | undefined {
 
 /** How the router ranks a route segment: 3 literal, 2 regex param, 0 param. */
 function segmentKind(segment: string): number {
-  const base = segment.replace(/\\./g, "x").replace(/(:\w+(?:-\w+)*(?:\([^)]*\))?)[?+*]$/, "$1");
-  if (base === "*" || /^:\w+(?:-\w+)*$/.test(base)) {
+  const base = segment.replace(/\\./g, "x").replace(/(:[A-Za-z_]\w*(?:\([^)]*\))?)[?+*]$/, "$1");
+  if (base === "*" || /^:[A-Za-z_]\w*$/.test(base)) {
     return 0;
   }
   return /[:(*]/.test(base) ? 2 : 3;
@@ -391,7 +391,7 @@ function segmentKind(segment: string): number {
  * like `expandModifiers` with escapes encoded (`\:x?` has none).
  */
 function paramModifier(segment: string): string | undefined {
-  return /:\w+(?:-\w+)*(?:\([^)]*\))?([?+*])$/.exec(encodeEscapes(segment))?.[1];
+  return /:[A-Za-z_]\w*(?:\([^)]*\))?([?+*])$/.exec(encodeEscapes(segment))?.[1];
 }
 
 function _routeToRegExp(route: string, input: string): RegExp {
@@ -519,7 +519,7 @@ function routeToRegExpSegments(
       !required &&
       extra.length === 0 &&
       tail.length === 1 &&
-      (/^:\w+(?:-\w+)*\?$/.test(tail[0]) || (repeat && tail[0] === "*"))
+      (/^:[A-Za-z_]\w*\?$/.test(tail[0]) || (repeat && tail[0] === "*"))
     ) {
       const catchAllGroup = `(?<${groupName(id)}>${ANY})`;
       const last =
@@ -560,7 +560,7 @@ function routeToRegExpSegments(
   // compiles it (`getParamRegexp`): a whole `:name` is an unchecked param
   // node, which also takes an empty segment (`/a//b` reaches `/a/:x/b`).
   const dynamic = (segment: string): string => {
-    if (/^:\w+(?:-\w+)*$/.test(segment)) {
+    if (/^:[A-Za-z_]\w*$/.test(segment)) {
       return `(?<${groupName(segment.slice(1))}>[^/]*)`;
     }
     const [regexp, next] = getParamRegexp(
@@ -624,13 +624,13 @@ function routeToRegExpSegments(
       break;
     } else if (segmentKey(encodeEscapes(segment)) === 1) {
       // Read like `expandModifiers`, with escapes encoded (`\:x?` has none)
-      const modMatch = encodeEscapes(segment).match(/^(.*:\w+(?:-\w+)*(?:\([^)]*\))?)([?+*])$/);
+      const modMatch = encodeEscapes(segment).match(/^(.*:[A-Za-z_]\w*(?:\([^)]*\))?)([?+*])$/);
       if (modMatch) {
         const [, base, mod] = modMatch;
 
         if (mod === "?") {
           // Append optional group to previous segment: /foo(?:/<inner>)?
-          pushOptional(dynamic(base), /^:\w+(?:-\w+)*$/.test(base));
+          pushOptional(dynamic(base), /^:[A-Za-z_]\w*$/.test(base));
           continue;
         }
 

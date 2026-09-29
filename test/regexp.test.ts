@@ -153,14 +153,16 @@ describe("routeToRegExp", () => {
     expect(mismatches).toEqual([]);
   });
 
-  // Hand-picked shapes the sweeps don't generate: escaped modifiers (`\:x?` is
-  // no optional param) and regex chars outside a constraint in a dynamic
-  // segment (`$`, `^`, `|`, `[`, `)` are literals there, as in a static one).
+  // Hand-picked shapes the sweeps don't generate: escaped modifiers (`\:x\?`
+  // is no optional param, `\:x?` throws) and regex chars outside a constraint
+  // in a dynamic segment (`$`, `^`, `|`, `[`, `)` are literals there, as in a
+  // static one).
   it("matches like findRoute for escaped modifiers and literal regex chars", () => {
     const patterns = [
-      "/a//\\:x?",
-      "///b\\:x?",
-      "/a/*/\\:x?",
+      "/a//\\:x\\?",
+      "///b\\:x\\?",
+      "/a/*/\\:x\\?",
+      "/a/:x\\?",
       "/a/:x(\\))?",
       "/a/:x(a\\)b)?/c",
       "/\\:x*",
@@ -619,7 +621,21 @@ describe("reserved pattern syntax", () => {
     "/a/*/:x",
     "/v1/:id:cancel",
     "/c++/*",
-    "/a/what?",
+    "/a/what\\?",
+    "/a/:v2",
+    "/a/:_0",
+    "/a/:caf\\é",
+    "/a/:x\\-id",
+    "/a/:test-id",
+    "/a/:x((?:a))",
+    "/a/((?:b)c)",
+    "/a/:x((?:a)|(?:b))",
+    "/a/:x((?:(?:a)))",
+    "/a/:x(a(?<n>b)c)",
+    "/a/*b",
+    "/a\\*\\*b",
+    "/a/\\**",
+    "/**.md",
     "/a/{b}?/{c}",
     "/a/{}",
     "/a/\\{b",
@@ -705,8 +721,8 @@ describe("routeToRegExp: duplicate param names", () => {
     "/a/*/*",
     "/a/(\\d+)/(\\d+)",
     "/a/*/b/*.png/(\\d+)",
-    // `:0` escapes to `__rou3_esc_0`, distinct from the unnamed `*` (`_0`).
-    "/w/:0/*",
+    // `:_0` escapes to `__rou3_esc___0`, distinct from the unnamed `*` (`_0`).
+    "/w/:_0/*",
   ])("accepts %s", (route) => {
     if (!DUPLICATE_NAMED_GROUPS && PCRE2_DUPLICATE_NAME_ROUTES.has(route)) {
       expect(() => routeToRegExp(route)).toThrowError(NEEDS_DUPLICATE_NAMES);

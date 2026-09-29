@@ -100,8 +100,13 @@ describe("benchmark", () => {
     // +~69B raw / +~44B gzip: regex chars outside a group in a dynamic segment
     // (`*$`, `^:id`, `x|:y`, a stray `)`) are literals, and a backreference in
     // a constraint throws (review of #228: both made the regex match less).
-    expect(bytes).toBeLessThanOrEqual(9910); // <9.91kb
-    expect(gzipSize).toBeLessThanOrEqual(4130); // <4.13kb
+    // +~94B raw / +~25B gzip: param names are `[A-Za-z_]\w*` (a `-` ends one,
+    // a digit can't start one, a non-ASCII char can't follow one), and a raw
+    // `?` in a static segment, a mid-segment `**` and an unnamed group inside
+    // a constraint throw (URLPattern alignment, #229); a `:` inside a group
+    // (`(?:…)`) is no param.
+    expect(bytes).toBeLessThanOrEqual(10000); // <10kb
+    expect(gzipSize).toBeLessThanOrEqual(4155); // <4.155kb
   });
 });
 

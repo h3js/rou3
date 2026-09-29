@@ -176,27 +176,41 @@ describe("regExpToRoute", () => {
   });
 
   it("decodes escaped capture-group names back to the original param name", () => {
-    // Param names that aren't valid capture-group names (`-`, leading digit) are
-    // emitted escaped; reversing must restore the original name, not leak the
-    // internal form as `:__rou3_esc_test_hid`.
-    expect(regExpToRoute(/^\/api\/(?<__rou3_esc_test_hid>[^/]+)\/?$/)).toBe("/api/:test-id");
-    expect(regExpToRoute(/^\/api\/(?<__rou3_esc_test_hid>.+)\/?$/)).toBe("/api/:test-id+");
-    expect(regExpToRoute(/^\/api(?:\/(?<__rou3_esc_test_hid>[^/]+))?\/?$/)).toBe("/api/:test-id?");
-    expect(regExpToRoute(/^\/api\/(?<__rou3_esc_0>[^/]+)\/?$/)).toBe("/api/:0");
-    expect(regExpToRoute(/^\/mix\/(?<__rou3_esc_a_hb>[^/]+)\.(?<a_b>[^/]+)\/?$/)).toBe(
-      "/mix/:a-b.:a_b",
+    // Names in the reserved `__rou3_` space are emitted escaped; reversing
+    // must restore the original name, not leak the internal form.
+    expect(regExpToRoute(/^\/api\/(?<__rou3_esc_____rou3__x>[^/]+)\/?$/)).toBe("/api/:__rou3_x");
+    expect(regExpToRoute(/^\/api\/(?<__rou3_esc_____rou3__x>.+)\/?$/)).toBe("/api/:__rou3_x+");
+    expect(regExpToRoute(/^\/api(?:\/(?<__rou3_esc_____rou3__x>[^/]+))?\/?$/)).toBe(
+      "/api/:__rou3_x?",
     );
+    expect(regExpToRoute(/^\/mix\/(?<__rou3_esc_____rou3__x>[^/]+)\.(?<_0>[^/]*)\/?$/)).toBe(
+      "/mix/:__rou3_x.*",
+    );
+    // Names a route can no longer have (`-`, leading digit) are rejected.
+    expect(() => regExpToRoute(/^\/api\/(?<__rou3_esc_test_hid>[^/]+)\/?$/)).toThrow(/^rou3: /);
+    expect(() => regExpToRoute(/^\/api\/(?<__rou3_esc_0>[^/]+)\/?$/)).toThrow(/^rou3: /);
+  });
+
+  it("rejects an unnamed group inside a constraint", () => {
+    // `addRoute` rejects it (a stray numbered param), so it has no route form.
+    for (const re of [/^\/a\/(?<x>(a)b)\/?$/, /^\/a\/((?:(a)))\/?$/]) {
+      expect(() => regExpToRoute(re), re.source).toThrow(/^rou3: /);
+    }
+    expect(regExpToRoute(/^\/a\/(?<x>(?:a)b)\/?$/)).toBe("/a/:x((?:a)b)");
+    expect(regExpToRoute(/^\/a\/(?<x>a(?<n>b)c)\/?$/)).toBe("/a/:x(a(?<n>b)c)");
+    expect(regExpToRoute(/^\/a\/(?<x>[(]\(a)\/?$/)).toBe("/a/:x([(]\\(a)");
   });
 
   it("escapes a literal that would extend the param name before it", () => {
-    // A name is `\w+(?:-\w+)*`: a word char, or a `-` and a word char, right
-    // after `:name` would read as more of the name.
+    // A name is `[A-Za-z_]\w*`: a word char right after `:name` would read as
+    // more of the name, and a non-ASCII one is rejected there. A `-` ends it.
     expect(regExpToRoute(/^\/a\/(?<x>[^/]+)abc\/?$/)).toBe("/a/:x\\abc");
-    expect(regExpToRoute(/^\/a\/pre-(?<x>[^/]+)-suf\/?$/)).toBe("/a/pre-:x\\-suf");
+    expect(regExpToRoute(/^\/a\/(?<x>[^/]+)é\/?$/)).toBe("/a/:x\\é");
+    expect(regExpToRoute(/^\/a\/pre-(?<x>[^/]+)-suf\/?$/)).toBe("/a/pre-:x-suf");
     expect(regExpToRoute(/^\/a\/(?<x>[^/]+)-\/?$/)).toBe("/a/:x-");
     expect(regExpToRoute(/^\/a\/(?<x>[^/]+)-(?<y>[^/]+)\/?$/)).toBe("/a/:x-:y");
     expect(regExpToRoute(/^\/a\/(?<x>\d+)abc\/?$/)).toBe("/a/:x(\\d+)abc");
-    for (const route of ["/a/:x\\abc", "/a/pre-:x\\-suf"]) {
+    for (const route of ["/a/:x\\abc", "/a/pre-:x-suf", "/a/:x\\é"]) {
       expect(routeToRegExp(regExpToRoute(routeToRegExp(route))).source).toBe(
         routeToRegExp(route).source,
       );

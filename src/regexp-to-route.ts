@@ -290,15 +290,12 @@ function reverseSegment(seg: string): string {
 
   let out = "";
   let i = 0;
-  // After a bare `:name`, a word char (or a `-` and one) would extend the
-  // name: escape it. A `(pat)` would read as its constraint and, after any
-  // group, a `*` as a modifier: no route emits these.
+  // After a bare `:name`, a word char would extend the name and a non-ASCII
+  // one is rejected there: escape them. A `(pat)` would read as its
+  // constraint and, after any group, a `*` as a modifier: no route emits these.
   let afterName = false;
-  const literal = (ch: string, next = "") => {
-    out +=
-      afterName && (/\w/.test(ch) || (ch === "-" && /\w/.test(next)))
-        ? `\\${ch}`
-        : escapeLiteral(ch);
+  const literal = (ch: string) => {
+    out += afterName && (/\w/.test(ch) || ch > "\x7f") ? `\\${ch}` : escapeLiteral(ch);
     afterName = false;
   };
   const param = (token: string, name?: string) => {
@@ -339,7 +336,7 @@ function reverseSegment(seg: string): string {
       if (/[a-z0-9]/i.test(next)) {
         throw new Error(`rou3: unsupported escape "\\${next}" in "${seg}"`);
       }
-      literal(next, seg[i + 2]);
+      literal(next);
       i += 2;
       continue;
     }
@@ -350,7 +347,7 @@ function reverseSegment(seg: string): string {
     if (BARE_META.has(c)) {
       throw new Error(`rou3: unsupported metacharacter "${c}" in "${seg}"`);
     }
-    literal(c, seg[i + 1]);
+    literal(c);
     i += 1;
   }
   return out;
@@ -497,6 +494,10 @@ function constraint(body: string): string {
   if (body.includes("/")) {
     throw new Error(`rou3: param constraint "(${body})" cannot contain "/"`);
   }
+  // An unnamed group inside a constraint has no route form (`addRoute` rejects it)
+  if (/\((?!\?)/.test(body.replace(/\\[\s\S]|\[(?:\\[\s\S]|[^\]])*\]/g, ""))) {
+    throw new Error(`rou3: param constraint "(${body})" cannot contain an unnamed group`);
+  }
   return `(${body})`;
 }
 
@@ -512,9 +513,8 @@ interface NamedGroup {
 
 /**
  * Parse `(?<name>...)` at `start`, returning its name, body and end index. The
- * name is decoded back to its route form, so a param whose name is not a valid
- * capture-group name (`:test-id`, `:0`) round-trips instead of leaking the
- * escaped group name.
+ * name is decoded back to its route form, so a param whose name is emitted
+ * escaped (`:_0`) round-trips instead of leaking the escaped group name.
  */
 function matchNamedGroup(src: string, start: number): NamedGroup | undefined {
   if (!src.startsWith("(?<", start)) {
@@ -537,10 +537,10 @@ function matchNamedGroup(src: string, start: number): NamedGroup | undefined {
   };
 }
 
-/** Decode a capture-group name into a route param name (`\w+(?:-\w+)*`). */
+/** Decode a capture-group name into a route param name (`[A-Za-z_]\w*`). */
 function paramName(key: string): string {
   const name = fromGroupName(key);
-  if (!/^\w+(?:-\w+)*$/.test(name)) {
+  if (!/^[A-Za-z_]\w*$/.test(name)) {
     throw new Error(`rou3: "${name}" is not a valid param name`);
   }
   return name;

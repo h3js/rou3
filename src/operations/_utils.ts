@@ -60,13 +60,15 @@ export function segmentKey(segment: string): string | 1 | 2 {
  * `\` that escapes no char of its segment (a `\/` or a trailing `\`), and on
  * a `^` / `$` / look-around in a group: the tree tests a segment on its own,
  * where they see its ends, and `routeToRegExp` inline, where they see the rest
- * of the path (#227). Called by `addRoute` (and so by `routeToRegExp`). A
- * stray `)` stays a literal.
+ * of the path (#227), and on an unnamed capturing group inside a group (a
+ * stray numbered param; `(?:…)` and `(?<name>…)` are fine). Called by
+ * `addRoute` (and so by `routeToRegExp`). A stray `)` stays a literal.
  *
  * Escapes are dropped first (`\(` is no group; `\/` stays, the split cuts
- * there too), then balanced `/`-free groups innermost-out, so any `(` left
- * does not close in its own segment, and any `\` left escapes nothing. Braces
- * inside a group are regex.
+ * there too), then balanced `/`-free groups innermost-out (an unnamed
+ * capturing one leaves a `\0`, like a backreference, in the group around
+ * it), so any `(` left does not close in its own segment, and any `\` left
+ * escapes nothing. Braces inside a group are regex.
  */
 export function checkConstraints(route: string): void {
   if (!/[\\({}]/.test(route)) return;
@@ -77,9 +79,12 @@ export function checkConstraints(route: string): void {
     s !==
     (s = s.replace(/\([^()/]*\)/g, (group) => {
       if (/[$^\0]|^\(\?<?[=!]/.test(group.replace(/\[[^\]]*\]/g, ""))) {
-        invalidSyntax("an anchor, look-around or backreference in a constraint", route);
+        invalidSyntax(
+          "an anchor, look-around, backreference or unnamed group in a constraint",
+          route,
+        );
       }
-      return "";
+      return group[1] === "?" ? "" : "\0";
     }))
   );
   if (s.includes("(")) {
@@ -103,8 +108,13 @@ export function invalidSyntax(what: string, route: string): never {
   throw new Error(`rou3: ${what} (${route})`);
 }
 
-/** `?` / `+` / `*` anywhere but after a whole-segment `:name` (see README). */
-export const MISPLACED_MODIFIER = "a `?` / `+` / `*` modifier must follow a whole-segment `:name`";
+/**
+ * A `?` / `+` / `*` modifier anywhere but after a whole-segment `:name` (a `?`
+ * also after `:name(…)` or in a mixed segment), a raw `?` in a static segment
+ * and a `**` in the middle of one (see README).
+ */
+export const MISPLACED_MODIFIER =
+  "a `?` / `+` / `*` in the wrong place, escape a literal one with `\\`";
 
 /**
  * Expand the first `?` / `+` / `*` modifier of a param into the routes it
@@ -116,14 +126,14 @@ export function expandModifiers(segments: string[], input?: string): string[] | 
   for (let i = 0; i < segments.length; i++) {
     const last = segments[i].charCodeAt(segments[i].length - 1);
     if (last !== 63 /* ? */ && last !== 43 /* + */ && last !== 42 /* * */) continue;
-    const m = segments[i].match(/^(.*:\w+(?:-\w+)*(?:\([^)]*\))?)([?+*])$/);
+    const m = segments[i].match(/^(.*:[A-Za-z_]\w*(?:\([^)]*\))?)([?+*])$/);
     if (!m) continue;
     const pre = segments.slice(0, i);
     const suf = segments.slice(i + 1);
     if (m[2] === "?") {
       return ["/" + pre.concat(m[1]).concat(suf).join("/"), "/" + pre.concat(suf).join("/")];
     }
-    if (!/^:\w+(?:-\w+)*$/.test(m[1])) {
+    if (!/^:[A-Za-z_]\w*$/.test(m[1])) {
       invalidSyntax(MISPLACED_MODIFIER, input!);
     }
     const name = m[1].slice(1);

@@ -116,13 +116,17 @@ describe("types", () => {
       expectTypeOf<InferRouteParams<"/a{/**}?/b">>().toEqualTypeOf<{ _: string }>();
     });
 
-    it("should end param names at a `-` no word char follows", () => {
+    it("should end param names at a `-`", () => {
       expectTypeOf<InferRouteParams<"/blog/:year-:month">>().toEqualTypeOf<{
         year: string;
         month: string;
       }>();
       expectTypeOf<InferRouteParams<"/a/:x-">>().toEqualTypeOf<{ x: string }>();
-      expectTypeOf<InferRouteParams<"/a/:test-id/b">>().toEqualTypeOf<{ "test-id": string }>();
+      expectTypeOf<InferRouteParams<"/a/:test-id/b">>().toEqualTypeOf<{ test: string }>();
+      expectTypeOf<InferRouteParams<"/a/:test\\-id/b">>().toEqualTypeOf<{ test: string }>();
+      expectTypeOf<InferRouteParams<"/a/:name-suffix">>().toEqualTypeOf<{ name: string }>();
+      expectTypeOf<InferRouteParams<"/a/:a-b.:a_b">>().toEqualTypeOf<{ a: string; a_b: string }>();
+      expectTypeOf<InferRouteParams<"/a/:v2/:_0">>().toEqualTypeOf<{ v2: string; _0: string }>();
       expectTypeOf<InferRouteParams<"/a/get-:file.:ext">>().toEqualTypeOf<{
         file: string;
         ext: string;

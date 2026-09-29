@@ -66,15 +66,12 @@ const SKIP_PATTERNS = new Set([
   "./foo",
   "../foo",
 
-  // Unicode identifiers — rou3 params use `\w` (ASCII word chars)
+  // Unicode identifiers — rou3 param names are ASCII (`[A-Za-z_]\w*`); the
+  // valid ones with an input are in `RESERVED_PATTERNS`
   "(café)",
-  "/:café",
-  "/:℘",
-  "/:㐀",
   "​​",
   ":​​",
   ":a󠄀b",
-  "test/:a𐑐b",
   ":🚲",
 
   // Percent-encoding normalization — rou3 does not decode
@@ -178,7 +175,8 @@ const KNOWN_DIFFS = new Set([
 
 // Valid URLPattern syntax rou3 has no meaning for (yet): every strategy
 // throws a `rou3:` error for these patterns instead of matching with a
-// different meaning (modifiers on `*` / an unnamed group, group repetition).
+// different meaning (modifiers on `*` / an unnamed group, group repetition,
+// Unicode param names).
 const RESERVED_PATTERNS = new Set([
   "/foo/(.*)?",
   "/foo/*?",
@@ -187,6 +185,12 @@ const RESERVED_PATTERNS = new Set([
   "/foo/(.*)*",
   "/foo{/bar}+",
   "/foo{/bar}*",
+  // Unicode param names: rou3 names are ASCII, and a non-ASCII char right
+  // after one throws instead of ending it
+  "/:café",
+  "/:℘",
+  "/:㐀",
+  "test/:a𐑐b",
 ]);
 
 // Additional known diffs specific to router-based matching (addRoute+findRoute / compileRouter)

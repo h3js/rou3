@@ -388,44 +388,57 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/files", "/files/a/b", "/files/a.b//"],
   },
-  // Param names accept `\w+(?:-\w+)*`, but a capture group name must be an identifier
-  // (no `-`, no leading digit) in JS and PCRE alike. Such names are emitted in a
-  // reserved, injective escaped form (`_` -> `__`, `-` -> `_h`) and decoded back
-  // to the original param name when groups are read.
+  // A param name is `[A-Za-z_]\w*`, so a `-` ends it, as in URLPattern:
+  // `:test-id` is `:test` then a literal `-id` (it was a param `test-id`).
   "/api/:test-id": {
-    regex: /^\/api\/(?:(?<__rou3_esc_test_hid>[^/]+)\/?|\/)$/,
-    match: [["/api/abc", { "test-id": "abc" }]],
-  },
-  "/api/:test-id?": {
-    regex: /^\/api(?:\/(?<__rou3_esc_test_hid>[^/]*))??\/?$/,
-    match: [
-      ["/api/abc", { "test-id": "abc" }],
-      ["/api", { "test-id": undefined }],
-    ],
-  },
-  "/api/**:test-id": {
-    regex: /^\/api\/(?:\/|(?<__rou3_esc_test_hid>(?:[\s\S]*[^/]|\/)\/*?)\/?)$/,
-    match: [["/api/a/b", { "test-id": "a/b" }]],
-    noMatch: ["/api", "/api/", "/apifoo"],
+    regex: /^\/api\/(?<test>[^/]+)-id\/?$/,
+    match: [["/api/abc-id", { test: "abc" }]],
+    noMatch: ["/api/abc", "/api/-id"],
   },
   "/files/:file-name.json": {
-    regex: /^\/files\/(?<__rou3_esc_file_hname>[^/]+)\.json\/?$/,
-    match: [["/files/readme.json", { "file-name": "readme" }]],
+    regex: /^\/files\/(?<file>[^/]+)-name\.json\/?$/,
+    match: [["/files/readme-name.json", { file: "readme" }]],
+    noMatch: ["/files/readme.json"],
   },
-  // `a-b` and `a_b` must not collapse onto one group name.
   "/mix/:a-b.:a_b": {
-    regex: /^\/mix\/(?<__rou3_esc_a_hb>[^/]+)\.(?<a_b>[^/]+)\/?$/,
-    match: [["/mix/x.y", { "a-b": "x", a_b: "y" }]],
+    regex: /^\/mix\/(?<a>[^/]+)-b\.(?<a_b>[^/]+)\/?$/,
+    match: [["/mix/x-b.y", { a: "x", a_b: "y" }]],
+    noMatch: ["/mix/x.y"],
   },
-  // Runs of `-`/`_` must survive: the escape is a prefix code, so `a-_b` and
-  // `a_-b` stay distinct. A `-` -> `_` sanitize collides them (duplicate group
-  // name -> SyntaxError).
-  "/run/:a-_b.:a_-b": {
-    regex: /^\/run\/(?<__rou3_esc_a_h__b>[^/]+)\.(?<__rou3_esc_a___hb>[^/]+)\/?$/,
-    match: [["/run/x.y", { "a-_b": "x", "a_-b": "y" }]],
+  // An escaped `-` is a literal too (it ended the name before as well).
+  "/api/:test\\-id": {
+    regex: /^\/api\/(?<test>[^/]+)-id\/?$/,
+    match: [["/api/abc-id", { test: "abc" }]],
   },
-  // A name is `\w+(?:-\w+)*`: a `-` no word char follows ends it (`[\w-]+`
-  // captured `{ "year-": "2024-0", month: "5" }`).
+  // Every route name is an identifier, but names in the reserved `__rou3_`
+  // space (and `_N`-shaped ones, the unnamed capture form `routeToRegExp`
+  // emits: see `find.test.ts`, the group helpers here read `_N` as unnamed)
+  // are emitted in an injective escaped form (`_` -> `__`) and decoded back to
+  // the param name when groups are read.
+  "/api/:__rou3_x": {
+    regex: /^\/api\/(?:(?<__rou3_esc_____rou3__x>[^/]+)\/?|\/)$/,
+    match: [["/api/abc", { __rou3_x: "abc" }]],
+  },
+  "/api/:__rou3_x?": {
+    regex: /^\/api(?:\/(?<__rou3_esc_____rou3__x>[^/]*))??\/?$/,
+    match: [
+      ["/api/abc", { __rou3_x: "abc" }],
+      ["/api", { __rou3_x: undefined }],
+    ],
+  },
+  "/api/**:__rou3_x": {
+    regex: /^\/api\/(?:\/|(?<__rou3_esc_____rou3__x>(?:[\s\S]*[^/]|\/)\/*?)\/?)$/,
+    match: [["/api/a/b", { __rou3_x: "a/b" }]],
+    noMatch: ["/api", "/api/", "/apifoo"],
+  },
+  // The reserved prefixes must not collapse with the unnamed `*` (`_0`).
+  "/run/:__rou3_esc_a.:__rou3_unnamed_1.*": {
+    regex:
+      /^\/run\/(?<__rou3_esc_____rou3__esc__a>[^/]+)\.(?<__rou3_esc_____rou3__unnamed__1>[^/]+)\.(?<_0>[^/]*)\/?$/,
+    match: [["/run/x.y.z", { __rou3_esc_a: "x", __rou3_unnamed_1: "y", "0": "z" }]],
+  },
+  // A `-` no word char follows ended a name before too (`[\w-]+` captured
+  // `{ "year-": "2024-0", month: "5" }`).
   "/blog/:year-:month": {
     regex: /^\/blog\/(?<year>[^/]+)-(?<month>[^/]+)\/?$/,
     match: [["/blog/2024-05", { year: "2024", month: "05" }]],
@@ -439,11 +452,6 @@ export const regexpCases: Record<string, RegExpCase> = {
   "/a/pre-:x\\-suf": {
     regex: /^\/a\/pre-(?<x>[^/]+)-suf\/?$/,
     match: [["/a/pre-b-suf", { x: "b" }]],
-  },
-  // Leading digit: also not a valid group name.
-  "/api/:0": {
-    regex: /^\/api\/(?:(?<__rou3_esc_0>[^/]+)\/?|\/)$/,
-    match: [["/api/abc", { "0": "abc" }]],
   },
   // Mid-segment optional after a greedy open-ended capture (`*` -> `[^/]*`).
   // Inlining as `(?<_0>[^/]*)(?:\.webp)?` would let the greedy capture swallow
@@ -1289,10 +1297,57 @@ export const RESERVED_SYNTAX_ROUTES: readonly string[] = [
   "/a/x:",
   "/a/:\u00e9",
   "/a/:(\\d+)",
-  // A name can't start or end with `-` (`:x-?` is `:x`, `-` and a stray `?`)
+  // A `-` ends a name (`:x-?` is `:x`, `-` and a stray `?`)
   "/a/:-x",
   "/a/**:x-",
   "/a/:x-?",
+  "/api/:test-id?",
+  "/api/:test-id+",
+  "/api/**:test-id",
+  // A non-ASCII char right after a name was a literal (`/:café` is `:caf` and
+  // `é`), URLPattern reads it as part of the name (`/:caf\\é` is a literal).
+  "/:café",
+  "/a/:x\u00e9.png",
+  "/a/:x(\\d+)/:y\u00a0",
+  "/a/**:café",
+  "/a/:x\ud83d\udeb2",
+  "/a/:\ud83d\udeb2",
+  // A name must start with a letter or `_` (`/:0` collided with the unnamed
+  // key `"0"`).
+  "/:0",
+  "/:1st",
+  "/a/:0.txt",
+  "/a/:0?",
+  "/a/:0+",
+  "/a/**:0",
+  "/a/pre-:1(\\d+)",
+  // An unnamed group inside a constraint was a stray numbered param
+  // (`/:x((a))` gave `{ x: "a", "0": "a" }`).
+  "/:x((a))",
+  "/a/((b)c)",
+  "/a/:x((?:a)|(b))",
+  "/a/:x((?:(a)))",
+  "/a/x((b))y",
+  // A `?` after plain text was a literal no lookup path can contain (`\\?`
+  // still is one).
+  "/foo?",
+  "/a/b?/c",
+  "/a/what?",
+  "/a/b?c",
+  "/a//\\:x?",
+  "/a/*/\\:x?",
+  "/a/\\\\?",
+  "/a{/b}?/c?",
+  "/**/b?",
+  // A `**` in the middle of a segment was two `*` captures, the second always
+  // `""` (`/**.md`, a segment starting with `**`, is `/**\/*.md`).
+  "/a**b",
+  "/a/x**",
+  "/a/x**y",
+  "/a/*.**",
+  "/a/:x.**",
+  "/a/x***",
+  "/a/**x**",
   // A modifier where none applies was a raw regex quantifier.
   "/a/**?",
   "/a/**+",

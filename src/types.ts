@@ -94,17 +94,12 @@ type Lower = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "
 type Lower2 = "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z";
 type WordChar = Digit | Lower | Lower2 | Uppercase<Lower | Lower2> | "_";
 
-// The param name at the start of `S`: its longest `\w+(?:-\w+)*` prefix
+// The param name at the start of `S`: its longest `[A-Za-z_]\w*` prefix (a
+// `-` ends it, a leading digit is no name)
 type TakeName<S extends string, Name extends string = ""> = S extends `${infer C}${infer Rest}`
-  ? C extends WordChar
+  ? C extends (Name extends "" ? Exclude<WordChar, Digit> : WordChar)
     ? TakeName<Rest, `${Name}${C}`>
-    : C extends "-"
-      ? Name extends ""
-        ? Name
-        : Rest extends `${WordChar}${string}`
-          ? TakeName<Rest, `${Name}-`>
-          : Name
-      : Name
+    : Name
   : Name;
 
 // `S` past the `(...)` group it starts with (escape aware)

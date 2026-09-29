@@ -1,11 +1,12 @@
-// Route param names are `\w+(?:-\w+)*`, but a named capture group must be a valid
-// identifier — no `-`, no leading digit — in JS and in PCRE alike. Names that
-// can't be emitted verbatim are escaped into a reserved form so `(?<name>...)`
-// stays compilable, and decoded back when groups are read: params always surface
-// under the original route name (`:test-id` -> `params["test-id"]`).
+// Route param names are identifiers (`[A-Za-z_]\w*`), but `_N`-shaped ones
+// collide with the unnamed captures `routeToRegExp` emits and `__rou3_` ones with
+// the internal prefixes. Those are escaped into a reserved form, and decoded back
+// when groups are read: params always surface under the original route name
+// (`:_0` -> `params._0`). The codec stays total for any string (a `-` or leading
+// digit is escaped too), so older regexes and `regExpToRoute` input decode.
 //
 // The escape is a prefix code (every `_` in the output opens a two-char escape),
-// so it is injective: distinct names can never collide (`:a-b`, `:a_b`, `:a--b`
+// so it is injective: distinct names can never collide (`a-b`, `a_b`, `a--b`
 // stay distinct, unlike a plain `-` -> `_` sanitize) and decoding is exact. It
 // stays inside `[A-Za-z0-9_]`, so the output is a legal PCRE group name too.
 

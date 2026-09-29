@@ -178,63 +178,13 @@ describe("route matching", () => {
   });
 });
 
-describe("hyphenated param names", () => {
-  const router = createRouter([
-    "/users/:user-id",
-    "/users/:user-id/posts/:post-id",
-    "/items/:item-name/details",
-  ]);
-
-  const compiledLookup = compileRouter(router);
-
-  const lookups = [
-    {
-      name: "findRoute",
-      match: (method: string, path: string) => findRoute(router, method, path),
-    },
-    {
-      name: "compiledLookup",
-      match: (method: string, path: string) => compiledLookup(method, path),
-    },
-  ];
-
-  for (const { name, match } of lookups) {
-    it(`match hyphenated params with ${name}`, () => {
-      expect(match("GET", "/users/123")).toMatchObject({
-        data: { path: "/users/:user-id" },
-        params: { "user-id": "123" },
-      });
-      expect(match("GET", "/users/abc/posts/456")).toMatchObject({
-        data: { path: "/users/:user-id/posts/:post-id" },
-        params: { "user-id": "abc", "post-id": "456" },
-      });
-      expect(match("GET", "/items/widget/details")).toMatchObject({
-        data: { path: "/items/:item-name/details" },
-        params: { "item-name": "widget" },
-      });
-      // Hyphenated param should still be single-segment
-      expect(match("GET", "/users/foo/bar")).not.toMatchObject({
-        data: { path: "/users/:user-id" },
-      });
-    });
-  }
-});
-
 describe("param names that are not valid capture-group names", () => {
-  // Param names accept `\w+(?:-\w+)*`, but a JS/PCRE capture group name must be an
-  // identifier (no `-`, no leading digit). Whole-segment params store the name
-  // as a plain string key and always worked; every regex-compiled position
-  // (mixed segments, inline constraints, segment wildcards) used to emit the
-  // raw name as `(?<test-id>…)` and throw `SyntaxError: Invalid capture group
-  // name` from addRoute().
-  const router = createRouter([
-    "/files/:file-name.json",
-    "/blog/:post-id(\\d+)",
-    "/n/:0.txt",
-    "/mix/:a-b.:a_b",
-    "/run/:a-_b.:a_-b",
-    "/w/:file-name.*",
-  ]);
+  // Every param name is an identifier (`[A-Za-z_]\w*`), but `_N`-shaped ones
+  // (the unnamed-capture form of `routeToRegExp`) and the reserved `__rou3_`
+  // space are escaped as capture-group names in every regex-compiled position
+  // (mixed segments, inline constraints, segment wildcards), and must surface
+  // under their original names, distinct from the unnamed captures.
+  const router = createRouter(["/n/:_0.txt", "/c/:_1(\\d+)", "/w/:_0.*", "/r/:__rou3_unnamed_0.*"]);
 
   const compiledLookup = compileRouter(router);
 
@@ -245,42 +195,29 @@ describe("param names that are not valid capture-group names", () => {
 
   for (const { name, match } of lookups) {
     it(`params surface under their original names (${name})`, () => {
-      expect(match("GET", "/files/readme.json")).toMatchObject({
-        data: { path: "/files/:file-name.json" },
-        params: { "file-name": "readme" },
-      });
-      expect(match("GET", "/blog/123")).toMatchObject({
-        data: { path: "/blog/:post-id(\\d+)" },
-        params: { "post-id": "123" },
-      });
-      expect(match("GET", "/blog/abc")).toBeUndefined();
       expect(match("GET", "/n/42.txt")).toMatchObject({
-        data: { path: "/n/:0.txt" },
-        params: { "0": "42" },
+        data: { path: "/n/:_0.txt" },
+        params: { _0: "42" },
       });
-      // Distinct names must stay distinct through the escape. A `-` -> `_`
-      // sanitize collapses `a-b`/`a_b` onto one group name and makes
-      // `a-_b`/`a_-b` a duplicate group (SyntaxError).
-      expect(match("GET", "/mix/x.y")).toMatchObject({
-        data: { path: "/mix/:a-b.:a_b" },
-        params: { "a-b": "x", a_b: "y" },
+      expect(match("GET", "/c/123")).toMatchObject({
+        data: { path: "/c/:_1(\\d+)" },
+        params: { _1: "123" },
       });
-      expect(match("GET", "/run/x.y")).toMatchObject({
-        data: { path: "/run/:a-_b.:a_-b" },
-        params: { "a-_b": "x", "a_-b": "y" },
-      });
-      // Escaped name alongside an unnamed segment wildcard capture.
-      expect(match("GET", "/w/logo.dark")).toMatchObject({
-        data: { path: "/w/:file-name.*" },
-        params: { "file-name": "logo", "0": "dark" },
+      expect(match("GET", "/c/abc")).toBeUndefined();
+      // Escaped names alongside an unnamed segment wildcard capture.
+      expect(match("GET", "/w/logo.dark")?.params).toEqual({ _0: "logo", "0": "dark" });
+      expect(match("GET", "/r/logo.dark")?.params).toEqual({
+        __rou3_unnamed_0: "logo",
+        "0": "dark",
       });
     });
   }
 });
 
-describe("param names end before a `-` that no word char follows", () => {
-  // A name is `\w+(?:-\w+)*`: a `-` belongs to it only between word chars.
-  // `[\w-]+` swallowed the `-` of `:year-:month` (`{ "year-": "2024-0" }`).
+describe("a `-` ends a param name", () => {
+  // A name is `[A-Za-z_]\w*`, as in URLPattern: `:test-id` is `:test` and a
+  // literal `-id` (it was a param `test-id`). `[\w-]+` before that swallowed
+  // the `-` of `:year-:month` (`{ "year-": "2024-0" }`).
   const router = createRouter([
     "/blog/:year-:month",
     "/post/:id{-:title}?",
@@ -289,6 +226,9 @@ describe("param names end before a `-` that no word char follows", () => {
     "/d/pre-:x\\-suf",
     "/e/:test-id",
     "/f/:x-(\\d+)",
+    "/g/:name-suffix",
+    "/h/:test\\-id",
+    "/users/:user-id/posts/:post-id",
   ]);
   const compiledLookup = compileRouter(router);
   const lookups = [
@@ -303,10 +243,14 @@ describe("param names end before a `-` that no word char follows", () => {
       expect(match("GET", "/a/b-")?.params).toEqual({ x: "b" });
       expect(match("GET", "/a/b")).toBeUndefined();
       expect(match("GET", "/b/b-/c")?.params).toEqual({ x: "b" });
-      // An escaped `-` ends the name too.
       expect(match("GET", "/d/pre-b-suf")?.params).toEqual({ x: "b" });
-      // A `-` between word chars is still part of the name.
-      expect(match("GET", "/e/abc")?.params).toEqual({ "test-id": "abc" });
+      // `:test-id` is `:test` then `-id`, with or without escaping the `-`.
+      expect(match("GET", "/e/abc")).toBeUndefined();
+      expect(match("GET", "/e/abc-id")?.params).toEqual({ test: "abc" });
+      expect(match("GET", "/h/abc-id")?.params).toEqual({ test: "abc" });
+      expect(match("GET", "/g/foo-suffix")?.params).toEqual({ name: "foo" });
+      expect(match("GET", "/users/1-id/posts/2-id")?.params).toEqual({ user: "1", post: "2" });
+      expect(match("GET", "/users/1/posts/2")).toBeUndefined();
       // `:x-(\d+)` is `:x`, `-` and an unnamed group, as in URLPattern.
       expect(match("GET", "/f/1-2")?.params).toEqual({ x: "1", "0": "2" });
     });
