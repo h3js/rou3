@@ -198,6 +198,23 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(/^\/mix\/(?<__rou3_esc_____rou3__x>[^/]+)\.(?<_0>[^/]*)\/?$/)).toBe(
       "/mix/:__rou3_x.*",
     );
+    // A `_N` param (escaped, `__rou3_esc___N`) is no unnamed capture (`_N`).
+    for (const route of [
+      "/:_0",
+      "/a/:_1-:b",
+      "/a/:_0+",
+      "/a/:_0?",
+      "/a/:_0*",
+      "/a/:_0(\\d+)",
+      "/a/:_0.*",
+      "/a/:_0*/:_1?",
+      "/a/:_0*/*",
+      "/a/:_0+/b",
+    ]) {
+      const re = routeToRegExp(route);
+      expect(regExpToRoute(re), route).toBe(route);
+      expect(routeToRegExp(regExpToRoute(re)).source, route).toBe(re.source);
+    }
     // Names a route can no longer have (`-`, leading digit) are rejected.
     expect(() => regExpToRoute(/^\/api\/(?<__rou3_esc_test_hid>[^/]+)\/?$/)).toThrow(/^rou3: /);
     expect(() => regExpToRoute(/^\/api\/(?<__rou3_esc_0>[^/]+)\/?$/)).toThrow(/^rou3: /);
