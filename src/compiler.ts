@@ -2,16 +2,49 @@ import { ESCAPED_GROUP_PREFIX, fromGroupName, UNNAMED_GROUP_PREFIX } from "./_gr
 import { NullProtoObj } from "./object.ts";
 import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 
-export interface RouterCompilerOptions<T = any> {
+/** A compiled single-match lookup (`compileRouter(router)`), like `findRoute`. */
+export type CompiledMatch<T = unknown> = (
+  method: string,
+  path: string,
+) => MatchedRoute<T> | undefined;
+
+/** A compiled multi-match lookup (`matchAll: true`), like `findAllRoutes`. */
+export type CompiledMatchAll<T = unknown> = (method: string, path: string) => MatchedRoute<T>[];
+
+/** Options of {@link compileRouter}. */
+export interface CompileRouterOptions<T = any> {
+  /** Return every matching route (least to most specific) instead of the best one. */
   matchAll?: boolean;
+  /** Resolve `.` and `..` segments of the path before matching. */
   normalize?: boolean;
+  /**
+   * Render one route's data as a JavaScript expression (raw code, emitted
+   * as is). Defaults to `JSON.stringify`. Only used by
+   * {@link compileRouterToString}: `compileRouter` keeps data by reference.
+   */
   serialize?: (data: T) => string;
 }
+
+/** Options of {@link compileRouterToString}. */
+export interface CompileRouterToStringOptions<T = any> extends CompileRouterOptions<T> {
+  /**
+   * Emit `const <functionName>=<matcher>;` instead of a bare expression.
+   */
+  functionName?: string;
+}
+
+/**
+ * @deprecated Use {@link CompileRouterToStringOptions} (or
+ * {@link CompileRouterOptions} for `compileRouter`).
+ */
+export type RouterCompilerOptions<T = any> = CompileRouterToStringOptions<T>;
 
 /**
  * Compiles the router instance into a faster route-matching function.
  *
- * **IMPORTANT:** `compileRouter` requires eval support with `new Function()` in the runtime for JIT compilation.
+ * **IMPORTANT:** `compileRouter` requires eval support with `new Function()` in the runtime for JIT compilation (not allowed under a CSP without `unsafe-eval`: use `compileRouterToString` at build time there).
+ *
+ * The compiled function is a **snapshot** of the router: routes added or removed afterwards are not seen, compile again after changing it. Route data is kept by reference. It returns what `findRoute` returns (with `matchAll: true`, what `findAllRoutes` returns), except that `params` is a plain object where `findRoute`'s has a null prototype.
  *
  * @example
  * import { createRouter, addRoute } from "rou3";
@@ -24,13 +57,40 @@ export interface RouterCompilerOptions<T = any> {
  *
  * @param router - The router context to compile.
  */
-export function compileRouter<T, O extends RouterCompilerOptions<T> = RouterCompilerOptions<T>>(
+export function compileRouter<T>(
   router: RouterContext<T>,
-  opts?: O,
-): (
-  method: string,
-  path: string,
-) => O["matchAll"] extends true ? MatchedRoute<T>[] : MatchedRoute<T> | undefined {
+  opts: CompileRouterOptions<T> & { matchAll: true },
+): CompiledMatchAll<T>;
+export function compileRouter<T>(
+  router: RouterContext<T>,
+  opts?: CompileRouterOptions<T> & { matchAll?: false },
+): CompiledMatch<T>;
+export function compileRouter<T>(
+  router: RouterContext<T>,
+  opts?: CompileRouterOptions<T>,
+): CompiledMatch<T> | CompiledMatchAll<T>;
+/**
+ * Compiles the router instance into a faster route-matching function.
+ *
+ * **IMPORTANT:** `compileRouter` requires eval support with `new Function()` in the runtime for JIT compilation (not allowed under a CSP without `unsafe-eval`: use `compileRouterToString` at build time there).
+ *
+ * The compiled function is a **snapshot** of the router: routes added or removed afterwards are not seen, compile again after changing it. Route data is kept by reference. It returns what `findRoute` returns (with `matchAll: true`, what `findAllRoutes` returns), except that `params` is a plain object where `findRoute`'s has a null prototype.
+ *
+ * @example
+ * import { createRouter, addRoute } from "rou3";
+ * import { compileRouter } from "rou3/compiler";
+ * const router = createRouter();
+ * // [add some routes]
+ * const findRoute = compileRouter(router);
+ * const matchAll = compileRouter(router, { matchAll: true });
+ * findRoute("GET", "/path/foo/bar");
+ *
+ * @param router - The router context to compile.
+ */
+export function compileRouter<T>(
+  router: RouterContext<T>,
+  opts?: CompileRouterOptions<T>,
+): CompiledMatch<T> | CompiledMatchAll<T> {
   const ctx: CompilerContext = { opts: opts || {}, router, data: [] };
   const compiled = compileRouteMatch(ctx);
   if (ctx.data.length < DATA_ARGS_MAX) {
@@ -46,25 +106,69 @@ export function compileRouter<T, O extends RouterCompilerOptions<T> = RouterComp
 }
 
 /**
- * Compile the router instance into a compact runnable code.
+ * Compile the router instance into a compact runnable code (ahead of time, e.g. into a build output).
  *
- * **IMPORTANT:** Route data must be serializable to JSON (i.e., no functions or classes) or implement the `toJSON()` method to render custom code or you can pass custom `serialize` function in options.
+ * The output is a self-contained JavaScript expression (or a `const <functionName>=…;` statement): no imports, no runtime dependency on rou3, and no `eval` / `new Function()`, so it runs under a strict CSP. It needs ES2018 (named capture groups, object spread). Like `compileRouter`, it is a **snapshot** of the router at compile time.
+ *
+ * **IMPORTANT:** The exact generated code is **not** stable across rou3 versions: generate it at build time with the installed rou3, don't commit, patch or parse it.
+ *
+ * **IMPORTANT:** Route data is emitted with `JSON.stringify` (`toJSON()` applies at every depth, as in JSON). Data containing a function, symbol or bigint throws: pass `opts.serialize` to emit each route's data as a JavaScript expression of your own instead.
  *
  * @example
  * import { createRouter, addRoute } from "rou3";
  * import { compileRouterToString } from "rou3/compiler";
  * const router = createRouter();
  * // [add some routes with serializable data]
- * const compilerCode = compileRouterToString(router, "findRoute");
+ * const compilerCode = compileRouterToString(router, { functionName: "findRoute" });
  * // "const findRoute=(m, p) => {}"
+ *
+ * // Route data as code (e.g. handler imports)
+ * compileRouterToString(router, { serialize: (data) => `{handler:${data.importName}}` });
  */
-export function compileRouterToString(
-  router: RouterContext,
-  functionName?: string,
-  opts?: RouterCompilerOptions,
+export function compileRouterToString<T>(
+  router: RouterContext<T>,
+  opts?: CompileRouterToStringOptions<T>,
+): string;
+/**
+ * @deprecated Pass the function name as an option instead:
+ * `compileRouterToString(router, { functionName, ...opts })`.
+ */
+export function compileRouterToString<T>(
+  router: RouterContext<T>,
+  functionName: string | undefined,
+  opts?: CompileRouterToStringOptions<T>,
+): string;
+/**
+ * Compile the router instance into a compact runnable code (ahead of time, e.g. into a build output).
+ *
+ * The output is a self-contained JavaScript expression (or a `const <functionName>=…;` statement): no imports, no runtime dependency on rou3, and no `eval` / `new Function()`, so it runs under a strict CSP. It needs ES2018 (named capture groups, object spread). Like `compileRouter`, it is a **snapshot** of the router at compile time.
+ *
+ * **IMPORTANT:** The exact generated code is **not** stable across rou3 versions: generate it at build time with the installed rou3, don't commit, patch or parse it.
+ *
+ * **IMPORTANT:** Route data is emitted with `JSON.stringify` (`toJSON()` applies at every depth, as in JSON). Data containing a function, symbol or bigint throws: pass `opts.serialize` to emit each route's data as a JavaScript expression of your own instead.
+ *
+ * @example
+ * import { createRouter, addRoute } from "rou3";
+ * import { compileRouterToString } from "rou3/compiler";
+ * const router = createRouter();
+ * // [add some routes with serializable data]
+ * const compilerCode = compileRouterToString(router, { functionName: "findRoute" });
+ * // "const findRoute=(m, p) => {}"
+ *
+ * // Route data as code (e.g. handler imports)
+ * compileRouterToString(router, { serialize: (data) => `{handler:${data.importName}}` });
+ */
+export function compileRouterToString<T>(
+  router: RouterContext<T>,
+  opts?: CompileRouterToStringOptions<T> | string,
+  legacyOpts?: CompileRouterToStringOptions<T>,
 ): string {
+  const functionName = typeof opts === "string" ? opts : opts?.functionName;
+  if (typeof opts !== "object" || !opts) {
+    opts = legacyOpts || {};
+  }
   const ctx: CompilerContext = {
-    opts: opts || {},
+    opts,
     router,
     data: [],
     compileToString: true,
@@ -219,7 +323,7 @@ function compileStaticMatch(ctx: CompilerContext): string {
           // findRoute resolves duplicates to the first-registered entry
           jitMethods[method] = matchAll ? matchers.map((m) => m.data) : matchers[0].data;
         } else {
-          const refs = matchers.map((m) => serializeData(ctx, m.data));
+          const refs = matchers.map((m) => serializeData(ctx, m));
           methodsCode += `${JSON.stringify(method)}:${matchAll ? `[${refs.join(",")}]` : refs[0]},`;
         }
       }
@@ -301,7 +405,7 @@ function compileFinalMatch(
   params: string[],
   suffixGuard?: string,
 ): { code: string; weight: number } {
-  let ret = `{data:${serializeData(ctx, data.data)}`;
+  let ret = `{data:${serializeData(ctx, data)}`;
 
   const conditions: string[] = [];
   // A `**:name` before the suffix must take a segment (weighs one point, as
@@ -741,15 +845,10 @@ function scanRegExpGroups(source: string): { names: string[]; whole: boolean } |
   };
 }
 
-function serializeData(ctx: CompilerContext, value: any): string {
+function serializeData(ctx: CompilerContext, entry: MethodData<any>): string {
+  let value = entry.data;
   if (ctx.compileToString) {
-    if (ctx.opts?.serialize) {
-      value = ctx.opts.serialize(value);
-    } else if (typeof value?.toJSON === "function") {
-      value = value.toJSON();
-    } else {
-      value = JSON.stringify(value);
-    }
+    value = ctx.opts.serialize ? ctx.opts.serialize(value) : toJSONCode(value, entry.route);
   }
   // Dedupe via a Map instead of `indexOf` (O(N²) across routes)
   const dataMap = (ctx.dataMap ??= new Map());
@@ -759,6 +858,47 @@ function serializeData(ctx: CompilerContext, value: any): string {
     dataMap.set(value, index);
   }
   return dataRef(ctx, index);
+}
+
+/**
+ * Default AOT data serializer: standard `JSON.stringify` (`toJSON()` applies
+ * at every depth), which is also a valid JS expression. Throws instead of
+ * emitting something that silently differs from the data: a function, symbol
+ * or bigint anywhere (dropped, `undefined` or a raw `TypeError`). Other
+ * objects follow JSON (a `Map` becomes `{}`). Compile time only.
+ */
+function toJSONCode(value: unknown, route: string): string {
+  let code: string | undefined;
+  try {
+    code = JSON.stringify(value, assertJSONValue);
+  } catch (error) {
+    code = undefined;
+    if (error !== NOT_JSON) {
+      throw notJSONError(route, error); // e.g. a circular reference
+    }
+  }
+  if (code === undefined) {
+    throw notJSONError(route);
+  }
+  return code;
+}
+
+const NOT_JSON = /* @__PURE__ */ Symbol("rou3:not-json");
+
+// `JSON.stringify` replacer: sees every value after its `toJSON()`
+function assertJSONValue(_key: string, value: unknown): unknown {
+  const type = typeof value;
+  if (type === "function" || type === "symbol" || type === "bigint") {
+    throw NOT_JSON;
+  }
+  return value;
+}
+
+function notJSONError(route: string, cause?: unknown): Error {
+  return new Error(
+    `rou3: route data for ${JSON.stringify(route)} is not JSON-serializable, pass opts.serialize to emit it as code`,
+    cause === undefined ? undefined : { cause },
+  );
 }
 
 // Data slots hold RegExp objects too (JIT: the object itself, AOT: its
