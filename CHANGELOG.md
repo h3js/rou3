@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.11.0
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.10.2...v0.11.0)
+
+### 🚀 Enhancements
+
+- **compiler:** ⚠️  Options object, `matchAll` overloads and JSON route data ([#225](https://github.com/h3js/rou3/pull/225))
+
+### 🩹 Fixes
+
+- **regexp-to-route:** Reject unanchored regexes and unicode flags ([#218](https://github.com/h3js/rou3/pull/218))
+- **router:** End param names at a `-` no word char follows ([#222](https://github.com/h3js/rou3/pull/222))
+- **router:** ⚠️  Never let a method-scoped route hide a method-agnostic one ([#223](https://github.com/h3js/rou3/pull/223))
+- **router:** ⚠️  Reject pattern syntax with no meaning yet ([#226](https://github.com/h3js/rou3/pull/226))
+- **overlap:** Dedupe findOverlappingRoutes by registration, not data reference ([#220](https://github.com/h3js/rou3/pull/220))
+- **find:** Return fresh match objects from the static fast path ([#219](https://github.com/h3js/rou3/pull/219))
+- **router:** ⚠️  Read any `\x` as a literal `x`, reject anchors in constraints ([#228](https://github.com/h3js/rou3/pull/228))
+- ⚠️  Align route pattern syntax with URLPattern ([#230](https://github.com/h3js/rou3/pull/230))
+
+### 🏡 Chore
+
+- Declare runtime baseline ([#224](https://github.com/h3js/rou3/pull/224))
+- Update docs ([8c85ec9](https://github.com/h3js/rou3/commit/8c85ec9))
+
+#### ⚠️ Breaking Changes
+
+- **compiler:** ⚠️  Options object, `matchAll` overloads and JSON route data ([#225](https://github.com/h3js/rou3/pull/225))
+- **router:** ⚠️  Never let a method-scoped route hide a method-agnostic one ([#223](https://github.com/h3js/rou3/pull/223))
+- **router:** ⚠️  Reject pattern syntax with no meaning yet ([#226](https://github.com/h3js/rou3/pull/226))
+- **router:** ⚠️  Read any `\x` as a literal `x`, reject anchors in constraints ([#228](https://github.com/h3js/rou3/pull/228))
+- ⚠️  Align route pattern syntax with URLPattern ([#230](https://github.com/h3js/rou3/pull/230))
+
+### ❤️ Contributors
+
+- Pi0x <x@pi0.io>
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.10.2
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.10.1...v0.10.2)
