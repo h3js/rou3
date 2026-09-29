@@ -142,7 +142,7 @@ Groups can't be nested or repeated (`{...}+` and `{...}*` throw).
 
 ### Escaping
 
-Escape `:`, `*`, `?`, `+`, `(`, `)`, `{` and `}` with a backslash to match them literally:
+Escape `:`, `*`, `?`, `+`, `(`, `)`, `{` and `}` with a backslash to match them literally. Outside a regex constraint, any escaped character is a literal (`\\.` is `.`, `\\\\` is `\`), as in URLPattern. A `\` can't escape `/` or end a segment.
 
 ```js
 addRoute(router, "GET", "/static\\:path/\\*\\*", {}); // matches only "/static:path/**"
@@ -151,7 +151,7 @@ addRoute(router, "GET", "/files/\\(2024\\)", {}); // matches only "/files/(2024)
 
 ### Invalid patterns
 
-`addRoute` throws a `rou3:` error that quotes the pattern when the syntax has no meaning, instead of silently matching something unexpected. For example: an unclosed `(` or `{`, a nested group, an empty group `()`, a modifier in the wrong place (`*?`, `**+`, `:x.png?`), a repeated param name, or a second catch-all.
+`addRoute` throws a `rou3:` error that quotes the pattern when the syntax has no meaning, instead of silently matching something unexpected. For example: an unclosed `(` or `{`, a nested group, an empty group `()`, a modifier in the wrong place (`*?`, `**+`, `:x.png?`), a repeated param name, a second catch-all, a `\/`, or an anchor (`^`, `$`), look-around or numbered backreference (`\1`) in a regex constraint. The router tests a constraint against its segment alone, while `routeToRegExp` puts it inline, where it would see the rest of the path, so the two would match different paths.
 
 ### Differences from URLPattern
 
@@ -454,6 +454,8 @@ const re = routeToRegExp("/users/:id(\\d+)");
 ```
 
 The regex matches **exactly the paths `findRoute` matches** on a router that only holds that route, including the router's tolerances (one optional trailing slash, empty segments, an optional trailing `*`, segments after `**` matched from the end). That makes it safe to use as a guard or scope check outside the router. Like `findRoute` without `normalize`, it compares paths as-is.
+
+The one exception is a regex constraint that can match `/`, such as `(.*)`: the router applies it to one segment, but in the regex it can span several, so `routeToRegExp("/foo/(.*)")` also matches `/foo/a/b`. The regex then matches more paths than the router, never fewer, so a guard built on it still runs.
 
 The output is **PCRE-compatible**, so its `.source` also works in `grep -P`, `rg -P`, PHP `preg_*` and Perl. Most routes also compile without look-behind, so they work in RE2-family engines (RE2, Go `regexp`, Rust `regex`).
 

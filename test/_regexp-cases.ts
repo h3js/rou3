@@ -160,6 +160,40 @@ export const regexpCases: Record<string, RegExpCase> = {
     regex: /^\/static%3Apath\/\*\/\*\*\/?$/,
     match: [["/static%3Apath/*/**"]],
   },
+  // Any `\x` outside a constraint is a literal `x`, in the tree too (#227): the
+  // tree kept the backslash of escapes other than `\:` `\(` `\)` `\{` `\}`.
+  "/foo\\.bar": {
+    regex: /^\/foo\.bar\/?$/,
+    match: [["/foo.bar"]],
+    noMatch: ["/foo\\.bar", "/fooxbar"],
+  },
+  "/foo\\bar": {
+    regex: /^\/foobar\/?$/,
+    match: [["/foobar"]],
+    noMatch: ["/foo\\bar"],
+  },
+  "/a\\\\b/c\\*d/\\?": {
+    regex: /^\/a\\b\/c\*d\/\?\/?$/,
+    match: [["/a\\b/c*d/?"]],
+    noMatch: ["/a\\\\b/c*d/?", "/ab/c*d/?", "/a\\b/c\\*d/\\?"],
+  },
+  // ... also in a dynamic segment, where escaped `:` / `(` / `\` stayed
+  // placeholders (`x\\:y` read `\:` instead of a `\` and a `:y`).
+  "/a/x\\\\:y": {
+    regex: /^\/a\/x\\(?<y>[^/]+)\/?$/,
+    match: [["/a/x\\1", { y: "1" }]],
+    noMatch: ["/a/x:1", "/a/x1"],
+  },
+  "/a/\\(:x\\)-\\:y": {
+    regex: /^\/a\/\((?<x>[^/]+)\)-:y\/?$/,
+    match: [["/a/(1)-:y", { x: "1" }]],
+    noMatch: ["/a/1-:y", "/a/(1)-y"],
+  },
+  "/a/:x\\.json/\\*-:y": {
+    regex: /^\/a\/(?<x>[^/]+)\.json\/\*-(?<y>[^/]+)\/?$/,
+    match: [["/a/1.json/*-2", { x: "1", y: "2" }]],
+    noMatch: ["/a/1xjson/*-2", "/a/1.json/x-2"],
+  },
   "/**": {
     regex: /^\/?(?<_>(?:[\s\S]*[^/])?\/*?)\/?$/,
     match: [
@@ -1292,6 +1326,28 @@ export const RESERVED_SYNTAX_ROUTES: readonly string[] = [
   "/a/(?:x)",
   "/a/:x(?:a|b)",
   "/a/x(?=y)",
+  // A `\` must escape a char of its segment: a `\/` kept a `\` in the tree
+  // and was a `/` in the regex, a trailing `\` threw a raw `SyntaxError`.
+  "/foo\\/bar",
+  "/a/:x\\/b",
+  "/a\\",
+  "/a/\\\\\\",
+  // An anchor or look-around in a constraint applied to the segment in the
+  // tree and to the whole path in the regex (`/:x(^a)/b` routed `/a/b`, its
+  // regex matched nothing).
+  "/:x(^a)/b",
+  "/:x(a$)/b",
+  "/a/(^a|b)",
+  "/a/:x((^a))",
+  "/a/:x(a(?=b))",
+  "/a/:x(a(?!b))",
+  "/a/:x((?<=a)b)",
+  "/a/:x((?<!a)b)",
+  // A numbered backreference counts the groups of the segment in the tree and
+  // of the whole path in the regex (`/:a/:b(x)(\1)`: `\1` is `b` or `a`).
+  "/:a/:b(x)(\\1)",
+  "/:a/((x)\\2)",
+  "/a/:x((a)\\1)",
 ];
 
 /** Whether `addRoute` accepts `pattern`. */

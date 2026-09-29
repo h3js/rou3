@@ -894,7 +894,7 @@ describe("Router remove", function () {
   });
 
   // `addRoute` maps an escaped literal segment to a *static* node key
-  // (`\*` -> `*`, `\*\*` -> `**`, `\uFFFD` placeholders -> `:(){}`); `removeRoute`
+  // (any `\x` -> `x`: `\*` -> `*`, `\*\*` -> `**`, `\:` -> `:`); `removeRoute`
   // has to key it identically or it walks to a nonexistent node and silently
   // removes nothing. Both now go through `segmentKey()` in `operations/_utils`.
   describe("remove escaped literal segments", () => {

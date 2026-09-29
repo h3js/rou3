@@ -93,11 +93,9 @@ function _collectSuffixKeys(node: Node, prefix: string, suffix: string, keys: st
 /**
  * Encode a decoded static key back into route syntax, so it can never be
  * confused with the `*` / `**` node markers and re-registers as the same static
- * key. Escaped literals (`\*` -> static `*`) round-trip through the marker
- * cases; route-syntax punctuation is backslash-escaped.
+ * key: route-syntax punctuation and `\` are backslash-escaped (a static `*` is
+ * `\*`).
  */
 function _escapeKey(key: string): string {
-  if (key === "*") return "\\*";
-  if (key === "**") return "\\*\\*";
-  return key.replace(/[:(){}]/g, "\\$&");
+  return key.replace(/[\\:(){}*]/g, "\\$&");
 }

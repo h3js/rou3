@@ -20,8 +20,8 @@ Read the relevant doc before changing that area:
 
 - Interpreter (`findRoute` / `findAllRoutes`) and compiled matchers (JIT and AOT) return identical results; tests compare them.
 - `findAllRoutes` order (least → most specific) is a public contract (README "Result ordering").
-- `routeToRegExp(p)` matches exactly the paths `findRoute` matches on a router holding only `p` (consumers use it as a security guard).
-- Never write a second pattern parser: derived APIs (`routeToRegExp` validation, overlap, `routeNodeKeys`) run the real `addRoute` on a throwaway router.
+- `routeToRegExp(p)` matches exactly the paths `findRoute` matches on a router holding only `p` (consumers use it as a security guard). The one exception: a constraint that can match `/` (`(.*)`) also matches across segments in the regex, so it over-matches, never under-matches.
+- Never write a second pattern parser: derived APIs (`routeToRegExp` validation and dynamic segments, overlap, `routeNodeKeys`) run the real `addRoute` (or its `getParamRegexp`) on a throwaway router.
 - Lookup ignores at most one trailing slash; middle empty segments are meaningful.
 - Optional features (overlap, regexp, `routeNodeKeys`, `regExpToRoute`) must stay tree-shakeable; `test/bench/bundle.test.ts` budgets the core bundle.
 - `addRoute` preprocessing helpers bail early when their trigger char is absent; keep those guards.

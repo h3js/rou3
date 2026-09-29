@@ -4,10 +4,12 @@
 
 ## Escapes
 
-Two systems; their placeholders must not collide:
+Any `\x` outside a constraint is a literal `x`, as in URLPattern (`/foo\.bar` matches `/foo.bar`, `\\` is a `\`). Inside a constraint it is regex (`(\d+)`). One escape model, in `operations/_utils.ts`, used by the router and `routeToRegExp` alike (#227):
 
-1. **Router** (`operations/_utils.ts`): `encodeEscapes()` turns `\:` `\(` `\)` `\{` `\}` into U+FFFD + a placeholder (A–E) before splitting; `decodeEscaped()` restores them for static keys. Other `\x` (e.g. `\*`) are handled by `segment === "\\*"` checks.
-2. **Regex** (`_escape.ts`): `replaceEscapesOutsideGroups()` replaces `\x` outside `(...)` with U+FFFE (so `\d` inside `(\d+)` survives); `resolveEscapePlaceholders()` makes them regex-safe literals. Used by `routeToRegExp` and `getParamRegexp`.
+- `encodeEscapes()` hides `\:` `\(` `\)` `\{` `\}` `\\` behind U+FFFD + their index in `ESCAPABLE` before splitting, so no scan reads them as syntax; `\\` is one of them so pairs read left to right (`\\:x` is `\` + `:x`). This also applies inside constraints (`\)` doesn't close one).
+- Static keys (`segmentKey`): other `\x` → `x`, then `decodeEscapes(s, "")`.
+- Dynamic segments (`getParamRegexp`): other `\x` outside a group → U+FFFE + `x` (`\*` stays an escape so it is no wildcard); placeholders decode to U+FFFE + char after params and groups are named; U+FFFE pairs then become regex-safe literals. Unescaped regex chars outside a group (`. ^ $ | [ ] ) { }`) are literals too, as in a static segment (`/api/*$`, `/x/^:id`, a stray `)`).
+- `routeToRegExp` classifies segments with `segmentKey(encodeEscapes(s))`, reads modifiers from the encoded text too (`\:x?` has none), emits static keys regex-escaped and dynamic segments through `getParamRegexp` (with `_N` unnamed keys), so escapes can't drift between the two.
 
 ## Group delimiters `{…}`
 
@@ -17,13 +19,13 @@ Two systems; their placeholders must not collide:
 
 Syntax with no defined meaning throws `rou3: <what> (<route as written>)` (`invalidSyntax()`), so it can get a meaning later without a breaking change. Checks sit where the pipeline already looks:
 
-- `checkConstraints` (route level): a `(` that does not close in its own segment, including a `/` inside a constraint (one message for both causes, bundle size); after dropping escapes and constraints, unbalanced or nested `{}`. A stray `)` is literal.
+- `checkConstraints` (route level): a `(` that does not close in its own segment, including a `/` inside a constraint (one message for both causes, bundle size); a `^` / `$` outside a class, a look-around or a numbered backreference (`\1`) in a constraint (the tree tests the segment alone, so they see its ends and count its groups; the inline regex sees the rest of the path and all its groups); escapes are replaced by `_` (a backreference by `\0`) first, so `\(?=` is no look-ahead; after dropping escapes and constraints, a `\` that escapes nothing (`\/`, a trailing `\`) and unbalanced or nested `{}`. A stray `)` is literal.
 - `expandGroupDelimiters`: `{…}+`, `{…}*`.
 - `expandModifiers`: `+` / `*` on anything but a whole-segment `:name` (`:x(\d+)?` and `pre-:x?` are fine).
 - `getParamRegexp` (depth 0): `:` without a name; a group that is empty or starts with `?`; a raw `?` / `+` quantifier; a `*` right after a name or group (ambiguous with a modifier).
 - `addName()` in `_add`: a name that is not `\w+(?:-\w+)*`; a name repeated within one expansion (a bare `**` counts as `_`): `rou3: duplicate param name "x" (…)`.
 
-`routeToRegExp` validates by calling `addRoute` on a throwaway router, so every error is the router's. Deliberately accepted: `pre-:x?` (drops the whole segment), `:x:y`, mid-segment `**` (`a**b`), stray `)`, `?`/`+` in static segments (`/c++`), digit names (`/w/:0/*`: collides with unnamed key `"0"`, later wins). Known gap: `(`/`)` inside a class in a constraint (`:x([(])`) is mis-parsed.
+`routeToRegExp` validates by calling `addRoute` on a throwaway router, so every error is the router's. Deliberately accepted: `pre-:x?` (drops the whole segment), `:x:y`, mid-segment `**` (`a**b`), stray `)`, `?`/`+` in static segments (`/c++`), digit names (`/w/:0/*`: collides with unnamed key `"0"`, later wins), `\b` / `\B` in a constraint (a segment end and a `/` are both non-word). Known gap: `(`/`)` inside a class in a constraint (`:x([(])`) is mis-parsed.
 
 Pinned by `RESERVED_SYNTAX_ROUTES` (`test/_regexp-cases.ts`, against `addRoute`, `routeToRegExp`, `routeNodeKeys`), the accepted list in `regexp.test.ts`, and WPT `RESERVED_PATTERNS`.
 

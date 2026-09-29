@@ -5,6 +5,7 @@ import { NullProtoObj } from "../object.ts";
 import type { Node, RouterContext, ParamsIndexMap } from "../types.ts";
 import {
   checkConstraints,
+  decodeEscapes,
   encodeEscapes,
   expandedRouteId,
   expandModifiers,
@@ -21,8 +22,9 @@ import {
  * the pattern: an unclosed `(`, unbalanced or nested `{}`, `{…}+` / `{…}*`,
  * a `?` / `+` / `*` anywhere but after a whole-segment `:name` (`?` also
  * after `:name(regex)`), an empty or `(?` group, a `:` without a name, more
- * after `**:name` in its segment, a repeated param name, and more than one
- * `**`.
+ * after `**:name` in its segment, a repeated param name, more than one `**`,
+ * a `\` that escapes no char of its segment (`\/`), and an anchor or
+ * look-around in a constraint.
  */
 export function addRoute<T>(
   ctx: RouterContext<T>,
@@ -222,20 +224,23 @@ function addName(names: string[], name: string, input: string): string {
 
 /**
  * The regex of a dynamic segment (params, constraints, `*`), after its
- * modifier has been expanded. Throws on what has no meaning (yet) there: a `:`
- * without a name, an empty group or one starting with `?`, and a `?` / `+` /
+ * modifier has been expanded and its escapes encoded (`encodeEscapes`); a `\x`
+ * outside a group is a literal `x`. Throws on what has no meaning (yet) there:
+ * a `:` without a name, an empty group or one starting with `?`, a `?` / `+` /
  * `*` modifier on anything but a whole segment's `:name` (a `?` / `+` was a
  * raw regex quantifier, a `*` right after a name or group is ambiguous with a
- * modifier).
+ * modifier). `routeToRegExp` reuses it (with its own unnamed group keys), so
+ * a dynamic segment is the same regex in both.
  */
-function getParamRegexp(
+export function getParamRegexp(
   segment: string,
   unnamedStart: number,
   names: string[],
   input: string,
+  groupKey: (index: number) => string = toUnnamedGroupKey,
 ): [RegExp, number] {
   let _i = unnamedStart;
-  // Replace URLPattern \x escapes outside (...) with \uFFFE placeholder
+  // Replace \x escapes outside (...) with a \uFFFE placeholder
   let _s = "",
     _d = 0,
     // Index right after the last `:name` or top-level group
@@ -256,30 +261,33 @@ function getParamRegexp(
     else if (c === 41 && _d > 0) {
       if (--_d === 0) _e = j + 1;
     } else if (c === 92 && _d === 0 && j + 1 < segment.length) {
+      // `\*` stays an escape so it is no wildcard (`\:` `\(` `\\` are encoded)
       const n = segment[j + 1];
-      if (n !== ":" && n !== "(" && n !== "*" && n !== "\\") {
+      if (n !== "*") {
         _s += "\uFFFE" + n;
         j++;
         continue;
       }
     }
-    // A literal `.` outside a (...) group is a route separator -> escape it;
-    // a `.` inside a group is opaque regex and stays verbatim (`:id(\d+\.\d+)`).
-    else if (c === 46 && _d === 0) {
-      _s += "\\.";
+    // Regex chars outside a (...) group are literals, as in a static segment
+    // (`:x.json`, `*$`); inside one they are regex (`:id(\d+\.\d+)`).
+    else if (_d === 0 && /[.^$|[\]){}]/.test(segment[j])) {
+      _s += "\\" + segment[j];
       continue;
     }
     _s += segment[j];
   }
-  [_s, _i] = replaceSegmentWildcards(_s, _i);
+  [_s, _i] = replaceSegmentWildcards(_s, _i, groupKey);
 
-  const regex = _s
-    .replace(
-      /:(\w+(?:-\w+)*)(?:\(([^)]*)\))?/g,
-      (_, id, p) => `(?<${toGroupName(addName(names, id, input))}>${p || "[^/]+"})`,
-    )
-    .replace(/\((?![?<])/g, () => `(?<${toUnnamedGroupKey(_i++)}>`)
-    .replace(/\uFFFE(.)/g, (_, c) => (/[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c));
+  const regex = decodeEscapes(
+    _s
+      .replace(
+        /:(\w+(?:-\w+)*)(?:\(([^)]*)\))?/g,
+        (_, id, p) => `(?<${toGroupName(addName(names, id, input))}>${p || "[^/]+"})`,
+      )
+      .replace(/\((?![?<])/g, () => `(?<${groupKey(_i++)}>`),
+    "\uFFFE",
+  ).replace(/\uFFFE([\s\S])/g, (_, c) => (/[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c));
 
   return [new RegExp(`^${regex}$`), _i];
 }

@@ -3,17 +3,31 @@ import { hasSegmentWildcard } from "../_segment-wildcards.ts";
 import { NullProtoObj } from "../object.ts";
 import type { MatchedRoute, MethodData, ParamsIndexMap } from "../types.ts";
 
+/**
+ * Hide escaped route syntax (`\:` `\(` `\)` `\{` `\}` `\\`) behind U+FFFD +
+ * its index in `ESCAPABLE` before splitting, so no later scan reads it as
+ * syntax. `\\` is one of them, so escape pairs are read left to right (`\\:x`
+ * is a `\` then `:x`). Other `\x` stay: static keys (`segmentKey`) and param
+ * segments (`getParamRegexp`) read them as a literal `x`.
+ */
 export function encodeEscapes(path: string): string {
   if (!path.includes("\\")) return path;
-  return path.replace(/\\([:(){}])/g, (_, c) => "\uFFFD" + "ABCDE"[":(){}".indexOf(c)]);
+  return path.replace(/\\([:(){}\\])/g, (_, c) => "\uFFFD" + ESCAPABLE.indexOf(c));
 }
+
+/** Undo `encodeEscapes`: each placeholder back to its char, after `prefix`. */
+export function decodeEscapes(segment: string, prefix: string): string {
+  return segment.replace(/\uFFFD([0-5])/g, (_, i) => prefix + ESCAPABLE[i]);
+}
+
+const ESCAPABLE = ":(){}\\";
 
 /**
  * Where a route-pattern segment goes in the tree, exactly as `addRoute` inserts
  * it: `2` = `node.wildcard`, `1` = `node.param`, otherwise the returned string
- * is the `node.static` key — an escaped `\*` / `\*\*` is the literal `*` / `**`
- * (the escape is what keeps it out of the wildcard/param branches), and
- * `\uFFFD` placeholders decode back to `:(){}`.
+ * is the `node.static` key, where any `\x` is a literal `x` (an escaped `\*` /
+ * `\*\*` is the literal `*` / `**`: the escape is what keeps it out of the
+ * wildcard/param branches) and `\uFFFD` placeholders decode back to `:(){}\`.
  *
  * Shared by `addRoute` and `removeRoute`: the two must classify *and* key
  * segments identically, otherwise removal walks to a different — usually
@@ -32,13 +46,9 @@ export function segmentKey(segment: string): string | 1 | 2 {
   ) {
     return 1;
   }
-  if (segment === "\\*") return "*";
-  if (segment === "\\*\\*") return "**";
+  if (segment.includes("\\")) segment = segment.replace(/\\([\s\S])/g, "$1");
   if (!segment.includes("\uFFFD")) return segment;
-  return segment.replace(/\uFFFD([A-E])/g, (_, c) =>
-    // eslint-disable-next-line unicorn/no-nested-ternary
-    c === "A" ? ":" : c === "B" ? "(" : c === "C" ? ")" : c === "D" ? "{" : "}",
-  );
+  return decodeEscapes(segment, "");
 }
 
 /**
@@ -46,21 +56,39 @@ export function segmentKey(segment: string): string | 1 | 2 {
  * or contains a `/` (`:id([^/]+)`): the pattern is split on `/` before groups
  * are read, which cut it in two. Either way `new RegExp` threw a raw
  * `SyntaxError` naming internal group names. Also throws on a `{` / `}` that
- * does not pair up or a nested `{...}` (literals or mis-parsed before). Called
- * by `addRoute` (and so by `routeToRegExp`). A stray `)` stays a literal.
+ * does not pair up or a nested `{...}` (literals or mis-parsed before), on a
+ * `\` that escapes no char of its segment (a `\/` or a trailing `\`), and on
+ * a `^` / `$` / look-around in a group: the tree tests a segment on its own,
+ * where they see its ends, and `routeToRegExp` inline, where they see the rest
+ * of the path (#227). Called by `addRoute` (and so by `routeToRegExp`). A
+ * stray `)` stays a literal.
  *
  * Escapes are dropped first (`\(` is no group; `\/` stays, the split cuts
  * there too), then balanced `/`-free groups innermost-out, so any `(` left
- * does not close in its own segment. Braces inside a group are regex.
+ * does not close in its own segment, and any `\` left escapes nothing. Braces
+ * inside a group are regex.
  */
 export function checkConstraints(route: string): void {
-  if (!/[({}]/.test(route)) return;
-  let s = route.replace(/\\[^/]/g, "");
-  while (s !== (s = s.replace(/\([^()/]*\)/g, "")));
+  if (!/[\\({}]/.test(route)) return;
+  // `\1`-`\9` -> `\0` (a backreference), any other escape -> `_` (a literal,
+  // so `\(?=` is no look-ahead)
+  let s = route.replace(/\\([^/])/g, (_, c) => (c > "0" && c <= "9" ? "\0" : "_"));
+  while (
+    s !==
+    (s = s.replace(/\([^()/]*\)/g, (group) => {
+      if (/[$^\0]|^\(\?<?[=!]/.test(group.replace(/\[[^\]]*\]/g, ""))) {
+        invalidSyntax("an anchor, look-around or backreference in a constraint", route);
+      }
+      return "";
+    }))
+  );
   if (s.includes("(")) {
     throw new Error(
       `rou3: a \`(\` must close in its own segment, escape a literal one as \`\\(\` (${route})`,
     );
+  }
+  if (s.includes("\\")) {
+    invalidSyntax("a `\\` must escape a char of its segment", route);
   }
   if (/[{}]/.test(s.replace(/\{[^{}]*\}/g, ""))) {
     invalidSyntax("unbalanced or nested `{}`", route);

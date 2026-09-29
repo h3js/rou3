@@ -233,7 +233,8 @@ describe("routeNodeKeys", () => {
       }
 
       expect(collisions).toEqual([]);
-      expect(reachable.size).toBeGreaterThan(100);
+      // Any `\x` is a literal `x`, so escaped spellings share a node (#227).
+      expect(reachable.size).toBeGreaterThan(75);
       // The dynamic markers are reserved: no static key ever encodes to them.
       expect(byKey.get("*")).toBe("param");
       expect(byKey.get("**")).toBe("wildcard");

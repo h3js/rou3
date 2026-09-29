@@ -4,6 +4,8 @@
 
 **Contract:** `routeToRegExp(p).test(path)` ⟺ `findRoute(router with only p, "", path) !== undefined`, and captures follow the router. Consumers use the regex as a guard (h3 `use(route, mw)`), so an under-match is an auth bypass: the regex mirrors the **trie's** tolerances, not URLPattern's. Pinned by the router-vs-regex sweeps (see [testing.md](testing.md)).
 
+**The one exception:** a constraint that can match `/` (`(.*)`, `[^a]`, `\D`) spans segments in the regex (`/foo/(.*)` matches `/foo/a/b`), while the tree splits first. That over-matches only (a guard still runs), and closing it means rewriting every construct that can match `/` in an opaque user regex, so it stays documented (README, JSDoc) and pinned by "over-matches only for constraints that can match `/`" and WPT `ROUTER_KNOWN_DIFFS`. Anything that would make the regex match *less* is rejected instead: anchors, look-arounds and numbered backreferences in a constraint, a `\/` (see [syntax.md](syntax.md)).
+
 ### Trailing slash and endings
 
 A path matches iff the body matches it with one trailing `/` stripped. The general encoding is the look-behind suffix `(?:(?<=\/)\/|(?<!\/)\/?)$` (JS/PCRE; RE2, Go and Rust `regex` reject it). `withTrailingSlash()` (`src/_trailing-slash.ts`) rewrites the ending look-behind-free wherever possible: **its JSDoc is the spec** (open vs closed endings, catch-all tails, which shapes keep the look-behind, and the proof that closed endings must leave an empty segment unset). Supporting scans live in `_regexp-scan.ts` (`parseLevel`, `canBeEmpty`, `canEndInSlash`, `isOptionalGroups`). Rules to keep:
@@ -16,6 +18,7 @@ A path matches iff the body matches it with one trailing `/` stripped. The gener
 
 ### Emission rules
 
+- Segments are classified like the tree (`segmentKey(encodeEscapes(s))`). Static keys are regex-escaped; dynamic segments (and the base of a `?`-modified one) are the tree's own `getParamRegexp` source with `_N` unnamed keys, so escapes and literal chars can't drift (see [syntax.md](syntax.md#escapes)).
 - Catch-alls (`**`, `**:x`, `:x+`, `:x*`) use `[\s\S]` (`ANY`), not `.`: the router splits on `/` only, and `.` skips line terminators (under-match). A user `.` inside a constraint keeps its JS meaning, so a trailing `(.*)` constraint gets lazy `.*?` / `.+?` tails.
 - The separator before a catch-all is never a bare `\/?` after a prefix (`/api/**` must not match `/apifoo`). Only root `/**` keeps `^\/?`. `**:name` and `:name+` emit identical regexes.
 - Whole-segment `:name` / `:name?` → `[^/]*` (a param takes `""`); inside a mixed segment `[^/]+` (mirrors `getParamRegexp`).
@@ -35,7 +38,7 @@ The tree expands `{…}?` into two routes, but `routeToRegExp` inlines a single 
 
 ### Not modeled
 
-- Constraints that can match `/` (`:x(.+)`): the tree splits first, the regex doesn't.
+- Constraints that can match `/` (`:x(.+)`): the tree splits first, the regex doesn't (over-match only, see the exception above).
 - The empty path `""` (router treats it as `/`).
 - `normalize: true` (`.`/`..` resolved before matching).
 - PCRE/Perl `$` also matches before a final `\n` (over-match only).
