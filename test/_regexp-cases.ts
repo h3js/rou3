@@ -254,6 +254,32 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/path", { id: undefined }],
     ],
   },
+  // An optional unnamed constraint stays unnamed (key `"0"`), no `:_0(…)?`.
+  "/a{/(\\d+)}?": {
+    regex: /^\/a(?:\/(?<_0>\d+))?\/?$/,
+    match: [
+      ["/a/12", { "0": "12" }],
+      ["/a", { "0": undefined }],
+      ["/a/", { "0": undefined }],
+    ],
+    noMatch: ["/a/x", "/a//"],
+  },
+  "/{/(\\d+)}?/.": {
+    regex: /^\/(?:\/(?<_0>\d+))?\/\.\/?$/,
+    match: [
+      ["//12/.", { "0": "12" }],
+      ["//.", { "0": undefined }],
+    ],
+    noMatch: ["/12/.", "//x/."],
+  },
+  "/:y{/(\\d+)}?": {
+    regex: /^\/(?<y>[^/]+)(?:\/(?<_0>\d+))?\/?$/,
+    match: [
+      ["/b/12", { y: "b", "0": "12" }],
+      ["/b", { y: "b", "0": undefined }],
+    ],
+    noMatch: ["/b/x", "/b//"],
+  },
   "/path/:rest+": {
     regex: /^\/path\/(?:\/\/|(?<rest>(?:[\s\S]*[^/]|\/\/)\/*?)\/?)$/,
     match: [

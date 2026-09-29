@@ -420,6 +420,36 @@ describe("regExpToRoute", () => {
     // A bare group that can't survive path splitting still throws.
     expect(() => regExpToRoute(/^\/path\/([^/]+)\/?$/)).toThrow(/cannot contain/);
   });
+
+  it("keeps an optional unnamed capture unnamed", () => {
+    // No `:_0(…)?`: that is a param named `_0` (key `"_0"`, not `"0"`).
+    const cases: [RegExp, string][] = [
+      [/^\/a(?:\/(?<_0>\d+))?\/?$/, "/a{/(\\d+)}?"],
+      [/^\/(?:\/(?<_0>\d+))?\/\.\/?$/, "/{/(\\d+)}?/."],
+      [/^\/(?<y>[^/]+)(?:\/(?<_0>\d+))?\/?$/, "/:y{/(\\d+)}?"],
+      [/^\/a(?:\/(?<_0>.*?))??\/?$/, "/a{/(.*)}?"],
+      [/^\/a(?:\/(?<_0>\d+))?\/b\/?$/, "/a{/(\\d+)}?/b"],
+      [/^\/a(?:\/(?<_0>(?:[\s\S]*[^/])?\/*?))??\/?$/, "/a{/([\\s\\S]*)}?"],
+      [/^\/a(?:\/(?<_0>[\s\S]+))?\/?$/, "/a{/([\\s\\S]+)}?"],
+      [/^\/a(?:\/(\d+))?\/?$/, "/a{/(\\d+)}?"],
+    ];
+    for (const [re, route] of cases) {
+      expect(regExpToRoute(re), re.source).toBe(route);
+    }
+    for (const route of ["/a{/(\\d+)}?/b", "/a{/([\\s\\S]*)}?"]) {
+      const re = routeToRegExp(route);
+      expect(regExpToRoute(re), route).toBe(route);
+    }
+    // Unnamed `[^/]+` has no route form, nor does a root one (no segment to
+    // hold the `{/…}?` group).
+    expect(() => regExpToRoute(/^\/a(?:\/(?<_0>[^/]+))?\/?$/)).toThrow(/cannot contain/);
+    expect(() => regExpToRoute(/^\/a(?:\/(?<_0>[^/]+)(?:\/b)?)?\/?$/)).toThrow(/cannot contain/);
+    expect(() => regExpToRoute(/^(?:\/(?<_0>\d+))?\/b\/?$/)).toThrow(/preceding segment/);
+    // Nor an unnamed catch-all (no `:_0*`).
+    expect(() => regExpToRoute(/^\/a(?:\/(?:(?<_0>[\s\S]*)\/)?(?<y>[^/]*))?\/?$/)).toThrow(
+      /^rou3: /,
+    );
+  });
 });
 
 // Routes whose reversal is not equivalent, with the route they come back as.

@@ -401,7 +401,8 @@ function applyOptional(
     // `**` / `:x*` and a lone optional last segment in one group (see
     // `pushCatchAll` in regexp.ts): `(?:/(?:(?<x>[\s\S]*)/)?(?<y>[^/]*))?`.
     const nested = NESTED_CATCH_ALL.exec(rest);
-    if (nested) {
+    // An unnamed catch-all is no `:_N*` (see the unnamed capture below).
+    if (nested && !UNNAMED.test(nested[1])) {
       const [catchAll, last] = nested.slice(1).map(paramName);
       const unnamed = UNNAMED.test(nested[2]);
       segments.push(catchAll === "_" && !unnamed ? "**" : `:${catchAll}*`);
@@ -410,6 +411,12 @@ function applyOptional(
     }
     const g = matchNamedGroup(rest, 0);
     if (g && g.end === rest.length) {
+      // An unnamed capture has no `:name?` form (`:_0(…)?` is a param named
+      // `_0`): `{/(pat)}?` on the previous segment. A `*` is optional alone.
+      if (g.unnamed && g.body !== "[^/]*") {
+        mergeGroup(segments, `/${constraint(g.body)}`);
+        return;
+      }
       // A greedy `(?:/(?<_>[\s\S]*))?` is the `**` catch-all, and so is a lazy
       // group with a lazy body (optional segments after it take the end of the
       // path). A lazy group with a greedy body is a param named `_` (`:_*`),
@@ -435,7 +442,9 @@ function applyOptional(
     // is the route that captures like the regex (`/a/:x?/*` compiles to the
     // same one, but gives `0`, not `x`, on `/a/b`).
     const units =
-      (segments.length === 0 || inGroup) && g && /^\[\^\/\][*+]$/.test(g.body)
+      (segments.length === 0 || inGroup) &&
+      g &&
+      (g.unnamed ? g.body === "[^/]*" : /^\[\^\/\][*+]$/.test(g.body))
         ? optionalUnits(rest.slice(g.end))
         : undefined;
     if (g && units) {
@@ -494,10 +503,13 @@ function paramToken(name: string, body: string, unnamed: boolean): string {
   return unnamed ? constraint(body) : `:${name}${constraint(body)}`;
 }
 
-/** Classify a param inside an optional group (`:name?`, `:name*`, ...). */
+/**
+ * Classify a param inside an optional group (`:name?`, `:name*`, ...). The only
+ * unnamed one is a `*`: the callers write other unnamed captures as `{/(pat)}?`.
+ */
 function optionalParam({ name, body, unnamed }: NamedGroup, dot: boolean): string {
   // `(?:/(?<_N>[^/]*))?` is a trailing `*` (optional in the tree).
-  if (unnamed && body === "[^/]*") {
+  if (unnamed) {
     return "*";
   }
   if (body === "[^/]*" || body === "[^/]+") {
