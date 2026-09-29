@@ -32,25 +32,37 @@ const ROUTE_SPECIAL = new Set([
  * Convert an anchored {@link RegExp} (or its source string) produced by
  * {@link routeToRegExp} back into a rou3 route pattern.
  *
+ * Throws a `rou3:` error for input it can't represent exactly: a regex not
+ * anchored with `^` and `$`, the flags `i`/`m`/`s`/`u`/`v` (`g`/`y`/`d` are
+ * ignored), and constructs outside the dialect `routeToRegExp` emits.
+ *
  * @example
  * regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
  * regExpToRoute(/^\/path\/(?:(?<param>[^/]+)\/?|\/)$/); // "/path/:param"
  * regExpToRoute(/^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$/); // "/path/**"
  */
 export function regExpToRoute(regexp: RegExp | string): string {
-  // Routes carry no flags, so a match-affecting flag (`i`/`m`/`s`) would be
-  // silently dropped and change matching semantics. Reject rather than lie;
-  // `g`/`y`/`u`/`v`/`d` don't affect a fully-anchored match and are ignored.
-  if (typeof regexp !== "string" && /[ims]/.test(regexp.flags)) {
+  // Routes carry no flags, so a match-affecting flag would be silently dropped
+  // and change matching semantics. Reject rather than lie: `i`/`m`/`s`, and
+  // `u`/`v`, which change what a constraint means (`\p{L}` is a letter class
+  // with them, the literal `p{L}` without; route constraints compile without
+  // flags). `g`/`y`/`d` don't affect a fully-anchored match and are ignored.
+  if (typeof regexp !== "string" && /[imsuv]/.test(regexp.flags)) {
     throw new Error(`rou3: cannot represent regexp flag(s) "${regexp.flags}" as a route`);
   }
 
   let src = typeof regexp === "string" ? regexp : regexp.source;
 
+  // A route matches whole paths, so the regex must be anchored at both ends
+  // (an unanchored one matches any path containing it). A `$` after an odd
+  // run of backslashes is an escaped literal, not an anchor.
+  if (!src.startsWith("^") || !src.endsWith("$") || /(?:^|[^\\])(?:\\\\)*\\\$$/.test(src)) {
+    throw new Error(`rou3: regexp must be anchored with \`^\` and \`$\` (${src})`);
+  }
+
   // Strip anchors and the trailing-slash suffix `routeToRegExp` appends (or the
   // plain optional slash older versions and hand-written regexes use).
-  if (src.startsWith("^")) src = src.slice(1);
-  if (src.endsWith("$")) src = src.slice(0, -1);
+  src = src.slice(1, -1);
   // Look-behind-free endings (see `withTrailingSlash`) back to their plain
   // forms. Only these exact shapes are rewritten; anything else, a lazy
   // quantifier inside a constraint included, is parsed as written.
