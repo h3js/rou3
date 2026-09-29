@@ -66,22 +66,6 @@ const SKIP_PATTERNS = new Set([
   "./foo",
   "../foo",
 
-  // Unicode identifiers — rou3 param names are ASCII (`[A-Za-z_]\w*`); the
-  // valid ones with an input are in `RESERVED_PATTERNS`
-  "(café)",
-  "​​",
-  ":​​",
-  ":a󠄀b",
-  ":🚲",
-
-  // Percent-encoding normalization — rou3 does not decode
-  "/caf%C3%A9",
-  "/café",
-  "/caf%c3%a9",
-
-  // Non-greedy unnamed group — different regex flavor
-  "/foo/([^\\/]+?)",
-
   // Regex set operations (v-flag syntax) — not used in rou3 routes
   "/([[a-z]--a])",
   "/([\\d&&[0-1]])",
@@ -106,6 +90,7 @@ const SKIP_PATTERNS = new Set([
  *    rou3 does not
  * 8. Case sensitivity: URLPattern may be case-insensitive;
  *    rou3 is always case-sensitive
+ * 9. Percent-encoding: URLPattern encodes the input; rou3 does not
  */
 
 // Known diff labels: tests where rou3 intentionally behaves differently.
@@ -140,6 +125,10 @@ const KNOWN_DIFFS = new Set([
 
   // Case-insensitive match — rou3 is case-sensitive
   "/foo/bar → /FOO/BAR [match]",
+
+  // Percent-encoding — URLPattern encodes the input (`/café` is
+  // `/caf%C3%A9`), rou3 matches it as given
+  "/caf%C3%A9 → /café [match]",
 
   // `*/` patterns — URLPattern treats `*` as catch-all
   "*/* → foo/bar [match]",
@@ -176,7 +165,7 @@ const KNOWN_DIFFS = new Set([
 // Valid URLPattern syntax rou3 has no meaning for (yet): every strategy
 // throws a `rou3:` error for these patterns instead of matching with a
 // different meaning (modifiers on `*` / an unnamed group, group repetition,
-// Unicode param names).
+// a `/` in a constraint, Unicode param names).
 const RESERVED_PATTERNS = new Set([
   "/foo/(.*)?",
   "/foo/*?",
@@ -185,6 +174,8 @@ const RESERVED_PATTERNS = new Set([
   "/foo/(.*)*",
   "/foo{/bar}+",
   "/foo{/bar}*",
+  // A `/` inside a constraint: the pattern is split on `/` first
+  "/foo/([^\\/]+?)",
   // Unicode param names: rou3 names are ASCII, and a non-ASCII char right
   // after one throws instead of ending it
   "/:café",
