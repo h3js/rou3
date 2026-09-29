@@ -117,9 +117,10 @@ type SkipGroup<S extends string, Depth extends unknown[] = []> = S extends `${in
         : SkipGroup<Rest, Depth>
   : S;
 
-// `[name, optional]` for each `:name` (an escaped `\:` is a literal)
+// `[name, optional]` for each `:name` (an escaped `\:` and the `:` of a `(?:`
+// group are no param)
 type ExtractParams<TPath extends string> = TPath extends `${infer Pre}:${infer Rest}`
-  ? Pre extends `${string}\\`
+  ? Pre extends `${string}${"\\" | "(?"}`
     ? ExtractParams<Rest>
     : ParamAt<Rest, TakeName<Rest>>
   : never;

@@ -127,6 +127,9 @@ describe("types", () => {
       expectTypeOf<InferRouteParams<"/a/:name-suffix">>().toEqualTypeOf<{ name: string }>();
       expectTypeOf<InferRouteParams<"/a/:a-b.:a_b">>().toEqualTypeOf<{ a: string; a_b: string }>();
       expectTypeOf<InferRouteParams<"/a/:v2/:_0">>().toEqualTypeOf<{ v2: string; _0: string }>();
+      // The `:` of a `(?:…)` group is no param
+      expectTypeOf<keyof InferRouteParams<"/((?:a|b))">>().toEqualTypeOf<never>();
+      expectTypeOf<InferRouteParams<"/x/:id((?:a|b)c)">>().toEqualTypeOf<{ id: string }>();
       expectTypeOf<InferRouteParams<"/a/get-:file.:ext">>().toEqualTypeOf<{
         file: string;
         ext: string;

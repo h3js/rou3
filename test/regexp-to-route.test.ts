@@ -191,13 +191,17 @@ describe("regExpToRoute", () => {
     expect(() => regExpToRoute(/^\/api\/(?<__rou3_esc_0>[^/]+)\/?$/)).toThrow(/^rou3: /);
   });
 
-  it("rejects an unnamed group inside a constraint", () => {
-    // `addRoute` rejects it (a stray numbered param), so it has no route form.
-    for (const re of [/^\/a\/(?<x>(a)b)\/?$/, /^\/a\/((?:(a)))\/?$/]) {
+  it("rejects a capturing group inside a constraint", () => {
+    // `addRoute` rejects it (a stray param), so it has no route form.
+    for (const re of [
+      /^\/a\/(?<x>(a)b)\/?$/,
+      /^\/a\/((?:(a)))\/?$/,
+      /^\/a\/(?<x>a(?<n>b)c)\/?$/,
+      /^\/a\/((?<n>b)c)\/?$/,
+    ]) {
       expect(() => regExpToRoute(re), re.source).toThrow(/^rou3: /);
     }
     expect(regExpToRoute(/^\/a\/(?<x>(?:a)b)\/?$/)).toBe("/a/:x((?:a)b)");
-    expect(regExpToRoute(/^\/a\/(?<x>a(?<n>b)c)\/?$/)).toBe("/a/:x(a(?<n>b)c)");
     expect(regExpToRoute(/^\/a\/(?<x>[(]\(a)\/?$/)).toBe("/a/:x([(]\\(a)");
   });
 
@@ -215,9 +219,13 @@ describe("regExpToRoute", () => {
         routeToRegExp(route).source,
       );
     }
-    // A group right after `:name` would read as its constraint and a `*`
-    // after a group as a modifier: no route emits these, so they throw.
+    // A group right after `:name` would read as its constraint, a `*` after a
+    // group as a modifier and a `*` after a `*` as a `**`: no route emits
+    // these, so they throw.
     for (const re of [
+      /^\/a(?<_0>[^/]*)(?<_1>[^/]*)\/?$/,
+      /^\/a(?<_0>[^/]*)(?<_1>[^/]*)b\/?$/,
+      /^\/(?<_0>[^/]*)(?<_1>[^/]*)\/?$/,
       /^\/a\/(?<x>[^/]+)(?<_0>[^/]*)\/?$/,
       /^\/a\/(?<x>\d+)(?<_0>[^/]*)\/?$/,
       /^\/a\/(?<x>[^/]+)(\d+)\/?$/,

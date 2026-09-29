@@ -292,18 +292,21 @@ function reverseSegment(seg: string): string {
   let i = 0;
   // After a bare `:name`, a word char would extend the name and a non-ASCII
   // one is rejected there: escape them. A `(pat)` would read as its
-  // constraint and, after any group, a `*` as a modifier: no route emits these.
+  // constraint, after any group a `*` as a modifier and after a `*` a `*` as
+  // a `**`: no route emits these.
   let afterName = false;
+  let afterStar = false;
   const literal = (ch: string) => {
     out += afterName && (/\w/.test(ch) || ch > "\x7f") ? `\\${ch}` : escapeLiteral(ch);
-    afterName = false;
+    afterName = afterStar = false;
   };
   const param = (token: string, name?: string) => {
-    if ((afterName && token[0] !== ":") || (token === "*" && out.endsWith(")"))) {
+    if ((afterName && token[0] !== ":") || (token === "*" && (afterStar || out.endsWith(")")))) {
       throw new Error(`rou3: no route has a param followed by a group in "${seg}"`);
     }
     out += token;
     afterName = token === `:${name}`;
+    afterStar = token === "*";
   };
   while (i < seg.length) {
     const c = seg[i];
@@ -494,9 +497,9 @@ function constraint(body: string): string {
   if (body.includes("/")) {
     throw new Error(`rou3: param constraint "(${body})" cannot contain "/"`);
   }
-  // An unnamed group inside a constraint has no route form (`addRoute` rejects it)
-  if (/\((?!\?)/.test(body.replace(/\\[\s\S]|\[(?:\\[\s\S]|[^\]])*\]/g, ""))) {
-    throw new Error(`rou3: param constraint "(${body})" cannot contain an unnamed group`);
+  // A capturing group inside a constraint has no route form (`addRoute` rejects it)
+  if (/\((?!\?(?!<[^=!]))/.test(body.replace(/\\[\s\S]|\[(?:\\[\s\S]|[^\]])*\]/g, ""))) {
+    throw new Error(`rou3: param constraint "(${body})" cannot contain a capturing group`);
   }
   return `(${body})`;
 }

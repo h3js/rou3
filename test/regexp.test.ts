@@ -631,7 +631,7 @@ describe("reserved pattern syntax", () => {
     "/a/((?:b)c)",
     "/a/:x((?:a)|(?:b))",
     "/a/:x((?:(?:a)))",
-    "/a/:x(a(?<n>b)c)",
+    "/a/:x((?:a|b)c)",
     "/a/*b",
     "/a\\*\\*b",
     "/a/\\**",
@@ -669,6 +669,26 @@ describe("reserved pattern syntax", () => {
     }
     const regex = routeToRegExp(route);
     expect(duplicateGroupNames(regex.source).length > 0).toBe(ALTERNATION_ROUTES.has(route));
+  });
+
+  it("points a misplaced modifier at `:name` and at escaping", () => {
+    // One message (bundle size) for modifier misuse, a `?` after plain text
+    // and a mid-segment `**`.
+    for (const route of [
+      "/a/:x.png?",
+      "/a/*?",
+      "/a/:x*.png",
+      "/a/pre-:x+",
+      "/foo?",
+      "/a/b?/c",
+      "/a**b",
+      "/a/x**",
+      "/a/*.**",
+    ]) {
+      expect(() => addRoute(createRouter(), "", route), route).toThrow(
+        "must follow a whole-segment `:name` (escape a literal one with `\\`)",
+      );
+    }
   });
 
   it("keeps escaped braces literal", () => {

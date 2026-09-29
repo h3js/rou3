@@ -143,7 +143,12 @@ describe("compiled params (interpreter parity)", () => {
   addRoute(router, "GET", "/o/:x?", "OPTIONAL");
   addRoute(router, "GET", "/u/*", "UNNAMED");
   addRoute(router, "GET", "/s/**/:file.json", "SUFFIX");
-  addRoute(router, "GET", "/uni/:id(a(?<é>b)c)", "UNICODE");
+  // A group name that is no identifier takes the `_normalizeGroups` runtime
+  // fallback. `addRoute` never emits one (names are `[A-Za-z_]\w*`, nested
+  // groups in a constraint throw), so the entry is patched by hand.
+  addRoute(router, "GET", "/uni/:id(abc)", "UNICODE");
+  const uni = router.root.static!.uni.param!.methods!.GET![0];
+  uni.paramsRegexp[1] = uni.paramsMap![0][1] = /^(?<id>a(?<é>b)c)$/ as any;
 
   const paths = ["/p/1", "/r/42", "/m/x42y", "/w/a/b", "/o/z", "/u/v", "/s/a/f.json", "/uni/abc"];
 

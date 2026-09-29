@@ -105,8 +105,11 @@ describe("benchmark", () => {
     // `?` in a static segment, a mid-segment `**` and an unnamed group inside
     // a constraint throw (URLPattern alignment, #229); a `:` inside a group
     // (`(?:…)`) is no param.
-    expect(bytes).toBeLessThanOrEqual(10000); // <10kb
-    expect(gzipSize).toBeLessThanOrEqual(4155); // <4.155kb
+    // +~58B raw / +~37B gzip: a nested `(?<name>…)` in a constraint throws
+    // too, a `?` guard skips the static-segment scan, and the modifier error
+    // names the escape (review of #229).
+    expect(bytes).toBeLessThanOrEqual(10060); // <10.06kb
+    expect(gzipSize).toBeLessThanOrEqual(4190); // <4.19kb
   });
 });
 

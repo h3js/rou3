@@ -569,13 +569,10 @@ describe("data slots above the argument limit (compiled)", () => {
 
 describe("regex constraints with embedded groups (compiled parity)", () => {
   const router = createEmptyRouter<{ path: string }>();
-  addRoute(router, "GET", "/c/:id(a(?<extra>b)?c)", { path: "INNER-NAMED" });
+  addRoute(router, "GET", "/c/:id(a(?:b)?c)", { path: "INNER-NONCAPTURING" });
   addRoute(router, "GET", "/m/:a(\\d+)/:b([a-z]+)", { path: "MULTI" });
   addRoute(router, "GET", "/n/:num(\\d+)", { path: "WHOLE" });
   addRoute(router, "GET", "/file/*.png", { path: "MID-WILDCARD" });
-  // Unicode group name: unsafe as a `.name` access, takes the
-  // `_normalizeGroups` runtime-fallback codegen path
-  addRoute(router, "GET", "/uni/:id(a(?<é>b)c)", { path: "UNI-FALLBACK" });
   const compiledLookup = compileRouter(router);
 
   const lookups = [
@@ -585,14 +582,8 @@ describe("regex constraints with embedded groups (compiled parity)", () => {
 
   for (const { name, match } of lookups) {
     it(`resolves nested and multiple regex groups (${name})`, () => {
-      expect(match("GET", "/c/abc")).toMatchObject({
-        data: { path: "INNER-NAMED" },
-        params: { id: "abc", extra: "b" },
-      });
-      expect(match("GET", "/c/ac")).toMatchObject({
-        data: { path: "INNER-NAMED" },
-        params: { id: "ac" },
-      });
+      expect(match("GET", "/c/abc")?.params).toEqual({ id: "abc" });
+      expect(match("GET", "/c/ac")?.params).toEqual({ id: "ac" });
       expect(match("GET", "/c/ax")).toBeUndefined();
       expect(match("GET", "/m/12/ab")).toMatchObject({
         data: { path: "MULTI" },
@@ -608,11 +599,6 @@ describe("regex constraints with embedded groups (compiled parity)", () => {
         data: { path: "MID-WILDCARD" },
         params: { "0": "logo" },
       });
-      expect(match("GET", "/uni/abc")).toMatchObject({
-        data: { path: "UNI-FALLBACK" },
-        params: { id: "abc", é: "b" },
-      });
-      expect(match("GET", "/uni/axc")).toBeUndefined();
     });
   }
 

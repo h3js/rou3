@@ -1321,10 +1321,16 @@ export const RESERVED_SYNTAX_ROUTES: readonly string[] = [
   "/a/:0+",
   "/a/**:0",
   "/a/pre-:1(\\d+)",
-  // An unnamed group inside a constraint was a stray numbered param
-  // (`/:x((a))` gave `{ x: "a", "0": "a" }`).
+  // A capturing group inside a constraint was a stray param (`/:x((a))`
+  // gave `{ x: "a", "0": "a" }`, `/:n/:x((?<n>a))` overwrote `n`,
+  // `/:x((?<x>a))` threw a raw `SyntaxError`).
   "/:x((a))",
   "/a/((b)c)",
+  "/:x((?<x>a))",
+  "/:n/:x((?<n>a))",
+  "/(a)/:x((?<_0>b))",
+  "/a/:x(a(?<n>b)c)",
+  "/a/((?<n>b)c)",
   "/a/:x((?:a)|(b))",
   "/a/:x((?:(a)))",
   "/a/x((b))y",

@@ -29,7 +29,7 @@ import {
  * group, a `:` without a valid name (`/:0`, `/:café`), more after `**:name`
  * in its segment, a repeated param name, more than one `**`, a `\` that
  * escapes no char of its segment (`\/`), and an anchor, look-around,
- * backreference or unnamed group in a constraint (`/:x((a))`; use `(?:…)`).
+ * backreference or capturing group in a constraint (`/:x((a))`; use `(?:…)`).
  */
 export function addRoute<T>(
   ctx: RouterContext<T>,
@@ -161,7 +161,7 @@ function _add<T>(
     }
 
     // Static (a `?` is a literal only escaped: no lookup path has one)
-    if (/(^|[^\\])\?/.test(segment)) {
+    if (segment.includes("?") && /(^|[^\\])\?/.test(segment)) {
       invalidSyntax(MISPLACED_MODIFIER, input);
     }
     segment = segments[i] = key;
@@ -236,9 +236,9 @@ function addName(names: string[], name: string, input: string): string {
  * outside a group is a literal `x`. Throws on what has no meaning (yet) there:
  * a `:` without a valid name, an empty group or one starting with `?`, a `?` /
  * `+` / `*` modifier on anything but a whole segment's `:name` (a `?` / `+` was
- * a raw regex quantifier, a `*` right after a name, group or `*` is ambiguous
- * with a modifier or a mid-segment `**`). `routeToRegExp` reuses it (with its own unnamed group keys), so
- * a dynamic segment is the same regex in both.
+ * a raw regex quantifier, a `*` right after a name or group is ambiguous with
+ * a modifier) and a mid-segment `**`. `routeToRegExp` reuses it (with its own
+ * unnamed group keys), so a dynamic segment is the same regex in both.
  */
 export function getParamRegexp(
   segment: string,
@@ -258,7 +258,7 @@ export function getParamRegexp(
     if (_d === 0) {
       if (c === 58 /* : */) {
         // A name is `[A-Za-z_]\w*` (a `-` ends it); a non-ASCII char can't
-        // follow it (URLPattern reads it as part of the name)
+        // follow it (it may be part of the name in URLPattern)
         _e =
           j + 1 + addName(names, /^[\w\x80-\ufffc]*/.exec(segment.slice(j + 1))![0], input).length;
       } else if (c === 40 /* ( */ && /[?)]/.test(segment[j + 1])) {
@@ -266,6 +266,7 @@ export function getParamRegexp(
       } else if (c === 63 /* ? */ || c === 43 /* + */ || (c === 42 /* * */ && j === _e)) {
         // `?` / `+` here were raw quantifiers; a `*` right after a name or
         // group is ambiguous with a modifier, after a `*` a mid-segment `**`
+        // (an escaped `\*` is consumed below and never sets `_e`)
         invalidSyntax(MISPLACED_MODIFIER, input);
       } else if (c === 42) {
         _e = j + 1;
