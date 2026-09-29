@@ -448,6 +448,12 @@ function compileFinalMatch(
       const map = paramsMap[i];
       if (typeof map[1] === "string") {
         paramsCode += `${propKey(map[1])}:${params[i]},`;
+        // A `:name` / `**:name` needs a value (see `emptyParam`)
+        const guard = nonEmptyGuard(map, params[i], data.suffix);
+        if (guard) {
+          conditions.push(guard);
+          guardConditions++;
+        }
         continue;
       }
       // `params[i]` is the same `s[<idx>]` expression the regex condition must
@@ -929,6 +935,28 @@ function dataRef(ctx: CompilerContext, index: number): string {
 // form, so every other key stays byte-identical to the plain `JSON.stringify`.
 function propKey(name: string): string {
   return name === "__proto__" ? '["__proto__"]' : JSON.stringify(name);
+}
+
+/**
+ * The condition under which param `map` (read as `param`) has a value, where
+ * it needs one (mirrors `emptyParam` in operations/_utils.ts): a `:name`'s
+ * segment is not empty (a `*` has a digit name), and a `**:name` takes two
+ * segments or more, or one that is not empty (a `**`, and `:name*`'s, may
+ * capture `""`). Its `**` starts at `s[c]` and `n` segments follow it.
+ */
+function nonEmptyGuard(
+  [index, name, optional, empty]: NonNullable<MethodData["paramsMap"]>[number],
+  param: string,
+  suffix: MethodData["suffix"],
+): string | undefined {
+  if (index >= 0) {
+    return (name as string).charCodeAt(0) > 57 /* not a digit */ ? param : undefined;
+  }
+  if (optional || empty) {
+    return;
+  }
+  const c = ~index + 1;
+  return `(l>${c + (suffix ? suffix[1] : 0) + 1}||s[${c}])`;
 }
 
 // One param node can hold both required (`:id`, `:id(\d+)`) and optional

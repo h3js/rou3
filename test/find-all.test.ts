@@ -351,6 +351,61 @@ describe("matcher: named wildcard", () => {
   });
 });
 
+describe("matcher: required params need a value", () => {
+  // `_findAllRoutes` asserts interpreter and compiled matchAll agree.
+  const router = createRouter([
+    "/a/**",
+    "/a/**:rest",
+    "/a/:x",
+    "/a/*",
+    "/a/:y*",
+    "/a/:z+/b",
+    "/a/:id(\\d*)",
+    "/a/:x/c",
+    "/**/:file",
+    "/**/c",
+  ]);
+
+  it("leaves out `:name` / `:name+` / `**:name` on an empty value", () => {
+    expect(_findAllRoutes(router, "GET", "/a//")).toEqual([
+      "/a/**",
+      "/a/:y*",
+      "/a/*",
+      "/a/:id(\\d*)",
+    ]);
+    expect(_findAllRoutes(router, "GET", "/a/1")).toEqual([
+      "/**/:file",
+      "/a/**",
+      "/a/**:rest",
+      "/a/:y*",
+      "/a/*",
+      "/a/:x",
+      "/a/:id(\\d*)",
+    ]);
+    expect(_findAllRoutes(router, "GET", "/a//b")).toEqual([
+      "/**/:file",
+      "/a/**",
+      "/a/**:rest",
+      "/a/:y*",
+    ]);
+    expect(_findAllRoutes(router, "GET", "/a///b")).toEqual([
+      "/**/:file",
+      "/a/**",
+      "/a/**:rest",
+      "/a/:y*",
+      "/a/:z+/b",
+    ]);
+    expect(_findAllRoutes(router, "GET", "/a//c")).toEqual([
+      "/**/:file",
+      "/a/**",
+      "/a/**:rest",
+      "/a/:y*",
+      "/**/c",
+    ]);
+    expect(_findAllRoutes(router, "GET", "//")).toEqual([]);
+  });
+});
+
 describe("matcher: root path parity", () => {
   // `_findAllRoutes` asserts interpreter and compiled matchAll agree.
   it("required root wildcard does not match root (0 segments)", () => {
@@ -381,10 +436,13 @@ describe("matcher: root path parity", () => {
     expect(_findAllRoutes(createRouter(["/**:all"]), "GET", "/")).toEqual([]);
     expect(_findAllRoutes(createRouter(["/:x"]), "GET", "/")).toEqual([]);
     expect(_findAllRoutes(createRouter(["/a/**:x"]), "GET", "/a/")).toEqual([]);
-    // ...but the second slash of `//` ends a real empty segment they take.
-    expect(_findAllRoutes(createRouter(["/**:all"]), "GET", "//")).toEqual(["/**:all"]);
-    expect(_findAllRoutes(createRouter(["/:x"]), "GET", "//")).toEqual(["/:x"]);
-    expect(_findAllRoutes(createRouter(["/a/**:x"]), "GET", "/a//")).toEqual(["/a/**:x"]);
+    // ...nor the real empty segment the second slash of `//` ends (they need
+    // a value), while `*` and `**` take it.
+    expect(_findAllRoutes(createRouter(["/**:all"]), "GET", "//")).toEqual([]);
+    expect(_findAllRoutes(createRouter(["/:x"]), "GET", "//")).toEqual([]);
+    expect(_findAllRoutes(createRouter(["/a/**:x"]), "GET", "/a//")).toEqual([]);
+    expect(_findAllRoutes(createRouter(["/*"]), "GET", "//")).toEqual(["/*"]);
+    expect(_findAllRoutes(createRouter(["/a/**"]), "GET", "/a//")).toEqual(["/a/**"]);
     // Static routes, root included, don't match beyond one trailing slash.
     expect(_findAllRoutes(createRouter(["/"]), "GET", "/")).toEqual(["/"]);
     expect(_findAllRoutes(createRouter(["/"]), "GET", "//")).toEqual([]);

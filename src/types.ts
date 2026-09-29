@@ -3,7 +3,15 @@ export interface RouterContext<T = unknown> {
   static: Record<string, Node<T> | undefined>;
 }
 
-export type ParamsIndexMap = Array<[Index: number, name: string | RegExp, optional: boolean]>;
+/**
+ * One entry per param: its route index (`-(i + 1)` for a `**` at `i`), its
+ * name (`"0"`, `"1"`, … for a `*`) or segment regex, whether it may match no
+ * segment (a trailing `*`, a bare `**`), and, on the `**:name` a `:name*`
+ * expands to, that it may capture `""` (a `:name` / `**:name` needs a value).
+ */
+export type ParamsIndexMap = Array<
+  [Index: number, name: string | RegExp, optional: boolean, empty?: boolean]
+>;
 export type MethodData<T = unknown> = {
   data: T;
   paramsMap?: ParamsIndexMap;
@@ -58,10 +66,8 @@ type ExtractWildcards<
   TPath extends string,
   Count extends readonly unknown[] = [],
 > = TPath extends `${string}*${infer Rest}`
-  ? Rest extends `*:${infer Named}` // Named catch-all wildcard (**:name)
-    ? Named extends `${infer Name}/${infer Tail}`
-      ? Name | ExtractWildcards<Tail, Count>
-      : Named
+  ? Rest extends `*:${infer Named}` // Named catch-all (**:name), a key of `ExtractParams`
+    ? ExtractWildcards<Named, Count>
     : Rest extends `*${infer Tail}` // Double wildcard (**) -> "_", `**<rest>` is `**/*<rest>` (a `}` closes a group)
       ? "_" | ExtractWildcards<Tail extends "" | `${"/" | "}"}${string}` ? Tail : `*${Tail}`, Count>
       : `${Count["length"]}` | ExtractWildcards<Rest, [...Count, unknown]> // Single wildcard (*) -> "0", "1", etc.
@@ -94,17 +100,18 @@ type Lower = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "
 type Lower2 = "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z";
 type WordChar = Digit | Lower | Lower2 | Uppercase<Lower | Lower2> | "_";
 
-// The param name at the start of `S`: its longest `\w+(?:-\w+)*` prefix
-type TakeName<S extends string, Name extends string = ""> = S extends `${infer C}${infer Rest}`
-  ? C extends WordChar
-    ? TakeName<Rest, `${Name}${C}`>
-    : C extends "-"
-      ? Name extends ""
-        ? Name
-        : Rest extends `${WordChar}${string}`
-          ? TakeName<Rest, `${Name}-`>
-          : Name
-      : Name
+// The name run at the start of `S`, as `addRoute` reads it: `[\w$]*` (a `-`,
+// `{` / `}` or `\` ends it; a non-ASCII char, part of it there, ends it here)
+type NameRun<S extends string, Name extends string = ""> = S extends `${infer C}${infer Rest}`
+  ? C extends WordChar | "$"
+    ? NameRun<Rest, `${Name}${C}`>
+    : Name
+  : Name;
+
+// Types don't validate routes: a name run `addRoute` rejects (not
+// `[A-Za-z_]\w*`: `:0`, `:id$`) just gives no key
+type ValidName<Name extends string> = Name extends "" | `${Digit}${string}` | `${string}$${string}`
+  ? never
   : Name;
 
 // `S` past the `(...)` group it starts with (escape aware)
@@ -122,16 +129,17 @@ type SkipGroup<S extends string, Depth extends unknown[] = []> = S extends `${in
         : SkipGroup<Rest, Depth>
   : S;
 
-// `[name, optional]` for each `:name` (an escaped `\:` is a literal)
+// `[name, optional]` for each `:name` (an escaped `\:` and the `:` of a `(?:`
+// group are no param)
 type ExtractParams<TPath extends string> = TPath extends `${infer Pre}:${infer Rest}`
-  ? Pre extends `${string}\\`
+  ? Pre extends `${string}${"\\" | "(?"}`
     ? ExtractParams<Rest>
-    : ParamAt<Rest, TakeName<Rest>>
+    : ParamAt<Rest, NameRun<Rest>>
   : never;
 
 type ParamAt<Rest extends string, Name extends string> = Rest extends `${Name}${infer After}`
   ? AfterConstraint<After> extends infer Tail extends string
-    ? (Name extends "" ? never : [Name, OptionalParam<Tail>]) | ExtractParams<Tail>
+    ? (Name extends ValidName<Name> ? [Name, OptionalParam<Tail>] : never) | ExtractParams<Tail>
     : never
   : never;
 

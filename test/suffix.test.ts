@@ -214,8 +214,8 @@ describe("segments after `**`: priority", () => {
       ["/blog/**", "/**/*.png", "/**/__og_image__/og.png"],
     ],
     // Narrower wins even when the broader one diverges earlier
-    [["/a/:p/**", "/a/**/x"], "/a/q/x", ["/a/:p/**", "/a/**/x"]],
-    [["/:a/**/p", "/**/b/p"], "/b/p", ["/:a/**/p", "/**/b/p"]],
+    [["/a/*/**", "/a/**/x"], "/a/q/x", ["/a/*/**", "/a/**/x"]],
+    [["/*/**/p", "/**/b/p"], "/b/p", ["/*/**/p", "/**/b/p"]],
     // Paths no suffix route matches keep the tree order
     [["/api/**", "/**", "/**/_payload.json"], "/api/users", ["/**", "/api/**"]],
     [
@@ -273,10 +273,13 @@ describe("segments after `**`: priority", () => {
       "/**/:n(\\d+)",
       "/**/*.p",
     ];
-    const alphabet = ["b", "p", "1", "q.p"];
+    // `""`: an empty segment, which a `:a` / `**:n` can't take (#229), in
+    // paths up to 3 segments (the sweep's cost grows with the paths)
+    const alphabet = ["b", "p", "1", "q.p", ""];
     const paths = ["/"];
     for (let depth = 1, prev = [""]; depth <= 4; depth++) {
       prev = prev.flatMap((path) => alphabet.map((segment) => `${path}/${segment}`));
+      if (depth === 4) prev = prev.filter((path) => !path.includes("//"));
       paths.push(...prev);
     }
     const matchSets = new Map(
@@ -345,7 +348,23 @@ describe("segments after `**`: priority", () => {
       "/**/*.p",
     ]);
     const { find, all } = lookups(router);
-    for (const path of ["/", "/b", "/b/p", "/x/b/p", "/b/1", "/q/1", "/a/q.p", "/b/x/y/p/"]) {
+    for (const path of [
+      "/",
+      "/b",
+      "/b/p",
+      "/x/b/p",
+      "/b/1",
+      "/q/1",
+      "/a/q.p",
+      "/b/x/y/p/",
+      "//",
+      "//p",
+      "///p",
+      "/b//",
+      "/b//p",
+      "/b///p",
+      "//b/p",
+    ]) {
       find(path);
       all(path);
     }
@@ -378,8 +397,8 @@ describe("segments after `**`: priority", () => {
   });
 
   it("agrees with compareRoutes on the scenarios above", () => {
-    expect(compareRoutes("/a/:p/**", "/a/**/x")).toBe("superset");
-    expect(compareRoutes("/:a/**/p", "/**/b/p")).toBe("superset");
+    expect(compareRoutes("/a/*/**", "/a/**/x")).toBe("superset");
+    expect(compareRoutes("/*/**/p", "/**/b/p")).toBe("superset");
     expect(compareRoutes("/**/_payload.json", "/blog/:slug/_payload.json")).toBe("superset");
     expect(compareRoutes("/blog/**", "/**/_payload.json")).toBe("partial");
   });

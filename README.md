@@ -96,25 +96,29 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 | `/**.md`                    | `/docs/intro.md`                         | `{ _: "docs", "0": "intro" }`                        |
 | `/book{s}?`                 | `/book` or `/books`                      | `{}`                                                 |
 | `/blog/:id(\\d+){-:title}?` | `/blog/123` or `/blog/123-my-post`       | `{ id: "123" }` or `{ id: "123", title: "my-post" }` |
+| `/files/:name.:ext`         | `/files/a.tar.gz`                        | `{ name: "a", ext: "tar.gz" }`                       |
+| `/v:version?`               | `/v` or `/v2`                            | `{}` or `{ version: "2" }`                           |
 
 > [!NOTE]
 > In JavaScript strings a regex backslash is written twice: `"/users/:id(\\d+)"` is the pattern `/users/:id(\d+)`.
 
 ### Params
 
-- **Named params** `:name` match one segment: `/users/:name`. They can also sit inside a segment: `/blog/:year-:month`.
+- **Named params** `:name` match one segment: `/users/:name`. They can also sit inside a segment: `/blog/:year-:month`. When several params share a segment, each one takes as little as it can, as in URLPattern: `/:a-:b` on `/x-y-z` gives `{ a: "x", b: "y-z" }`, and `/:name.:ext` on `/a.tar.gz` gives `{ name: "a", ext: "tar.gz" }`. A `*` takes as much as it can: `/*-:a` on `/x-y-z` gives `{ "0": "x-y", a: "z" }`.
 - **Regex constraints** `:name(regex)` only match when the regex does: `/users/:id(\\d+)`. The regex applies to one segment and can't contain `/`.
-- **Unnamed groups** `(regex)` capture into numbered keys `"0"`, `"1"`, …: `/path/(\\d+)`.
+- **Unnamed groups** `(regex)` capture into numbered keys `"0"`, `"1"`, …: `/path/(\\d+)`. Inside a regex, group with `(?:…)`: a capturing group there throws (`/:x((a))`, `/:x((?<n>a))`).
 - **Modifiers** go at the end of a whole-segment param:
   - `:name?` optional (also works with a regex: `:id(\\d+)?`)
   - `:name+` one or more segments
   - `:name*` zero or more segments
+- **`?` inside a segment** makes only the param optional: `/pre-:x?` matches `/pre-` and `/pre-a`, but not `/`. Use a group for an optional segment: `/{pre-:x}?`. Where it matches, the route with the param wins (see the differences below).
 
 <details>
 <summary>Param naming rules</summary>
 
-- A name is word characters (`[A-Za-z0-9_]`), with `-` allowed between them (`:test-id`). Any other character ends it, so `/blog/:year-:month` has two params and `/files/:name-` has a literal trailing `-`.
-- To end a name early, escape the next character: `/files/:name\\-v2` gives `{ name }` followed by a literal `-v2`.
+- A name starts with a letter or `_` and goes on with word characters (`[A-Za-z_][A-Za-z0-9_]*`), as in URLPattern: `:v2` and `:_0` are names, `:0` and `:1st` throw.
+- Any other ASCII character but `$` ends a name, `-` included: `/blog/:year-:month` has two params, and `/users/:user-id` is the param `user` followed by a literal `-id` (write `:user_id` for one param). A group's `{` or `}` ends one too: `/:a{b}?` is the param `a` followed by an optional `b`.
+- A non-ASCII character or `$` right after a name throws (`/:café`, `/:id$`: URLPattern reads them as part of the name). To end a name early, escape the next character: `/:caf\\é` gives `{ caf }` followed by a literal `é`, and `/:id\\$` gives `{ id }` followed by a literal `$`.
 - A name can appear only once per route: `/a/:x/:x` throws.
 - A `:` must start a name. Write a literal colon as `\\:`.
 - `+` and `*` only repeat a whole-segment `:name` (`:id(\d+)+` and `pre-:x+` throw).
@@ -125,9 +129,9 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 
 - **`*`** matches one segment, or part of one, and captures it into a numbered key: `/files/*`, `/files/*.png`.
 - **`**`** matches zero or more segments and captures them into `_`: `/docs/**`.
-- **`**:name`** matches one or more segments and captures them into `name`: `/docs/**:path`.
+- **`**:name`** matches one or more segments and captures them into `name`: `/docs/**:path`. Like `:name` and `:name+`, it needs a value: `/docs//` doesn't match (see [empty segments](#trailing-slashes-and-empty-segments)).
 - **Segments after `**`** are matched from the **end** of the path, and the `**` takes whatever is in between. `/**/_payload.json` matches `_payload.json` in any directory, and `/blog/**:path/og.png` matches `og.png` anywhere under `/blog`.
-- **`**` followed by text** is short for `**/*<text>`: `/**.md` matches any path whose last segment ends in `.md`.
+- **`**` followed by text** is short for `**/*<text>`: `/**.md` matches any path whose last segment ends in `.md`. Anywhere else in a segment, `**` throws (`/a**b`, `/a/x**`): write `*` for one capture or `\\*\\*` for a literal.
 
 A route can have only one catch-all. `**`, `**:name`, and a `:name+` / `:name*` that is not the last segment all count as one.
 
@@ -151,23 +155,26 @@ addRoute(router, "GET", "/files/\\(2024\\)", {}); // matches only "/files/(2024)
 
 ### Invalid patterns
 
-`addRoute` throws a `rou3:` error that quotes the pattern when the syntax has no meaning, instead of silently matching something unexpected. For example: an unclosed `(` or `{`, a nested group, an empty group `()`, a modifier in the wrong place (`*?`, `**+`, `:x.png?`), a repeated param name, a second catch-all, a `\/`, or an anchor (`^`, `$`), look-around or numbered backreference (`\1`) in a regex constraint. The router tests a constraint against its segment alone, while `routeToRegExp` puts it inline, where it would see the rest of the path, so the two would match different paths.
+`addRoute` throws a `rou3:` error that quotes the pattern when the syntax has no meaning, instead of silently matching something unexpected. For example: an unclosed `(` or `{`, a nested group, an empty group `()`, a modifier in the wrong place (`*?`, `**+`, `:x.png?`), a `?` after plain text (`/foo?`: lookup paths have no query string, escape a literal one as `\\?`), a `**` in the middle of a segment (`/a**b`), an invalid or repeated param name (`/:0`, `/:café`, `/:id$`, `/a/:x/:x`), a second catch-all, a `\/`, a capturing group inside a regex constraint (`/:x((a))`, use `(?:…)`), or an anchor (`^`, `$`), look-around or numbered backreference (`\1`) in a regex constraint, or a character from U+FFFD to U+FFFF (used internally). The router tests a constraint against its segment alone, while `routeToRegExp` puts it inline, where it would see the rest of the path, so the two would match different paths.
 
 ### Differences from URLPattern
 
 rou3 matches paths segment by segment in a tree, which leads to a few intentional differences:
 
-| Feature                       | URLPattern                         | rou3                                                    |
-| ----------------------------- | ---------------------------------- | ------------------------------------------------------- |
-| `*` (single star)             | Greedy catch-all `(.*)` across `/` | One segment (or part of one), `([^/]*)`                 |
-| `**` (double star)            | Literal `**`                       | Catch-all, zero or more segments, one per route         |
-| `(.*)` in a segment           | Greedy match across `/`            | Stays within the segment                                |
-| `{...}+` / `{...}*` groups    | Group repetition                   | Not supported (throws)                                  |
-| Path normalization (`.`/`..`) | Resolved in input paths            | Opt-in with `{ normalize: true }`                       |
-| Case sensitivity              | Can be case-insensitive            | Always case-sensitive                                   |
-| Non-`/`-prefixed paths        | Supported                          | Paths must start with `/`                               |
-| Param names                   | Unicode identifiers (no `-`)       | ASCII word characters, `-` allowed between (`:test-id`) |
-| Percent-encoding              | Normalizes `%xx` sequences         | Input is not decoded                                    |
+| Feature                       | URLPattern                         | rou3                                            |
+| ----------------------------- | ---------------------------------- | ----------------------------------------------- |
+| `*` (single star)             | Greedy catch-all `(.*)` across `/` | One segment (or part of one), `([^/]*)`         |
+| Trailing `*`                  | Required (`/foo/*` doesn't match `/foo`) | Optional (`/foo/*` matches `/foo`), so `use("/api/*")`-style scopes cover `/api` too |
+| `**` (double star)            | Literal `**`                       | Catch-all, zero or more segments, one per route |
+| `(.*)` in a segment           | Greedy match across `/`            | Stays within the segment                        |
+| `{...}+` / `{...}*` groups    | Group repetition                   | Not supported (throws)                          |
+| Path normalization (`.`/`..`) | Resolved in input paths            | Opt-in with `{ normalize: true }`               |
+| Case sensitivity              | Can be case-insensitive            | Always case-sensitive                           |
+| Non-`/`-prefixed paths        | Supported                          | Paths must start with `/`                       |
+| Optional param after a greedy capture (`/*-:x?`, `/:a(\d+):b?`) | The greedy capture takes what it can (`/--`: `{ 0: "-" }`; `/12`: `{ a: "12" }`) | The route with the param wins (`/--`: `{ 0: "", x: "-" }`; `/12`: `{ a: "1", b: "2" }`) |
+| Param names                   | Unicode identifiers                | `[A-Za-z_]\w*`; a non-ASCII char or `$` right after one throws |
+| Empty segments in `:name*` / `:name+` | Every repeated segment needs a value (`/foo/:bar*` doesn't match `/foo//`) | A `:name*` may be empty (`/foo/:bar*` on `/foo//` is `{ bar: "" }`), a `:name+` needs a value as a whole (`/foo/:bar+` on `/foo//a` is `{ bar: "/a" }`) |
+| Percent-encoding              | Normalizes `%xx` sequences         | Input is not decoded                            |
 
 ## Matching
 
@@ -198,19 +205,19 @@ A lookup sees the routes for its method and the method-agnostic ones together, a
 - **At most one trailing slash** is ignored: `/users/foo/` matches `/users/:name`, `/users/foo//` does not.
 - In patterns, trailing slashes are ignored: `/users/`, `/users//` and `/users` are the same route.
 - **Empty segments in the middle are real**: `/a//b` does not match `/a/b`.
-- A param or catch-all can match an empty segment and capture `""`:
+- A `:name`, `:name+` or `**:name` needs a value, as in URLPattern: it never captures `""`. A `*`, `**`, `:name*` or a regex constraint that can match empty (`:id(\\d*)`) takes an empty segment:
 
 ```js
 addRoute(router, "GET", "/admin/:id", {});
 addRoute(router, "GET", "/files/:path+", {});
+addRoute(router, "GET", "/raw/*", {});
 
 findRoute(router, "GET", "/admin/"); // undefined (the trailing slash is ignored)
-findRoute(router, "GET", "/admin//"); // params: { id: "" }
-findRoute(router, "GET", "/files//"); // params: { path: "" }
+findRoute(router, "GET", "/admin//"); // undefined (an empty segment)
+findRoute(router, "GET", "/files//"); // undefined
+findRoute(router, "GET", "/files///"); // params: { path: "/" } (two empty segments)
+findRoute(router, "GET", "/raw//"); // params: { "0": "" }
 ```
-
-> [!IMPORTANT]
-> A required param (or `:name+`) can still be an empty string. If a handler needs a value, check for `""` or use a regex constraint such as `/admin/:id(.+)` or `/users/:id(\\d+)`.
 
 ### Path normalization
 
@@ -465,7 +472,7 @@ The output is **PCRE-compatible**, so its `.source` also works in `grep -P`, `rg
 import { regExpToRoute } from "rou3";
 
 regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
-regExpToRoute(/^\/path\/(?:(?<param>[^/]+)\/?|\/)$/); // "/path/:param"
+regExpToRoute(/^\/path\/(?<param>[^/]+)\/?$/); // "/path/:param"
 regExpToRoute(/^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$/); // "/path/**"
 regExpToRoute("^\\/files\\/(?<_0>[^/]*)\\.png\\/?$"); // "/files/*.png"
 regExpToRoute(/^\/?(?<_>[\s\S]*)\/_payload\.json\/?$/); // "/**/_payload.json"
@@ -481,7 +488,7 @@ It understands the regexes `routeToRegExp` emits, and every one of them round-tr
 - In PCRE and Perl, `$` also matches before a final `\n`, so there the regex also matches `<path>\n`.
 - `.` and `..` are not resolved. Normalize the path first if your router uses `normalize: true`.
 
-**Params.** The regex leaves a group **unset** where the router reports `""` in two cases: a required segment that is empty (`/a//` on `/a/:x`) and a `**` that matches no segment (`/a` on `/a/**`; at the root the regex captures `""` too). When optional segments meet a `*` or a constrained optional, or several optional segments follow a `**`, the regex can assign a segment to a different param than the router (`/a/:x?/*` on `/a/b` sets `x`, the router sets `*`). The set of matched paths is still the same.
+**Params.** The regex leaves a group **unset** where the router reports a value in three cases: a `**` that matches no segment (`/a` on `/a/**`, where the router reports `""`; at the root the regex captures `""` too), a `**:name` / `:name+` at the end whose value is two empty segments (`/a///` on `/a/**:x`, where the router reports `/`), and a `*` after a `**` on an empty last segment (`/a//` on `/**/*`, where the router reports `""`). When optional segments meet a `*` or a constrained optional, or several optional segments follow a `**`, the regex can assign a segment to a different param than the router (`/a/:x?/*` on `/a/b` sets `x`, the router sets `*`). The set of matched paths is still the same.
 
 **Errors.** Patterns that `addRoute` rejects throw the same error, and so does a route that declares the same param name twice (`/files/:path/**:path`; a bare `**` is the param `_`).
 
@@ -495,16 +502,16 @@ The trailing-slash rule (at most one trailing slash, exactly one when the last s
 | Route                          | Regex                                                            |
 | ------------------------------ | ---------------------------------------------------------------- |
 | `/users/:id(\d+)`              | `^\/users\/(?<id>\d+)\/?$`                                       |
-| `/path/:id?`                   | `^\/path(?:\/(?<id>[^/]*))??\/?$`                                |
-| `/path/:param`                 | `^\/path\/(?:(?<param>[^/]+)\/?\|\/)$`                           |
-| `/users/:id/:tab?`             | `^\/users\/(?:(?<id>[^/]+)(?:\/\|$)\|\/)(?:(?<tab>[^/]*)\/?)??$` |
+| `/path/:id?`                   | `^\/path(?:\/(?<id>[^/]+))?\/?$`                                 |
+| `/path/:param`                 | `^\/path\/(?<param>[^/]+)\/?$`                                    |
+| `/users/:id/:tab?`             | `^\/users\/(?<id>[^/]+)(?:\/(?<tab>[^/]+))?\/?$`                  |
 | `/path/**`                     | `^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$`                   |
-| `/base/**:path`                | `^\/base\/(?:\/\|(?<path>(?:[\s\S]*[^/]\|\/)\/*?)\/?)$`          |
+| `/base/**:path`                | `^\/base\/(?:\/\/\|(?<path>(?:[\s\S]*[^/]\|\/\/)\/*?)\/?)$`      |
 | `/**`                          | `^\/?(?<_>(?:[\s\S]*[^/])?\/*?)\/?$`                             |
 | `/**/_payload.json`            | `^\/?(?<_>[\s\S]*)\/_payload\.json\/?$`                          |
 | `/path/**/suffix`              | `^\/path(?:\/(?<_>[\s\S]*))?\/suffix\/?$`                        |
-| `/**/:file`                    | `^\/?(?<_>[\s\S]*)\/(?:(?<file>[^/]+)\/?\|\/)$`                  |
-| `/a/**/:page?`                 | `^\/a(?:\/(?:(?:(?<_>[\s\S]*)\/)?(?:(?<page>[^/]+)\/?\|\/))?)?$` |
+| `/**/:file`                    | `^\/?(?<_>[\s\S]*)\/(?<file>[^/]+)\/?$`                           |
+| `/a/**/:page?`                 | `^\/a(?:\/(?<_>[\s\S]*?))??(?:\/(?<page>[^/]+))?\/?$`             |
 | `/`                            | `^\/$`                                                           |
 | `/path/:id(\d*)` (look-behind) | `^\/path\/(?<id>\d*)(?:(?<=\/)\/\|(?<!\/)\/?)$`                  |
 
@@ -512,8 +519,8 @@ The trailing-slash rule (at most one trailing slash, exactly one when the last s
 
 - a constraint at the end of the route whose match can end in `/` (`:name([^.]+)`, `:x(.+)`),
 - a required last segment whose constraint can match empty (`/path/:id(\d*)`),
-- optional segments side by side where an earlier one can be empty (`/a/:x(\d*)?/:y?`, `/a/:x?{/b/c}?`, `/a/:x/:y(\d+)?/:z?`),
-- a catch-all combined with optional segments (`/a/**:rest/:page?`, `/a/:p/**/:n(\d+)?`, `/a/**/:y?{/b}?`).
+- optional segments side by side where an earlier one can be empty (`/a/:x(\d*)?/:y?`),
+- a catch-all combined with optional segments (`/a/**:rest/:page?`, `/a/*/**/:n(\d+)?`, `/a/**/:y?{/b}?`).
 
 Fixed-length look-behinds work in JavaScript, PCRE and Perl, but not in RE2-family engines.
 
@@ -521,14 +528,16 @@ Fixed-length look-behinds work in JavaScript, PCRE and Perl, but not in RE2-fami
 
 ```js
 routeToRegExp("/blog/:id(\\d+){-:title}?");
-// /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
+// /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+?))?\/?$/
+routeToRegExp("/files/:name{.:ext}?");
+// /^\/files\/(?<name>[^/]+?)(?:\.(?<ext>[^/]+?))?\/?$/
 routeToRegExp("/users{/:id}?/posts/:post");
-// /^\/users(?:\/(?<id>[^/]*))?\/posts\/(?:(?<post>[^/]+)\/?|\/)$/
+// /^\/users(?:\/(?<id>[^/]+))?\/posts\/(?<post>[^/]+)\/?$/
 ```
 
-When the group extends the param before it (`/files/:name{.:ext}?`), a look-ahead gives the param the same value as the router (`archive.tar.gz` gives `name: "archive.tar"`, `ext: "gz"`). RE2-family engines reject that output.
+A param in a segment with other text is lazy (`[^/]+?`), like in the router, so `/files/:name{.:ext}?` splits `archive.tar.gz` into `name: "archive"` and `ext: "tar.gz"`, and `/pre-:x?` compiles to `^\/pre-(?:(?<x>[^/]+?))?\/?$`. When the group follows a `*` or a regex constraint in its segment (`/files/*{.:ext}?/raw`), a look-ahead gives the capture the same value as the router. RE2-family engines reject that output.
 
-**Duplicate named groups.** Other optional combinations (several groups, `/media/*{.webp}?`, `/a/:rest*/b/*`, `/a/**{.png}?`) compile to an alternation that repeats a named group. That works in JavaScript engines with duplicate named groups (Node.js 23+, Chrome 125+, Firefox 129+, Safari 17+) and Perl, and needs `PCRE2_DUPNAMES` in strict PCRE2 engines. On Node.js 22, `routeToRegExp` throws a `rou3:` `SyntaxError` for these routes, and `regExpToRoute` can't convert them back.
+**Duplicate named groups.** Other optional combinations compile to an alternation: several groups, an in-segment group followed by optional segments (`/:x{.:e}?/:y?`), an optional part after a capture that could take its text (`/media/*{.webp}?`, `/*-:x?`, `/*-x{-x}?`, `/:a([a-z-]+)-:b?`), `/a/:rest*/b/*` and `/a/**{.png}?`. The alternation repeats a named group. That works in JavaScript engines with duplicate named groups (Node.js 23+, Chrome 125+, Firefox 129+, Safari 17+) and Perl, and needs `PCRE2_DUPNAMES` in strict PCRE2 engines. On Node.js 22, `routeToRegExp` throws a `rou3:` `SyntaxError` for these routes, and `regExpToRoute` can't convert them back.
 
 **Catch-all with optional segments.** With one optional segment right after a `**`, the regex picks the same route as the router (`/a/**/:n(\d+)?` gives `/a/b/1` to `n`). With several, it matches the same paths but may assign segments differently (`/docs/**/:page?/:lang(en|fr)?` on `/docs/en` sets `page`, the router sets `lang`).
 
@@ -537,9 +546,9 @@ When the group extends the param before it (`/files/:name{.:ext}?`), a look-ahea
 <details>
 <summary>What <code>regExpToRoute</code> accepts</summary>
 
-- The dialect `routeToRegExp` emits: `(?<name>...)` groups, `[^/]*` segments, `[\s\S]*` catch-alls, `(?:/...)?` optional groups and the endings shown above. Unnamed groups such as `(\d+)` work too, and the regex inside a constraint is kept verbatim.
-- Looser forms: a plain `\/?` ending, `.*` / `.+` catch-alls and `[^/]+` params. A catch-all inside an optional group is the exception: the regex for `/a{/:w*}?` throws, and the one for `/a{/:w+}?` comes back as `/a/:w(.+)?`.
-- Routes that compile to the same regex come back in one spelling: `/base/**:path` becomes `/base/:path+`, `/**.md` becomes `/**/*.md`, and `/a/:x?/:y?` becomes `/a{/:x/:y?}?`.
+- The dialect `routeToRegExp` emits: `(?<name>...)` groups, `[^/]*` segments and `[^/]+?` params inside one, `[\s\S]*` catch-alls, `(?:/...)?` optional groups and the endings shown above. Unnamed groups such as `(\d+)` work too, and the regex inside a constraint is kept verbatim.
+- Looser forms, as older versions emitted: a plain `\/?` ending, `.*` / `.+` catch-alls and `[^/]+` params, read as `:name`. A `:name` inside a segment is lazy, so a hand-written greedy `(?<a>[^/]+)-(?<b>[^/]+)` comes back as `/:a-:b`, which splits `/x-y-z` as `x` and `y-z`. An old catch-all inside an optional group is the exception: 0.9.2's regex for `/a{/:w*}?` throws, and its regex for `/a{/:w+}?` comes back as `/a/:w(.+)?` (the current regexes come back as `/a/:w*` and `/a{/:w+}?`).
+- Routes that compile to the same regex come back in one spelling: `/base/**:path` becomes `/base/:path+`, `/**.md` becomes `/**/*.md`, `/a/pre-{:x}?` becomes `/a/pre-:x?`, and `/a/:x?/:y?` becomes `/a{/:x/:y?}?`.
 
 It throws for: a regex not anchored with both `^` and `$`, look-arounds and backreferences, regex operators outside a constraint (`|`, `.`, `+`, `[…]`, …), the flags `i`, `m`, `s`, `u` and `v` (`g`, `y` and `d` are ignored), the duplicate-group alternations above, and constraints that can't be written as a route (for example one containing `/`).
 

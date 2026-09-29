@@ -62,17 +62,17 @@ const findRoute = /* @__PURE__ */ (() => {
         }
         if (l === 3) {
           if (m === "GET") {
-            return { data: $9, params: { id: s[2] } };
+            if (s[2]) return { data: $9, params: { id: s[2] } };
           }
         } else if (s[3] === "y") {
           if (l === 4) {
             if (m === "GET") {
-              return { data: $10, params: { idY: s[2] } };
+              if (s[2]) return { data: $10, params: { idY: s[2] } };
             }
           } else if (s[4] === "z") {
             if (l === 5) {
               if (m === "GET") {
-                return { data: $11, params: { idYZ: s[2] } };
+                if (s[2]) return { data: $11, params: { idYZ: s[2] } };
               }
             }
           }

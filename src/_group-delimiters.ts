@@ -37,13 +37,20 @@ export function scanFirstGroup(path: string): GroupDelimiter | undefined {
 
   const mod = path[j + 1];
   const hasMod = mod === "?" || mod === "+" || mod === "*";
+  // A `{` / `}` ends a param name, as in URLPattern: the char after one is
+  // escaped where it could extend a name once expanded (`/:a{b}?` is `/:a\b`
+  // or `/:a`). A `\x` there is always a literal `x` (`body` and `suf` start
+  // outside any constraint), so this is a no-op after anything else.
   return [
     path.slice(0, i),
-    path.slice(i + 1, j),
-    path.slice(j + (hasMod ? 2 : 1)),
+    path.slice(i + 1, j).replace(NAME_CHAR, "\\$&"),
+    path.slice(j + (hasMod ? 2 : 1)).replace(NAME_CHAR, "\\$&"),
     hasMod ? mod : undefined,
   ];
 }
+
+// A char that would extend a `:name` (a `$` or non-ASCII one there throws)
+const NAME_CHAR = /^[\w$\x80-￼]/;
 
 /**
  * Expand the first `{...}` / `{...}?` group of `path` into the routes it

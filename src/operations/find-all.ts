@@ -1,6 +1,6 @@
 import type { RouterContext, Node, MatchedRoute, MethodData } from "../types.ts";
 import { collectSuffix, rankFromEnd } from "./_suffix.ts";
-import { getMatchParams, methodEntries, normalizePath, splitPath } from "./_utils.ts";
+import { emptyParam, getMatchParams, methodEntries, normalizePath, splitPath } from "./_utils.ts";
 
 /**
  * Find all route patterns that match the given path.
@@ -18,12 +18,7 @@ export function findAllRoutes<T>(
     path = path.slice(0, -1);
   }
   const segments = splitPath(path);
-  const matches = _findAll(ctx.root, method, segments, 0);
-  // Routes with segments after `**` match from the end of the path, and so
-  // does the order of the results once one of them matches
-  if (ctx.root.hasSuffix && matches.some((m) => m.suffix)) {
-    rankFromEnd(matches, segments);
-  }
+  const matches = _findRanked(ctx, method, segments);
 
   // Fresh objects (the entries are internal); static routes and
   // `params: false` carry no `params` key, as in `findRoute` and compiled
@@ -33,6 +28,31 @@ export function findAllRoutes<T>(
       ? { data: m.data, params: getMatchParams(segments, m.paramsMap, m.suffix) }
       : { data: m.data },
   );
+}
+
+/**
+ * Every route matching `segments`, least -> most specific: in tree order, or
+ * ranked from the end of the path once a route with segments after `**` is
+ * among them. `reverse`: see `_findAll`; the last match is then the one
+ * `findRoute` picks.
+ */
+export function _findRanked<T>(
+  ctx: RouterContext<T>,
+  method: string,
+  segments: string[],
+  reverse?: boolean,
+): MethodData<T>[] {
+  let matches = _findAll(ctx.root, method, segments, 0, [], reverse);
+  // A `:name` / `**:name` can't take an empty segment (see `emptyParam`)
+  if (segments.includes("")) {
+    matches = matches.filter((m) => !emptyParam(m, segments));
+  }
+  // Routes with segments after `**` match from the end of the path, and so
+  // does the order of the results once one of them matches
+  if (ctx.root.hasSuffix && matches.some((m) => m.suffix)) {
+    rankFromEnd(matches, segments);
+  }
+  return matches;
 }
 
 /**

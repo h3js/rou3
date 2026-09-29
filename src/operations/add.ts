@@ -18,13 +18,23 @@ import {
 /**
  * Add a route to the router context.
  *
+ * Param names are `[A-Za-z_]\w*`: a `-` ends one (`:test-id` is `:test` and a
+ * literal `-id`), and so does a group's `{` / `}` (`/:a{b}?` is `:a` and an
+ * optional `b`), as in URLPattern. Also as there, a `:name` sharing its
+ * segment takes as little as it can (`/:a-:b` on `/x-y-z` is `x` and `y-z`),
+ * and a `?` on one after text makes only the param optional (`/pre-:x?`
+ * matches `/pre-` and `/pre-a`; `/{pre-:x}?` drops the segment).
+ *
  * @throws a `rou3:` error for pattern syntax with no meaning (yet), quoting
  * the pattern: an unclosed `(`, unbalanced or nested `{}`, `{…}+` / `{…}*`,
  * a `?` / `+` / `*` anywhere but after a whole-segment `:name` (`?` also
- * after `:name(regex)`), an empty or `(?` group, a `:` without a name, more
- * after `**:name` in its segment, a repeated param name, more than one `**`,
- * a `\` that escapes no char of its segment (`\/`), and an anchor or
- * look-around in a constraint.
+ * after `:name(regex)` and in a mixed segment), a raw `?` after plain text
+ * (`/foo?`), a `**` in the middle of a segment (`/a**b`), an empty or `(?`
+ * group, a `:` without a valid name (`/:0`, `/:café`, `/:id$`), more after `**:name`
+ * in its segment, a repeated param name, more than one `**`, a `\` that
+ * escapes no char of its segment (`\/`), an anchor, look-around,
+ * backreference or capturing group in a constraint (`/:x((a))`; use `(?:…)`),
+ * and a U+FFFD-U+FFFF char (internal placeholders).
  */
 export function addRoute<T>(
   ctx: RouterContext<T>,
@@ -114,10 +124,13 @@ function _add<T>(
         node.wildcard = { key: "**" };
       }
       node = node.wildcard;
+      // `**:\uFFFFname`: a `:name*`'s, which may capture `""` (see `emptyParam`)
+      const empty = segment.charCodeAt(3) === 0xffff;
       paramsMap.push([
         -(i + 1),
-        addName(names, segment.length === 2 ? "_" : segment.slice(3), input),
+        addName(names, segment.length === 2 ? "_" : segment.slice(empty ? 4 : 3), input),
         segment.length === 2 /* no id */,
+        empty,
       ]);
       if (i === segments.length - 1) {
         break;
@@ -141,7 +154,7 @@ function _add<T>(
       if (segment === "*") {
         // A trailing `*` may match no segment, but not after a `**`
         paramsMap.push([i, String(_unnamedParamIndex++), !suffix /* optional */]);
-      } else if (!/^:\w+(?:-\w+)*$/.test(segment)) {
+      } else if (!/^:[A-Za-z_]\w*$/.test(segment)) {
         const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex, names, input);
         _unnamedParamIndex = nextIndex;
         paramsRegexp[i] = regexp;
@@ -155,7 +168,10 @@ function _add<T>(
       continue;
     }
 
-    // Static
+    // Static (a `?` is a literal only escaped: no lookup path has one)
+    if (segment.includes("?") && /(^|[^\\])\?/.test(segment)) {
+      invalidSyntax(MISPLACED_MODIFIER, input);
+    }
     segment = segments[i] = key;
     if (suffix) {
       suffix.push(segment);
@@ -211,12 +227,18 @@ function _add<T>(
 
 /**
  * Record param `name` of an expansion of `input`, throwing on a repeat or on
- * a name that is not one (`**:x(\\d+)`, `**:x.json`: a `**:name` ends its
- * segment).
+ * a name that is not `[A-Za-z_]\w*` (`:0`, `:café`, `**:x(\\d+)`, `**:x.json`:
+ * a `**:name` ends its segment). A `**:name` runs to its segment's end, so
+ * the quoted name drops the `\` a group put before a name char outside a
+ * constraint (`**:x{s}?` names `xs`) and decodes `encodeEscapes`' placeholders
+ * (`**:x\:y` names `x\:y`).
  */
 function addName(names: string[], name: string, input: string): string {
-  if (names.includes(name) || !/^\w+(?:-\w+)*$/.test(name)) {
-    invalidSyntax(`${names.includes(name) ? "duplicate" : "invalid"} param name "${name}"`, input);
+  if (names.includes(name) || !/^[A-Za-z_]\w*$/.test(name)) {
+    invalidSyntax(
+      `${names.includes(name) ? "duplicate" : "invalid"} param name "${decodeEscapes(name.replace(/\\(?=[\w$\x80-\ufffc])(?![^(]*\))/g, ""), "\\")}"`,
+      input,
+    );
   }
   names.push(name);
   return name;
@@ -226,11 +248,15 @@ function addName(names: string[], name: string, input: string): string {
  * The regex of a dynamic segment (params, constraints, `*`), after its
  * modifier has been expanded and its escapes encoded (`encodeEscapes`); a `\x`
  * outside a group is a literal `x`. Throws on what has no meaning (yet) there:
- * a `:` without a name, an empty group or one starting with `?`, a `?` / `+` /
- * `*` modifier on anything but a whole segment's `:name` (a `?` / `+` was a
- * raw regex quantifier, a `*` right after a name or group is ambiguous with a
- * modifier). `routeToRegExp` reuses it (with its own unnamed group keys), so
- * a dynamic segment is the same regex in both.
+ * a `:` without a valid name, an empty group or one starting with `?`, a `?` /
+ * `+` / `*` modifier on anything but a whole segment's `:name` (a `?` / `+` would
+ * be a raw regex quantifier, a `*` right after a name or group is ambiguous with
+ * a modifier) and a mid-segment `**`. `routeToRegExp` reuses it (with its own
+ * unnamed group keys), so a dynamic segment is the same regex in both.
+ *
+ * A `:name` here shares its segment, so it takes as little as possible
+ * (`[^/]+?`, as in URLPattern: `:a-:b` on `x-y-z` is `x` and `y-z`); a `*`
+ * stays greedy (URLPattern's `*` is a greedy `(.*)`).
  */
 export function getParamRegexp(
   segment: string,
@@ -243,31 +269,39 @@ export function getParamRegexp(
   // Replace \x escapes outside (...) with a \uFFFE placeholder
   let _s = "",
     _d = 0,
-    // Index right after the last `:name` or top-level group
+    // Index right after the last `:name`, top-level group or `*`
     _e = -1;
   for (let j = 0; j < segment.length; j++) {
     const c = segment.charCodeAt(j);
     if (_d === 0) {
       if (c === 58 /* : */) {
-        _e = j + 1 + segment.slice(j + 1).search(/(?!\w|(?<=\w)-\w)/);
-        if (_e === j + 1) invalidSyntax('invalid param name ""', input);
+        // A name is `[A-Za-z_]\w*` (a `-` ends it); a `$` or non-ASCII char
+        // can't follow it (part of the name in URLPattern: `:id$` is `id$`)
+        _e =
+          j + 1 + addName(names, /^[\w$\x80-\ufffc]*/.exec(segment.slice(j + 1))![0], input).length;
       } else if (c === 40 /* ( */ && /[?)]/.test(segment[j + 1])) {
         invalidSyntax("empty or `(?` group", input);
       } else if (c === 63 /* ? */ || c === 43 /* + */ || (c === 42 /* * */ && j === _e)) {
+        // `?` / `+` here would be raw quantifiers; a `*` right after a name or
+        // group is ambiguous with a modifier, after a `*` a mid-segment `**`
+        // (an escaped `\*` is consumed below and never sets `_e`)
         invalidSyntax(MISPLACED_MODIFIER, input);
+      } else if (c === 42) {
+        _e = j + 1;
       }
+    } else if (c === 58) {
+      // A `:` inside a group (`(?:`) is no param
+      _s += "\uFFFE:";
+      continue;
     }
     if (c === 40) _d++;
     else if (c === 41 && _d > 0) {
       if (--_d === 0) _e = j + 1;
     } else if (c === 92 && _d === 0 && j + 1 < segment.length) {
       // `\*` stays an escape so it is no wildcard (`\:` `\(` `\\` are encoded)
-      const n = segment[j + 1];
-      if (n !== "*") {
-        _s += "\uFFFE" + n;
-        j++;
-        continue;
-      }
+      const n = segment[++j];
+      _s += n === "*" ? "\\*" : "\uFFFE" + n;
+      continue;
     }
     // Regex chars outside a (...) group are literals, as in a static segment
     // (`:x.json`, `*$`); inside one they are regex (`:id(\d+\.\d+)`).
@@ -281,9 +315,10 @@ export function getParamRegexp(
 
   const regex = decodeEscapes(
     _s
+      // Names were checked and recorded above; a `\uFFFE:` is inside a group
       .replace(
-        /:(\w+(?:-\w+)*)(?:\(([^)]*)\))?/g,
-        (_, id, p) => `(?<${toGroupName(addName(names, id, input))}>${p || "[^/]+"})`,
+        /(?<!\uFFFE):([A-Za-z_]\w*)(?:\(([^)]*)\))?/g,
+        (_, id, p) => `(?<${toGroupName(id)}>${p || "[^/]+?"})`,
       )
       .replace(/\((?![?<])/g, () => `(?<${groupKey(_i++)}>`),
     "\uFFFE",

@@ -62,6 +62,13 @@ describe("types", () => {
       expectTypeOf<InferRouteParams<"/test/:id*">>().toEqualTypeOf<Optional>();
       expectTypeOf<InferRouteParams<"/test/:id(\\d+)?">>().toEqualTypeOf<Optional>();
       expectTypeOf<InferRouteParams<"/test/:id?/x">>().toEqualTypeOf<Optional>();
+      // `pre-:id?` makes only the param optional (`pre-{:id}?`)
+      expectTypeOf<InferRouteParams<"/test/pre-:id?">>().toEqualTypeOf<Optional>();
+      expectTypeOf<InferRouteParams<"/test/pre-:id(\\d+)?/x">>().toEqualTypeOf<Optional>();
+      expectTypeOf<InferRouteParams<"/test/:a-:id?">>().toEqualTypeOf<{
+        a: string;
+        id: string | undefined;
+      }>();
       // a modifier `*` is not a wildcard capture; a real trailing `*` still is
       expectTypeOf<InferRouteParams<"/test/:id*/x/*">>().toEqualTypeOf<{
         id: string | undefined;
@@ -116,13 +123,20 @@ describe("types", () => {
       expectTypeOf<InferRouteParams<"/a{/**}?/b">>().toEqualTypeOf<{ _: string }>();
     });
 
-    it("should end param names at a `-` no word char follows", () => {
+    it("should end param names at a `-`", () => {
       expectTypeOf<InferRouteParams<"/blog/:year-:month">>().toEqualTypeOf<{
         year: string;
         month: string;
       }>();
       expectTypeOf<InferRouteParams<"/a/:x-">>().toEqualTypeOf<{ x: string }>();
-      expectTypeOf<InferRouteParams<"/a/:test-id/b">>().toEqualTypeOf<{ "test-id": string }>();
+      expectTypeOf<InferRouteParams<"/a/:test-id/b">>().toEqualTypeOf<{ test: string }>();
+      expectTypeOf<InferRouteParams<"/a/:test\\-id/b">>().toEqualTypeOf<{ test: string }>();
+      expectTypeOf<InferRouteParams<"/a/:name-suffix">>().toEqualTypeOf<{ name: string }>();
+      expectTypeOf<InferRouteParams<"/a/:a-b.:a_b">>().toEqualTypeOf<{ a: string; a_b: string }>();
+      expectTypeOf<InferRouteParams<"/a/:v2/:_0">>().toEqualTypeOf<{ v2: string; _0: string }>();
+      // The `:` of a `(?:…)` group is no param
+      expectTypeOf<keyof InferRouteParams<"/((?:a|b))">>().toEqualTypeOf<never>();
+      expectTypeOf<InferRouteParams<"/x/:id((?:a|b)c)">>().toEqualTypeOf<{ id: string }>();
       expectTypeOf<InferRouteParams<"/a/get-:file.:ext">>().toEqualTypeOf<{
         file: string;
         ext: string;
@@ -141,6 +155,29 @@ describe("types", () => {
       }>();
       expectTypeOf<InferRouteParams<"/a/:x(\\)|a)?">>().toEqualTypeOf<{ x: string | undefined }>();
       expectTypeOf<InferRouteParams<"/static\\:path/:id">>().toEqualTypeOf<{ id: string }>();
+    });
+
+    it("should end param names at a `{` / `}`", () => {
+      expectTypeOf<InferRouteParams<"/:a{b}?">>().toEqualTypeOf<{ a: string }>();
+      expectTypeOf<InferRouteParams<"/:a{b}">>().toEqualTypeOf<{ a: string }>();
+      expectTypeOf<InferRouteParams<"/:foo{}bar">>().toEqualTypeOf<{ foo: string }>();
+      expectTypeOf<InferRouteParams<"/c/{:a}b">>().toEqualTypeOf<{ a: string }>();
+      // A `**:name` too
+      expectTypeOf<InferRouteParams<"/a{/**:x}?">>().toEqualTypeOf<{ x: string | undefined }>();
+      expectTypeOf<InferRouteParams<"/a/**:x{/b}?">>().toEqualTypeOf<{ x: string }>();
+      expectTypeOf<InferRouteParams<"/a/**:x{s}?">>().toEqualTypeOf<{ x: string }>();
+    });
+
+    // Types read names like `addRoute` but don't validate routes: a name it
+    // rejects (`:0`, `:id$`) gives no key.
+    it("should give no key for an invalid param name", () => {
+      expectTypeOf<keyof InferRouteParams<"/:0">>().toEqualTypeOf<never>();
+      expectTypeOf<keyof InferRouteParams<"/:id$">>().toEqualTypeOf<never>();
+      expectTypeOf<keyof InferRouteParams<"/a/:$x">>().toEqualTypeOf<never>();
+      expectTypeOf<keyof InferRouteParams<"/a/**:id$">>().toEqualTypeOf<never>();
+      expectTypeOf<InferRouteParams<"/a/:x-:id$">>().toEqualTypeOf<{ x: string }>();
+      // An escaped `$` is a literal
+      expectTypeOf<InferRouteParams<"/:id\\$">>().toEqualTypeOf<{ id: string }>();
     });
 
     it("should infer mixed params", () => {

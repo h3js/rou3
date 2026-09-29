@@ -66,25 +66,6 @@ const SKIP_PATTERNS = new Set([
   "./foo",
   "../foo",
 
-  // Unicode identifiers — rou3 params use `\w` (ASCII word chars)
-  "(café)",
-  "/:café",
-  "/:℘",
-  "/:㐀",
-  "​​",
-  ":​​",
-  ":a󠄀b",
-  "test/:a𐑐b",
-  ":🚲",
-
-  // Percent-encoding normalization — rou3 does not decode
-  "/caf%C3%A9",
-  "/café",
-  "/caf%c3%a9",
-
-  // Non-greedy unnamed group — different regex flavor
-  "/foo/([^\\/]+?)",
-
   // Regex set operations (v-flag syntax) — not used in rou3 routes
   "/([[a-z]--a])",
   "/([\\d&&[0-1]])",
@@ -109,6 +90,7 @@ const SKIP_PATTERNS = new Set([
  *    rou3 does not
  * 8. Case sensitivity: URLPattern may be case-insensitive;
  *    rou3 is always case-sensitive
+ * 9. Percent-encoding: URLPattern encodes the input; rou3 does not
  */
 
 // Known diff labels: tests where rou3 intentionally behaves differently.
@@ -124,7 +106,7 @@ const KNOWN_DIFFS = new Set([
   // `*` catch-all vs single-segment — URLPattern `*` = `(.*)`, rou3 `*` = `([^/]*)`
   "/foo/* → /foo/bar/baz [match]",
 
-  // Trailing slash — rou3 ignores up to two trailing slashes, so `/foo/` is
+  // Trailing slash — rou3 ignores at most one trailing slash, so `/foo/` is
   // `/foo` (no empty last segment), and a trailing `*` is optional. URLPattern
   // matches `/foo/` with an empty capture and rejects `/foo` for `/foo/*`.
   // routeToRegExp reproduces the router here (#200).
@@ -143,6 +125,10 @@ const KNOWN_DIFFS = new Set([
 
   // Case-insensitive match — rou3 is case-sensitive
   "/foo/bar → /FOO/BAR [match]",
+
+  // Percent-encoding — URLPattern encodes the input (`/café` is
+  // `/caf%C3%A9`), rou3 matches it as given
+  "/caf%C3%A9 → /café [match]",
 
   // `*/` patterns — URLPattern treats `*` as catch-all
   "*/* → foo/bar [match]",
@@ -178,7 +164,8 @@ const KNOWN_DIFFS = new Set([
 
 // Valid URLPattern syntax rou3 has no meaning for (yet): every strategy
 // throws a `rou3:` error for these patterns instead of matching with a
-// different meaning (modifiers on `*` / an unnamed group, group repetition).
+// different meaning (modifiers on `*` / an unnamed group, group repetition,
+// a `/` in a constraint, Unicode param names).
 const RESERVED_PATTERNS = new Set([
   "/foo/(.*)?",
   "/foo/*?",
@@ -187,6 +174,14 @@ const RESERVED_PATTERNS = new Set([
   "/foo/(.*)*",
   "/foo{/bar}+",
   "/foo{/bar}*",
+  // A `/` inside a constraint: the pattern is split on `/` first
+  "/foo/([^\\/]+?)",
+  // Unicode param names: rou3 names are ASCII, and a non-ASCII char right
+  // after one throws instead of ending it
+  "/:café",
+  "/:℘",
+  "/:㐀",
+  "test/:a𐑐b",
 ]);
 
 // Additional known diffs specific to router-based matching (addRoute+findRoute / compileRouter)
@@ -331,8 +326,9 @@ describe("wpt urlpattern compatibility", () => {
             const { matched, params } = strategy.match(test.pattern, test.input!);
 
             if (!test.expectedMatch) {
-              // rou3 allows trailing slash — acceptable difference
-              if (matched && test.input!.endsWith("/")) return;
+              // rou3 ignores one trailing slash — acceptable difference (a
+              // second one is an empty last segment)
+              if (matched && test.input!.endsWith("/") && !test.input!.endsWith("//")) return;
               expect(matched, `"${test.input}" should not match pattern "${test.pattern}"`).toBe(
                 false,
               );
@@ -353,4 +349,56 @@ describe("wpt urlpattern compatibility", () => {
       });
     });
   }
+});
+
+// Not in the WPT data: a `:name` / `:name+` needs a value, as in URLPattern
+// (#229). `[pattern, input, groups]`, `null` for no match; checked against
+// the runtime's URLPattern where it has one.
+const EMPTY_SEGMENT_CASES: [string, string, Record<string, string> | null][] = [
+  ["/foo/:bar", "/foo//", null],
+  ["/foo/:bar+", "/foo//", null],
+  ["/foo/:bar?", "/foo//", null],
+  ["/foo{/:bar}?", "/foo//", null],
+  ["/foo/:bar/baz", "/foo//baz", null],
+  ["/foo/pre-:bar", "/foo/pre-", null],
+  ["/foo/:bar", "/foo/a", { bar: "a" }],
+  ["/foo/:bar+", "/foo/a/b", { bar: "a/b" }],
+];
+
+// Where rou3 still differs (see the README): a `:name*` takes an empty segment
+// (URLPattern's needs a value in each), and `:name+` / `:name*` / `**` take
+// empty segments between others.
+const EMPTY_SEGMENT_DIFFS: [string, string, Record<string, string>][] = [
+  ["/foo/:bar*", "/foo//", { bar: "" }],
+  ["/foo/:bar+", "/foo////", { bar: "//" }],
+  ["/foo/:bar+", "/foo//a", { bar: "/a" }],
+];
+
+describe("wpt urlpattern compatibility: empty segments", () => {
+  const URLPatternCtor = (globalThis as { URLPattern?: any }).URLPattern;
+  for (const strategy of strategies) {
+    for (const [pattern, input, groups] of EMPTY_SEGMENT_CASES) {
+      it(`${strategy.name}: ${pattern} → ${input}`, () => {
+        const { matched, params } = strategy.match(pattern, input);
+        expect(matched ? params : null).toEqual(groups);
+      });
+    }
+    for (const [pattern, input, groups] of EMPTY_SEGMENT_DIFFS) {
+      it(`${strategy.name}: ${pattern} → ${input} (rou3 only)`, () => {
+        const { matched, params } = strategy.match(pattern, input);
+        expect(matched ? params : null).toEqual(groups);
+      });
+    }
+  }
+
+  it.runIf(URLPatternCtor)("agrees with URLPattern", () => {
+    for (const [pattern, input, groups] of EMPTY_SEGMENT_CASES) {
+      const result = new URLPatternCtor({ pathname: pattern }).exec({ pathname: input });
+      expect(result ? result.pathname.groups : null, `${pattern} → ${input}`).toEqual(groups);
+    }
+    for (const [pattern, input] of EMPTY_SEGMENT_DIFFS) {
+      const result = new URLPatternCtor({ pathname: pattern }).exec({ pathname: input });
+      expect(result, `${pattern} → ${input}`).toBeNull();
+    }
+  });
 });

@@ -100,8 +100,38 @@ describe("benchmark", () => {
     // +~69B raw / +~44B gzip: regex chars outside a group in a dynamic segment
     // (`*$`, `^:id`, `x|:y`, a stray `)`) are literals, and a backreference in
     // a constraint throws (review of #228: both made the regex match less).
-    expect(bytes).toBeLessThanOrEqual(9910); // <9.91kb
-    expect(gzipSize).toBeLessThanOrEqual(4130); // <4.13kb
+    // +~94B raw / +~25B gzip: param names are `[A-Za-z_]\w*` (a `-` ends one,
+    // a digit can't start one, a non-ASCII char can't follow one), and a raw
+    // `?` in a static segment, a mid-segment `**` and an unnamed group inside
+    // a constraint throw (URLPattern alignment, #229); a `:` inside a group
+    // (`(?:…)`) is no param.
+    // +~58B raw / +~37B gzip: a nested `(?<name>…)` in a constraint throws
+    // too, a `?` guard skips the static-segment scan, and the modifier error
+    // names the escape (review of #229).
+    // +~271B raw / +~126B gzip: a `:name` / `:name+` needs a value, as in
+    // URLPattern (#229): `emptyParam` rejects matches that give one `""`,
+    // `findRoute` sends paths with an empty segment through the
+    // `findAllRoutes` walk (`_findRanked`, so the tree walk never checks), and
+    // `:name*` marks its `**:name` expansion, which may still be empty.
+    // +~68B raw / +~25B gzip: addRoute rejects U+FFFD-U+FFFF, the internal
+    // placeholders a route could write as syntax (`\uFFFD0` as an escaped `:`,
+    // the `:name*` marker).
+    // +~13B raw / +~4B gzip: `**:name?` throws (it read the `**` as text
+    // before the param and gave an undeclared `_`).
+    // +~62B raw / +~35B gzip: a `{` / `}` ends a param name, as in URLPattern
+    // (`scanFirstGroup` escapes a name char after one; `/:a{b}?` was `:ab`).
+    // +1B: a `$` right after a name throws (part of it in URLPattern).
+    // +~20B raw / +~2B gzip: the modifier error says where `?` and `+` / `*`
+    // go (it said a whole-segment `:name` for all three, wrong for `pre-:x?`).
+    // +18B raw / +6B gzip: an invalid param name is quoted without `\`s
+    // (`/a/**:x{s}?` named `x\s`, an escape `scanFirstGroup` added).
+    // +32B raw / +17B gzip: the modifier error names `:name(…)` and says no
+    // modifier follows a `**:name` (it read as wrong for `/p/**:i?`).
+    // +39B raw / +18B gzip: the quoted name drops only the `\` a group put
+    // before a name char outside a constraint (`**:x(\d+)` read `x(d+)`) and
+    // decodes the escape placeholders (`**:x\:y` read `x\uFFFD0y`).
+    expect(bytes).toBeLessThanOrEqual(10550); // <10.56kb
+    expect(gzipSize).toBeLessThanOrEqual(4410); // <4.41kb
   });
 });
 

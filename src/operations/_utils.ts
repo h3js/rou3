@@ -52,6 +52,10 @@ export function segmentKey(segment: string): string | 1 | 2 {
 }
 
 /**
+ * Throws on U+FFFD-U+FFFF: internal placeholders (`encodeEscapes`, `\uFFFE` in
+ * `getParamRegexp`, the `:name*` marker of `expandModifiers`), which a route
+ * could otherwise write as syntax (`\uFFFD0` read as an escaped `:`).
+ *
  * Throws when a `(...)` group in `route` never closes (`/files/(2024`, #199)
  * or contains a `/` (`:id([^/]+)`): the pattern is split on `/` before groups
  * are read, which cut it in two. Either way `new RegExp` threw a raw
@@ -60,16 +64,20 @@ export function segmentKey(segment: string): string | 1 | 2 {
  * `\` that escapes no char of its segment (a `\/` or a trailing `\`), and on
  * a `^` / `$` / look-around in a group: the tree tests a segment on its own,
  * where they see its ends, and `routeToRegExp` inline, where they see the rest
- * of the path (#227). Called by `addRoute` (and so by `routeToRegExp`). A
- * stray `)` stays a literal.
+ * of the path (#227), and on a capturing group inside a group (a stray
+ * numbered or named param; only `(?:…)` is fine). Called by `addRoute` (and
+ * so by `routeToRegExp`). A stray `)` stays a literal.
  *
  * Escapes are dropped first (`\(` is no group; `\/` stays, the split cuts
- * there too), then balanced `/`-free groups innermost-out, so any `(` left
- * does not close in its own segment, and any `\` left escapes nothing. Braces
- * inside a group are regex.
+ * there too), then balanced `/`-free groups innermost-out (a capturing one
+ * leaves a `\0`, like a backreference, in the group around it), so any `(` left does not close in its own segment, and any `\` left
+ * escapes nothing. Braces inside a group are regex.
  */
 export function checkConstraints(route: string): void {
-  if (!/[\\({}]/.test(route)) return;
+  if (!/[\\({}\uFFFD-\uFFFF]/.test(route)) return;
+  if (/[\uFFFD-\uFFFF]/.test(route)) {
+    invalidSyntax("a U+FFFD-U+FFFF char", route);
+  }
   // `\1`-`\9` -> `\0` (a backreference), any other escape -> `_` (a literal,
   // so `\(?=` is no look-ahead)
   let s = route.replace(/\\([^/])/g, (_, c) => (c > "0" && c <= "9" ? "\0" : "_"));
@@ -77,9 +85,13 @@ export function checkConstraints(route: string): void {
     s !==
     (s = s.replace(/\([^()/]*\)/g, (group) => {
       if (/[$^\0]|^\(\?<?[=!]/.test(group.replace(/\[[^\]]*\]/g, ""))) {
-        invalidSyntax("an anchor, look-around or backreference in a constraint", route);
+        invalidSyntax(
+          "an anchor, look-around, backreference or capturing group in a constraint",
+          route,
+        );
       }
-      return "";
+      // Only a `(?:…)` may sit inside a constraint (a look-around threw above)
+      return group[1] === "?" && group[2] !== "<" ? "" : "\0";
     }))
   );
   if (s.includes("(")) {
@@ -103,34 +115,65 @@ export function invalidSyntax(what: string, route: string): never {
   throw new Error(`rou3: ${what} (${route})`);
 }
 
-/** `?` / `+` / `*` anywhere but after a whole-segment `:name` (see README). */
-export const MISPLACED_MODIFIER = "a `?` / `+` / `*` modifier must follow a whole-segment `:name`";
+/**
+ * `?` / `+` / `*` anywhere but after a whole-segment `:name` (a `?` also after
+ * `:name(…)` or in a mixed segment; none after `**:name`), which covers a raw
+ * `?` in plain text and a `**` in the middle of a segment too (one message,
+ * bundle size; see README).
+ */
+export const MISPLACED_MODIFIER =
+  "misplaced `?` / `+` / `*`: `?` follows `:name` or `:name(…)`, `+` / `*` a whole-segment `:name`, not `**:name`; escape a literal one with `\\`";
 
 /**
  * Expand the first `?` / `+` / `*` modifier of a param into the routes it
- * stands for. `+` / `*` repeat a whole-segment `:name` only: `input` (quoted
- * in the error) repeating a constrained param (`:x(\\d+)+`) or part of a
- * segment (`pre-:x+`) dropped the constraint / the rest of the segment.
+ * stands for. A `?` on a param that does not start its segment makes only the
+ * param optional (`pre-:x?` is `pre-{:x}?`, as in URLPattern; `{pre-:x}?`
+ * drops the segment). `+` / `*` repeat a whole-segment `:name` only: `input`
+ * (quoted in the error) repeating a constrained param (`:x(\\d+)+`) or part
+ * of a segment (`pre-:x+`) throws: it would drop the constraint / the rest of
+ * the segment.
+ * A `?` on a `**:name` throws too (the `**` is no text before the param).
  */
 export function expandModifiers(segments: string[], input?: string): string[] | undefined {
   for (let i = 0; i < segments.length; i++) {
     const last = segments[i].charCodeAt(segments[i].length - 1);
     if (last !== 63 /* ? */ && last !== 43 /* + */ && last !== 42 /* * */) continue;
-    const m = segments[i].match(/^(.*:\w+(?:-\w+)*(?:\([^)]*\))?)([?+*])$/);
+    const m = segments[i].match(/^(.*)(:[A-Za-z_]\w*(?:\([^)]*\))?)([?+*])$/);
     if (!m) continue;
     const pre = segments.slice(0, i);
     const suf = segments.slice(i + 1);
-    if (m[2] === "?") {
-      return ["/" + pre.concat(m[1]).concat(suf).join("/"), "/" + pre.concat(suf).join("/")];
+    // Without the param: the text before it in its segment, or no segment
+    const without = "/" + pre.concat(m[1] || [], suf).join("/");
+    // A `**` before it is no text: `**:name?` throws like `**:name+`
+    if (m[3] === "?" && m[1] !== "**") {
+      return ["/" + pre.concat(m[1] + m[2], suf).join("/"), without];
     }
-    if (!/^:\w+(?:-\w+)*$/.test(m[1])) {
+    if (m[1] || m[2].includes("(")) {
       invalidSyntax(MISPLACED_MODIFIER, input!);
     }
-    const name = m[1].slice(1);
-    const wc = "/" + [...pre, `**:${name}`, ...suf].join("/");
-    const without = "/" + [...pre, ...suf].join("/");
-    return m[2] === "+" ? [wc] : [wc, without];
+    // A `:name*`'s `**:name` may capture `""`: marked `**:\uFFFFname`, no
+    // route syntax (see `emptyParam`)
+    const wc =
+      "/" + pre.concat(`**:${m[3] === "*" ? "\uFFFF" : ""}${m[2].slice(1)}`, suf).join("/");
+    return m[3] === "+" ? [wc] : [wc, without];
   }
+}
+
+/**
+ * Whether matching `m` on `segments` gives a `:name` an empty segment, or a
+ * `**:name` (`:name+`) an empty value: those need one, as in URLPattern. A
+ * `*`, a `**`, a `:name*` and a constraint (it decides: `:id(\d*)`) may be
+ * empty. Callers check only paths with an empty segment.
+ */
+export function emptyParam(m: MethodData<unknown>, segments: string[]): boolean {
+  const pMap = m.paramsMap;
+  const params = pMap && getMatchParams(segments, pMap, m.suffix)!;
+  // A `*` is named by a digit and a constraint is a RegExp (`/^…$/`), both
+  // `< ":"`; a `**` is `optional`
+  return !!pMap?.some(
+    ([, name, optional, empty]) =>
+      !optional && !empty && (name as string) > ":" && params![name as string] === "",
+  );
 }
 
 export function normalizePath(path: string): string {

@@ -661,6 +661,64 @@ describe("Router lookup", function () {
     );
   });
 
+  // `:name` and `:name+` need a value, as in URLPattern; `*`, `**`, `:name*`
+  // and a constraint that can match empty (`:id(\d*)`) still take an empty
+  // segment (#229).
+  describe("required params need a value", function () {
+    testRouter(
+      [
+        "/foo/:bar",
+        "/plus/:bar+",
+        "/star/*",
+        "/rep/:bar*",
+        "/opt/:x?",
+        "/mid/:x/b",
+        "/grp{/:x}?",
+        "/re/:id(\\d*)",
+        "/pre/pre-:x",
+        "/ww/**:p",
+        "/sfx/**:p/b",
+        "/sib/:x",
+        "/sib/*",
+      ],
+      undefined,
+      {
+        "/foo//": undefined,
+        "/foo/a": { data: { path: "/foo/:bar" }, params: { bar: "a" } },
+        "/plus//": undefined,
+        "/plus///": { data: { path: "/plus/:bar+" }, params: { bar: "/" } },
+        "/plus//a": { data: { path: "/plus/:bar+" }, params: { bar: "/a" } },
+        "/star//": { data: { path: "/star/*" }, params: { "0": "" } },
+        "/rep//": { data: { path: "/rep/:bar*" }, params: { bar: "" } },
+        "/rep": { data: { path: "/rep/:bar*" } },
+        "/opt//": undefined,
+        "/opt/": { data: { path: "/opt/:x?" } },
+        "/mid//b": undefined,
+        "/grp//": undefined,
+        "/re//": { data: { path: "/re/:id(\\d*)" }, params: { id: "" } },
+        "/pre/pre-": undefined,
+        "/ww//": undefined,
+        "/ww///": { data: { path: "/ww/**:p" }, params: { p: "/" } },
+        "/sfx//b": undefined,
+        "/sfx///b": { data: { path: "/sfx/**:p/b" }, params: { p: "/" } },
+        "/sib//": { data: { path: "/sib/*" }, params: { "0": "" } },
+        "/sib/a": { data: { path: "/sib/:x" }, params: { x: "a" } },
+      },
+    );
+
+    // Params after a `**` (matched from the end of the path) too
+    testRouter(["/**/:file"], undefined, {
+      "//": undefined,
+      "/a/": { data: { path: "/**/:file" }, params: { _: "", file: "a" } },
+      "/a//": undefined,
+    });
+    testRouter(["/x/**/:y/z"], undefined, {
+      "/x//z": undefined,
+      "/x/a//z": undefined,
+      "/x/a/b/z": { data: { path: "/x/**/:y/z" }, params: { _: "a", y: "b" } },
+    });
+  });
+
   describe("empty segments", function () {
     testRouter(
       ["/test//route", "/test/:param/route"],

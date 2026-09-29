@@ -178,63 +178,13 @@ describe("route matching", () => {
   });
 });
 
-describe("hyphenated param names", () => {
-  const router = createRouter([
-    "/users/:user-id",
-    "/users/:user-id/posts/:post-id",
-    "/items/:item-name/details",
-  ]);
-
-  const compiledLookup = compileRouter(router);
-
-  const lookups = [
-    {
-      name: "findRoute",
-      match: (method: string, path: string) => findRoute(router, method, path),
-    },
-    {
-      name: "compiledLookup",
-      match: (method: string, path: string) => compiledLookup(method, path),
-    },
-  ];
-
-  for (const { name, match } of lookups) {
-    it(`match hyphenated params with ${name}`, () => {
-      expect(match("GET", "/users/123")).toMatchObject({
-        data: { path: "/users/:user-id" },
-        params: { "user-id": "123" },
-      });
-      expect(match("GET", "/users/abc/posts/456")).toMatchObject({
-        data: { path: "/users/:user-id/posts/:post-id" },
-        params: { "user-id": "abc", "post-id": "456" },
-      });
-      expect(match("GET", "/items/widget/details")).toMatchObject({
-        data: { path: "/items/:item-name/details" },
-        params: { "item-name": "widget" },
-      });
-      // Hyphenated param should still be single-segment
-      expect(match("GET", "/users/foo/bar")).not.toMatchObject({
-        data: { path: "/users/:user-id" },
-      });
-    });
-  }
-});
-
 describe("param names that are not valid capture-group names", () => {
-  // Param names accept `\w+(?:-\w+)*`, but a JS/PCRE capture group name must be an
-  // identifier (no `-`, no leading digit). Whole-segment params store the name
-  // as a plain string key and always worked; every regex-compiled position
-  // (mixed segments, inline constraints, segment wildcards) used to emit the
-  // raw name as `(?<test-id>…)` and throw `SyntaxError: Invalid capture group
-  // name` from addRoute().
-  const router = createRouter([
-    "/files/:file-name.json",
-    "/blog/:post-id(\\d+)",
-    "/n/:0.txt",
-    "/mix/:a-b.:a_b",
-    "/run/:a-_b.:a_-b",
-    "/w/:file-name.*",
-  ]);
+  // Every param name is an identifier (`[A-Za-z_]\w*`), but `_N`-shaped ones
+  // (the unnamed-capture form of `routeToRegExp`) and the reserved `__rou3_`
+  // space are escaped as capture-group names in every regex-compiled position
+  // (mixed segments, inline constraints, segment wildcards), and must surface
+  // under their original names, distinct from the unnamed captures.
+  const router = createRouter(["/n/:_0.txt", "/c/:_1(\\d+)", "/w/:_0.*", "/r/:__rou3_unnamed_0.*"]);
 
   const compiledLookup = compileRouter(router);
 
@@ -245,42 +195,29 @@ describe("param names that are not valid capture-group names", () => {
 
   for (const { name, match } of lookups) {
     it(`params surface under their original names (${name})`, () => {
-      expect(match("GET", "/files/readme.json")).toMatchObject({
-        data: { path: "/files/:file-name.json" },
-        params: { "file-name": "readme" },
-      });
-      expect(match("GET", "/blog/123")).toMatchObject({
-        data: { path: "/blog/:post-id(\\d+)" },
-        params: { "post-id": "123" },
-      });
-      expect(match("GET", "/blog/abc")).toBeUndefined();
       expect(match("GET", "/n/42.txt")).toMatchObject({
-        data: { path: "/n/:0.txt" },
-        params: { "0": "42" },
+        data: { path: "/n/:_0.txt" },
+        params: { _0: "42" },
       });
-      // Distinct names must stay distinct through the escape. A `-` -> `_`
-      // sanitize collapses `a-b`/`a_b` onto one group name and makes
-      // `a-_b`/`a_-b` a duplicate group (SyntaxError).
-      expect(match("GET", "/mix/x.y")).toMatchObject({
-        data: { path: "/mix/:a-b.:a_b" },
-        params: { "a-b": "x", a_b: "y" },
+      expect(match("GET", "/c/123")).toMatchObject({
+        data: { path: "/c/:_1(\\d+)" },
+        params: { _1: "123" },
       });
-      expect(match("GET", "/run/x.y")).toMatchObject({
-        data: { path: "/run/:a-_b.:a_-b" },
-        params: { "a-_b": "x", "a_-b": "y" },
-      });
-      // Escaped name alongside an unnamed segment wildcard capture.
-      expect(match("GET", "/w/logo.dark")).toMatchObject({
-        data: { path: "/w/:file-name.*" },
-        params: { "file-name": "logo", "0": "dark" },
+      expect(match("GET", "/c/abc")).toBeUndefined();
+      // Escaped names alongside an unnamed segment wildcard capture.
+      expect(match("GET", "/w/logo.dark")?.params).toEqual({ _0: "logo", "0": "dark" });
+      expect(match("GET", "/r/logo.dark")?.params).toEqual({
+        __rou3_unnamed_0: "logo",
+        "0": "dark",
       });
     });
   }
 });
 
-describe("param names end before a `-` that no word char follows", () => {
-  // A name is `\w+(?:-\w+)*`: a `-` belongs to it only between word chars.
-  // `[\w-]+` swallowed the `-` of `:year-:month` (`{ "year-": "2024-0" }`).
+describe("a `-` ends a param name", () => {
+  // A name is `[A-Za-z_]\w*`, as in URLPattern: `:test-id` is `:test` and a
+  // literal `-id` (it was a param `test-id`). `[\w-]+` before that swallowed
+  // the `-` of `:year-:month` (`{ "year-": "2024-0" }`).
   const router = createRouter([
     "/blog/:year-:month",
     "/post/:id{-:title}?",
@@ -289,6 +226,10 @@ describe("param names end before a `-` that no word char follows", () => {
     "/d/pre-:x\\-suf",
     "/e/:test-id",
     "/f/:x-(\\d+)",
+    "/g/:name-suffix",
+    "/h/:test\\-id",
+    "/users/:user-id/posts/:post-id",
+    "/i/:id\\$",
   ]);
   const compiledLookup = compileRouter(router);
   const lookups = [
@@ -303,12 +244,132 @@ describe("param names end before a `-` that no word char follows", () => {
       expect(match("GET", "/a/b-")?.params).toEqual({ x: "b" });
       expect(match("GET", "/a/b")).toBeUndefined();
       expect(match("GET", "/b/b-/c")?.params).toEqual({ x: "b" });
-      // An escaped `-` ends the name too.
       expect(match("GET", "/d/pre-b-suf")?.params).toEqual({ x: "b" });
-      // A `-` between word chars is still part of the name.
-      expect(match("GET", "/e/abc")?.params).toEqual({ "test-id": "abc" });
+      // `:test-id` is `:test` then `-id`, with or without escaping the `-`.
+      expect(match("GET", "/e/abc")).toBeUndefined();
+      expect(match("GET", "/e/abc-id")?.params).toEqual({ test: "abc" });
+      expect(match("GET", "/h/abc-id")?.params).toEqual({ test: "abc" });
+      expect(match("GET", "/g/foo-suffix")?.params).toEqual({ name: "foo" });
+      expect(match("GET", "/users/1-id/posts/2-id")?.params).toEqual({ user: "1", post: "2" });
+      expect(match("GET", "/users/1/posts/2")).toBeUndefined();
       // `:x-(\d+)` is `:x`, `-` and an unnamed group, as in URLPattern.
       expect(match("GET", "/f/1-2")?.params).toEqual({ x: "1", "0": "2" });
+      // An escaped `$` is a literal (`/i/:id$` throws: `id$` is one name in URLPattern).
+      expect(match("GET", "/i/1$")?.params).toEqual({ id: "1" });
+    });
+  }
+});
+
+describe("a `{` / `}` ends a param name", () => {
+  // As in URLPattern (and `InferRouteParams`): group expansion joined the text
+  // after a `{` / `}` onto the name (`/:a{b}?` gave `{ ab: "x" }` on `/x`).
+  const routes = [
+    "/o/:a{b}?",
+    "/r/:a{b}",
+    "/e/:foo{}bar",
+    "/c/{:a}b",
+    "/w/:a{-x}?y",
+    "/x/:a{-:b}?",
+  ];
+  const router = createRouter(routes);
+  const compiledLookup = compileRouter(router);
+  // eslint-disable-next-line no-new-func
+  const aotLookup = new Function(
+    `return ${compileRouterToString(router)}`,
+  )() as typeof compiledLookup;
+  const lookups = [
+    { name: "findRoute", match: (p: string) => findRoute(router, "GET", p) },
+    { name: "compiledLookup", match: (p: string) => compiledLookup("GET", p) },
+    { name: "aotLookup", match: (p: string) => aotLookup("GET", p) },
+  ];
+  for (const { name, match } of lookups) {
+    it(`reads the text after it as a literal (${name})`, () => {
+      expect(match("/o/x")?.params).toEqual({ a: "x" });
+      expect(match("/o/xb")?.params).toEqual({ a: "x" });
+      expect(match("/r/xb")?.params).toEqual({ a: "x" });
+      expect(match("/r/x")).toBeUndefined();
+      expect(match("/e/xbar")?.params).toEqual({ foo: "x" });
+      expect(match("/e/x")).toBeUndefined();
+      expect(match("/c/xb")?.params).toEqual({ a: "x" });
+      expect(match("/w/qy")?.params).toEqual({ a: "q" });
+      expect(match("/w/q-xy")?.params).toEqual({ a: "q" });
+      expect(match("/x/q")?.params).toEqual({ a: "q" });
+      expect(match("/x/q-r")?.params).toEqual({ a: "q", b: "r" });
+    });
+  }
+
+  it("removes by the pattern as written", () => {
+    const r = createRouter(routes);
+    for (const route of routes) removeRoute(r, "GET", route);
+    expect(r.root).toEqual(createEmptyRouter().root);
+  });
+});
+
+describe("params sharing a segment (URLPattern)", () => {
+  const router = createRouter([
+    "/a/:a-:b",
+    "/n/:name.:ext",
+    "/c/:a:b",
+    "/w/:a-*",
+    "/v/*-:a",
+    "/f/:name{.:ext}?",
+    "/p/pre-:x?",
+    "/d/pre-:x(\\d+)?",
+    "/m/pre-:x?/end",
+    "/s/{pre-:x}?",
+    "/e/:a:b?",
+    "/g/*-:x?",
+    "/h/:a(\\d+)-:x?",
+  ]);
+  const compiledLookup = compileRouter(router);
+  // eslint-disable-next-line no-new-func
+  const aotLookup = new Function(
+    `return ${compileRouterToString(router)}`,
+  )() as typeof compiledLookup;
+  const lookups = [
+    { name: "findRoute", match: (p: string) => findRoute(router, "GET", p) },
+    { name: "compiledLookup", match: (p: string) => compiledLookup("GET", p) },
+    { name: "aotLookup", match: (p: string) => aotLookup("GET", p) },
+  ];
+  for (const { name, match } of lookups) {
+    it(`the first param takes as little as possible (${name})`, () => {
+      expect(match("/a/x-y-z")?.params).toEqual({ a: "x", b: "y-z" });
+      expect(match("/n/a.tar.gz")?.params).toEqual({ name: "a", ext: "tar.gz" });
+      expect(match("/c/xyz")?.params).toEqual({ a: "x", b: "yz" });
+      // A `*` stays greedy (URLPattern's `(.*)`).
+      expect(match("/w/x-y-z")?.params).toEqual({ a: "x", "0": "y-z" });
+      expect(match("/v/x-y-z")?.params).toEqual({ "0": "x-y", a: "z" });
+      expect(match("/f/archive.tar.gz")?.params).toEqual({ name: "archive", ext: "tar.gz" });
+      expect(match("/f/archive")?.params).toEqual({ name: "archive" });
+    });
+
+    it(`\`pre-:x?\` makes only the param optional (${name})`, () => {
+      // The route without the param is static (no `params`).
+      expect(match("/p/pre-")?.data).toEqual({ path: "/p/pre-:x?" });
+      expect(match("/p/pre-a")?.params).toEqual({ x: "a" });
+      expect(match("/p")).toBeUndefined();
+      expect(match("/d/pre-")?.data).toEqual({ path: "/d/pre-:x(\\d+)?" });
+      expect(match("/d/pre-12")?.params).toEqual({ x: "12" });
+      expect(match("/d/pre-a")).toBeUndefined();
+      expect(match("/d")).toBeUndefined();
+      expect(match("/m/pre-/end")?.data).toEqual({ path: "/m/pre-:x?/end" });
+      expect(match("/m/pre-1/end")?.params).toEqual({ x: "1" });
+      expect(match("/m/end")).toBeUndefined();
+      // `{pre-:x}?` makes the whole segment optional.
+      expect(match("/s")?.data).toEqual({ path: "/s/{pre-:x}?" });
+      expect(match("/s/pre-a")?.params).toEqual({ x: "a" });
+      expect(match("/s/pre-")).toBeUndefined();
+      // The route without `b` is `/e/:a`, which needs a value too.
+      expect(match("/e/")).toBeUndefined();
+      expect(match("/e//")).toBeUndefined();
+      expect(match("/e/x")?.params).toEqual({ a: "x" });
+      expect(match("/e/xyz")?.params).toEqual({ a: "x", b: "yz" });
+      // A greedy `*` or a constraint before it: the route with the param wins.
+      expect(match("/g/a-b-")?.params).toEqual({ "0": "a", x: "b-" });
+      expect(match("/g/a-")?.params).toEqual({ "0": "a" });
+      expect(match("/g/--")?.params).toEqual({ "0": "", x: "-" });
+      expect(match("/h/1-")?.params).toEqual({ a: "1" });
+      expect(match("/h/1-a")?.params).toEqual({ a: "1", x: "a" });
     });
   }
 });
@@ -625,13 +686,10 @@ describe("data slots above the argument limit (compiled)", () => {
 
 describe("regex constraints with embedded groups (compiled parity)", () => {
   const router = createEmptyRouter<{ path: string }>();
-  addRoute(router, "GET", "/c/:id(a(?<extra>b)?c)", { path: "INNER-NAMED" });
+  addRoute(router, "GET", "/c/:id(a(?:b)?c)", { path: "INNER-NONCAPTURING" });
   addRoute(router, "GET", "/m/:a(\\d+)/:b([a-z]+)", { path: "MULTI" });
   addRoute(router, "GET", "/n/:num(\\d+)", { path: "WHOLE" });
   addRoute(router, "GET", "/file/*.png", { path: "MID-WILDCARD" });
-  // Unicode group name: unsafe as a `.name` access, takes the
-  // `_normalizeGroups` runtime-fallback codegen path
-  addRoute(router, "GET", "/uni/:id(a(?<é>b)c)", { path: "UNI-FALLBACK" });
   const compiledLookup = compileRouter(router);
 
   const lookups = [
@@ -641,14 +699,8 @@ describe("regex constraints with embedded groups (compiled parity)", () => {
 
   for (const { name, match } of lookups) {
     it(`resolves nested and multiple regex groups (${name})`, () => {
-      expect(match("GET", "/c/abc")).toMatchObject({
-        data: { path: "INNER-NAMED" },
-        params: { id: "abc", extra: "b" },
-      });
-      expect(match("GET", "/c/ac")).toMatchObject({
-        data: { path: "INNER-NAMED" },
-        params: { id: "ac" },
-      });
+      expect(match("GET", "/c/abc")?.params).toEqual({ id: "abc" });
+      expect(match("GET", "/c/ac")?.params).toEqual({ id: "ac" });
       expect(match("GET", "/c/ax")).toBeUndefined();
       expect(match("GET", "/m/12/ab")).toMatchObject({
         data: { path: "MULTI" },
@@ -664,11 +716,6 @@ describe("regex constraints with embedded groups (compiled parity)", () => {
         data: { path: "MID-WILDCARD" },
         params: { "0": "logo" },
       });
-      expect(match("GET", "/uni/abc")).toMatchObject({
-        data: { path: "UNI-FALLBACK" },
-        params: { id: "abc", é: "b" },
-      });
-      expect(match("GET", "/uni/axc")).toBeUndefined();
     });
   }
 
@@ -769,8 +816,10 @@ describe("at most one trailing slash is ignored (#209)", () => {
         expect(match("GET", "//")).toBeUndefined();
         expect(match("GET", "/users/123/")).toMatchObject({ params: { id: "123" } });
         expect(match("GET", "/users/123//")).toBeUndefined();
-        // a slash after a real empty last segment is still the one ignored
-        expect(match("GET", "/users//")).toMatchObject({ params: { id: "" } });
+        // a slash after a real empty last segment is still the one ignored,
+        // and a `:name` needs a value
+        expect(match("GET", "/users//")).toBeUndefined();
+        expect(match("GET", "/opt/a/")).toMatchObject({ params: { _: "a" } });
         expect(match("GET", "/users/")).toBeUndefined();
         expect(match("GET", "/opt/a//")).toMatchObject({ params: { _: "a/" } });
       });
@@ -1114,4 +1163,75 @@ describe("falsy route data is kept", () => {
       });
     }
   }
+});
+
+// Paths with an empty segment take `findAllRoutes`' walk in `findRoute` (a
+// `:name` / `**:name` can't take one, #229), while the compiled matchers
+// guard each param: both must still pick the same route, and list the same
+// ones. Routers are random (seeded) picks from a pool, some method-agnostic.
+describe("empty segments (compiled parity, sweep)", () => {
+  const pool = [
+    "/a/:x",
+    "/a/*",
+    "/:x/b",
+    "/a/:x/b",
+    "/a//b",
+    "/a/**",
+    "/a/**:r",
+    "/a/:y*",
+    "/a/:z+/b",
+    "/**/:f",
+    "/**/b",
+    "/:x",
+    "/*",
+    "/a/:x?",
+    "/a{/:x}?/b",
+    "/a/:id(\\d*)",
+    "/a/:id(\\d+)",
+    "/a/pre-:x",
+    "/**",
+    "/a/b",
+    "/:x/:y",
+    "/*/:y",
+    "/a/**/:y",
+    "/:x/**:r",
+    "/a/:x/*",
+  ];
+  const paths = ["/", "//"];
+  for (let depth = 1, prev = [""]; depth <= 3; depth++) {
+    prev = prev.flatMap((path) => ["a", "b", "", "1", "pre-"].map((s) => `${path}/${s}`));
+    paths.push(...prev);
+  }
+
+  it("findRoute / findAllRoutes agree with JIT and AOT", () => {
+    let seed = 7;
+    const random = () => (seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648) / 2_147_483_648;
+    const failures: string[] = [];
+    for (let n = 0; n < 150; n++) {
+      const router = createEmptyRouter<string>();
+      const routes = pool.filter(() => random() < 0.25);
+      for (const route of routes) addRoute(router, random() < 0.3 ? "" : "GET", route, route);
+      const jit = compileRouter(router);
+      const jitAll = compileRouter(router, { matchAll: true });
+      const aot = new Function(`return ${compileRouterToString(router)}`)();
+      for (const path of paths) {
+        const found = findRoute(router, "GET", path);
+        const expected = JSON.stringify(found && { data: found.data, params: found.params });
+        for (const [name, match] of [
+          ["jit", jit("GET", path)],
+          ["aot", aot("GET", path)],
+        ]) {
+          if (JSON.stringify(match) !== expected) {
+            failures.push(`${name} [${routes}] ${path}: ${JSON.stringify(match)} vs ${expected}`);
+          }
+        }
+        const all = findAllRoutes(router, "GET", path).map((m) => m.data);
+        const compiledAll = jitAll("GET", path).map((m) => m.data);
+        if (JSON.stringify(all) !== JSON.stringify(compiledAll)) {
+          failures.push(`matchAll [${routes}] ${path}: ${compiledAll} vs ${all}`);
+        }
+      }
+    }
+    expect(failures.slice(0, 10)).toEqual([]);
+  });
 });

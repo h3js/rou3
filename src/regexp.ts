@@ -2,7 +2,14 @@ import { expandGroupDelimiters, scanFirstGroup } from "./_group-delimiters.ts";
 import { toGroupName } from "./_group-names.ts";
 import { createRouter } from "./context.ts";
 import { addRoute, getParamRegexp } from "./operations/add.ts";
-import { encodeEscapes, expandModifiers, segmentKey, splitRoute } from "./operations/_utils.ts";
+import {
+  decodeEscapes,
+  encodeEscapes,
+  expandModifiers,
+  segmentKey,
+  splitRoute,
+} from "./operations/_utils.ts";
+import { appendsCleanly } from "./_optional-append.ts";
 import { canBeEmpty, isOptionalGroups } from "./_regexp-scan.ts";
 import { openOptionals, withTrailingSlash } from "./_trailing-slash.ts";
 
@@ -11,7 +18,8 @@ import { openOptionals, withTrailingSlash } from "./_trailing-slash.ts";
 // U+2028 and U+2029, PCRE and RE2 by default only `\n`). `[\s\S]` is any char
 // in all of them.
 const ANY = "[\\s\\S]*";
-const LAZY_ANY = "[\\s\\S]*?";
+// A `**:name` / `:name+`, which needs a value (see `emptyParam`)
+const SOME = "[\\s\\S]+";
 
 /**
  * Convert a rou3 route pattern into an anchored {@link RegExp}.
@@ -27,7 +35,8 @@ const LAZY_ANY = "[\\s\\S]*?";
  *
  * The regex matches exactly the paths `findRoute()` matches for a router holding
  * only `route` — including the router's tolerances: one optional trailing slash,
- * empty segments for `:name` / `*` params, and an optional trailing `*` — so it
+ * empty segments for `*` / `**` (a `:name` / `:name+` needs a value), and an
+ * optional trailing `*` — so it
  * can stand in for the router as a guard or scope check. Not modeled: param
  * constraints that can match `/` (`(.*)`: the tree splits on `/` first, so
  * the regex matches more paths, never fewer), the empty path, and
@@ -62,7 +71,8 @@ const LAZY_ANY = "[\\s\\S]*?";
  *
  * @example
  * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)\/?$/
- * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+))?\/?$/
+ * routeToRegExp("/blog/:id(\\d+){-:title}?"); // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+?))?\/?$/
+ * routeToRegExp("/v:version?"); // /^\/v(?:(?<version>[^/]+?))?\/?$/
  */
 export function routeToRegExp(route: string = "/"): RegExp {
   if (route.charCodeAt(0) !== 47 /* '/' */) {
@@ -76,11 +86,20 @@ export function routeToRegExp(route: string = "/"): RegExp {
 
 /** `routeToRegExp` of `route`, an expansion of `input` (quoted in errors). */
 function toRegExp(route: string, input: string): RegExp {
+  // A `?` on a param that does not start its segment makes only the param
+  // optional (see `expandModifiers`). Where it can't compile in place,
+  // `*-:x?` is `*-{:x}?`; in a route with groups already, it is read once
+  // they are expanded (an escaped `\{` or a `{}` quantifier in a constraint is
+  // no group).
+  const inSegment = inSegmentOptional(route, input);
+  if (inSegment !== route && !scanFirstGroup(route)) {
+    route = inSegment;
+  }
   // Compile a single optional group (`{...}?`) inline as `(?:...)?`
   // instead of expanding it into an alternation of full routes. The alternation
   // form re-emits every param before the group in both branches, producing
   // duplicate named groups that PCRE2-family engines reject.
-  const inlineOptional = inlineOptionalGroup(route, input);
+  const inlineOptional = inSegment === route && inlineOptionalGroup(route, input);
   if (inlineOptional) {
     return inlineOptional;
   }
@@ -121,6 +140,46 @@ function toRegExp(route: string, input: string): RegExp {
   }
 
   return _routeToRegExp(route, input);
+}
+
+/**
+ * `route` with every in-segment optional param (`pre-:x?`, see
+ * `expandModifiers`) that can't compile in place written as the group it
+ * stands for (`*-:x?` as `*-{:x}?`, see `inPlaceOptional`), read with escapes
+ * encoded and split like `addRoute` (`splitRoute`). In a route with groups
+ * already, `toRegExp` expands them first.
+ */
+function inSegmentOptional(route: string, input: string): string {
+  if (!route.includes("?")) return route;
+  // Split like `addRoute`: `**-:x?` is `**` then `*-:x?`
+  const encoded = "/" + splitRoute(encodeEscapes(route)).join("/");
+  const out = encoded.replace(
+    /(^|\/)([^/]*?)(:[A-Za-z_]\w*(?:\([^)]*\))?)\?(?=[/{}]|$)/g,
+    (all, sep, pre, param) =>
+      !pre || (!/[{}]/.test(pre) && inPlaceOptional(pre, param, input, 0))
+        ? all
+        : `${sep}${pre}{${param}}?`,
+  );
+  return out === encoded ? route : decodeEscapes(out, "\\");
+}
+
+/**
+ * The regex of an in-segment optional param `pre` + `param` + `?` (encoded),
+ * `pre(?:param)?`, or `undefined` where earlier captures could take the
+ * param's text (see `appendsCleanly`). `[regex, next unnamed index]`.
+ */
+function inPlaceOptional(
+  pre: string,
+  param: string,
+  input: string,
+  unnamed: number,
+): [string, number] | undefined {
+  const [regexp, next] = getParamRegexp(pre + param, unnamed, [], input, toRegExpUnnamedKey);
+  const source = regexp.source.slice(1, -1);
+  const at = source.lastIndexOf(`(?<${toGroupName(/\w+/.exec(param)![0])}>`);
+  const head = source.slice(0, at);
+  const tail = source.slice(at);
+  return appendsCleanly(head, tail) ? [`${head}(?:${tail})?`, next] : undefined;
 }
 
 /**
@@ -213,14 +272,9 @@ function inlineOptionalGroup(route: string, input: string): RegExp | undefined {
         [merged, lookahead] = capture;
       } else if (
         last.startsWith(prefix) &&
-        // Past a capture elsewhere in the segment, the appended part could be
-        // taken by it (`/f/:x.a{.a}?/m`): only trailing groups keep the old
-        // inline form there.
-        (suf === "" || !hasGroup(prefix)) &&
-        // A greedy, open-ended capture (`[^/]*` from a `*` wildcard /
-        // unconstrained param, or `.*`/`.+`/`[\s\S]*`) would swallow the
-        // optional literal instead of leaving it out (`/media/*{.webp}?`).
-        !/(?:\[\^\/\]|\[\\s\\S\]|\.)[*+]\)?$/.test(prefix)
+        // Earlier captures must not take the appended part where the router's
+        // longer route matches (`/media/*{.webp}?`, see `appendsCleanly`).
+        appendsCleanly(prefix, last.slice(k))
       ) {
         merged = `${prefix}(?:${last.slice(k)})?`;
       }
@@ -253,14 +307,17 @@ function inlineOptionalGroup(route: string, input: string): RegExp | undefined {
 }
 
 /**
- * Merge a segment ending in its only capture (`(?<name>[^/]*)` from `:name` /
- * `*`, or a constraint `(?<name>C)`, after static text) with the same segment
- * extended by the group (`(?<name>[^/]+)\.(?<ext>[^/]+)`). The capture must
- * take the extended form's value where that one matches, and the whole value
- * otherwise, as the router (`archive.tar.gz` gives `name: "archive.tar"`).
- * That needs a look-ahead to the rest of the segment, unless the capture is a
- * `\d` / `\w` run and the group starts with a char it can't match
- * (`/blog/:id(\d+){-:title}?`). Returns `[merged, lookahead]`.
+ * Merge a segment ending in its only capture (`(?<name>[^/]+)` from a whole
+ * `:name`, `(?<name>[^/]*)` from a `*`, `(?<name>[^/]+?)` from a `:name` after text, or a
+ * constraint `(?<name>C)`) with the same segment extended by the group
+ * (`(?<name>[^/]+?)\.(?<ext>[^/]+?)`). The capture must take the extended
+ * form's value where that one matches, and the whole value otherwise, as the
+ * router. A `:name` in the extended form is lazy, so trying it shortest first
+ * with the group before without it finds the same split (`archive.tar.gz`
+ * gives `archive` + `tar.gz`). A greedy `*` or a constraint needs a look-ahead to the
+ * rest of the segment, unless the capture is a `\d` / `\w` run and the group
+ * starts with a char it can't match (`/blog/:id(\d+){-:title}?`). Returns
+ * `[merged, lookahead]`.
  */
 function mergeCapture(base: string, full: string): [string, boolean] | undefined {
   const match = /^([^(]*\(\?<\w+>)([\s\S]*)\)$/.exec(base);
@@ -275,15 +332,19 @@ function mergeCapture(base: string, full: string): [string, boolean] | undefined
   let fullBody = body;
   let rest = full.slice(head.length + body.length + 1);
   if (!full.startsWith(`${head}${body})`)) {
-    // A whole `:name` is `[^/]*`, `:name` in a mixed segment `[^/]+`.
-    const capture = /^(\[\^\/\][*+])\)([\s\S]+)$/.exec(full.slice(head.length));
-    if (!capture || !/^\[\^\/\][*+]$/.test(body)) {
+    // A whole `:name` is `[^/]+`, `:name` in a mixed segment `[^/]+?`.
+    const capture = /^\[\^\/\]\+\?\)([\s\S]+)$/.exec(full.slice(head.length));
+    if (!capture || body !== "[^/]+") {
       return;
     }
-    [, fullBody, rest] = capture;
+    fullBody = "[^/]+?";
+    rest = capture[1];
   }
   if (!rest) {
     return;
+  }
+  if (fullBody === "[^/]+?") {
+    return [`${head}[^/]+?)(?:${rest})?`, false];
   }
   const first = rest.charCodeAt(0) === 92 /* \ */ ? rest[1] : rest[0];
   if (/^\\[dw][*+]?$/.test(body) && !/[\w([|.?*+{^$]/.test(first)) {
@@ -295,11 +356,6 @@ function mergeCapture(base: string, full: string): [string, boolean] | undefined
   // retrying shorter matches.
   const ahead = rest.replace(/\(\?<\w+>/g, "(?:");
   return [`${head}${wrap(fullBody)}(?=${ahead}(?:/|$))|${wrap(body)}(?![^/]))(?:${rest})?`, true];
-}
-
-/** Whether a regex fragment holds a group (escaped parens aside). */
-function hasGroup(re: string): boolean {
-  return re.replace(/\\[\s\S]/g, "").includes("(");
 }
 
 /**
@@ -379,19 +435,20 @@ function lazyCatchAll(after: string[], extra: string[]): boolean | undefined {
 
 /** How the router ranks a route segment: 3 literal, 2 regex param, 0 param. */
 function segmentKind(segment: string): number {
-  const base = segment.replace(/\\./g, "x").replace(/(:\w+(?:-\w+)*(?:\([^)]*\))?)[?+*]$/, "$1");
-  if (base === "*" || /^:\w+(?:-\w+)*$/.test(base)) {
+  const base = segment.replace(/\\./g, "x").replace(/(:[A-Za-z_]\w*(?:\([^)]*\))?)[?+*]$/, "$1");
+  if (base === "*" || /^:[A-Za-z_]\w*$/.test(base)) {
     return 0;
   }
   return /[:(*]/.test(base) ? 2 : 3;
 }
 
 /**
- * The `?`/`+`/`*` modifier of a param segment (`:x?`, `pre-:x(\\d+)+`), read
- * like `expandModifiers` with escapes encoded (`\:x?` has none).
+ * The `?`/`+`/`*` modifier of a whole-segment param (`:x?`, `:x(\\d+)?`),
+ * read like `expandModifiers` with escapes encoded (`\:x?` has none). An
+ * in-segment `pre-:x?` is a required segment (only its param is optional).
  */
 function paramModifier(segment: string): string | undefined {
-  return /:\w+(?:-\w+)*(?:\([^)]*\))?([?+*])$/.exec(encodeEscapes(segment))?.[1];
+  return /^:[A-Za-z_]\w*(?:\([^)]*\))?([?+*])$/.exec(encodeEscapes(segment))?.[1];
 }
 
 function _routeToRegExp(route: string, input: string): RegExp {
@@ -484,10 +541,16 @@ function routeToRegExpSegments(
   // match the same paths, and only the nested one leaves a single optional
   // group at the end (see `withTrailingSlash`). Both give a lone segment to
   // `x`, as the router does unless `/a/:y` wins it (a `*` or a constrained
-  // `:y`). `nest` counts the `)?` closers to insert before.
+  // `:y`). A `:x` needs a value, so one that can be empty (`*`, `**`) doesn't
+  // nest in it (`/a/:x?/*` on `/a//` is `/a/*`), and follows it instead.
+  // `nest` counts the `)?` closers to insert before, `nestValue` whether the
+  // innermost group needs a value.
   let nest = 0;
+  let nestValue = false;
   const pushOptional = (inner: string, nestable: boolean, lazy = false) => {
     const group = `(?:/${inner})?${lazy ? "?" : ""}`;
+    const empty = canBeEmpty(inner);
+    if (nestValue && empty) nest = 0;
     if (reSegments.length === 0) {
       ownSeparator = true;
       reSegments.push(group);
@@ -496,42 +559,43 @@ function routeToRegExpSegments(
       const at = prev.length - 2 * nest;
       reSegments.push(`${prev.slice(0, at)}${group}${prev.slice(at)}`);
     }
-    if (nestable) nest++;
+    if (nestable) {
+      nest++;
+      nestValue = !empty;
+    }
   };
 
   const segments = splitRoute(route);
 
   // A `**` / `**:name` / `:name+` / `:name*` with segments after it: those
   // match the end of the path and the catch-all what is between, zero or more
-  // segments (one or more for `**:name` / `:name+`), empty ones included. The
+  // segments (one or more with a value for `**:name` / `:name+`, `empty` for
+  // the one a `:name*` expands to), empty ones included. The
   // separator stays with the prefix (`/a/**/b` must not match `/ab`), except
   // at the root, where the leading slash doubles as it so that `_` is `""`
   // on `/b` as in the router. With optional segments after it, the router
   // registers several routes; `lazyCatchAll` picks between them.
-  const pushCatchAll = (id: string, required: boolean, i: number, repeat = false): boolean => {
-    // `**` / `:x*` then a lone `:y?` (or a `*`, which is optional in the
-    // route `:x*` registers without it): the router takes the route with the
-    // last segment wherever it matches, and the one without only where
+  const pushCatchAll = (
+    id: string,
+    required: boolean,
+    i: number,
+    repeat = false,
+    empty = !required,
+  ): boolean => {
+    // `:x*` then a `*`, which is optional in the route `:x*` registers without
+    // it: the router takes the route with the last segment wherever it
+    // matches (a `*` takes an empty one too), and the one without only where
     // nothing follows the prefix. Both fit in one optional group, the
     // catch-all nested in it before the last segment.
     const tail = segments.slice(i + 1);
-    if (
-      !required &&
-      extra.length === 0 &&
-      tail.length === 1 &&
-      (/^:\w+(?:-\w+)*\?$/.test(tail[0]) || (repeat && tail[0] === "*"))
-    ) {
-      const catchAllGroup = `(?<${groupName(id)}>${ANY})`;
-      const last =
-        tail[0] === "*"
-          ? `(?<${toRegExpUnnamedKey(idCtr++)}>[^/]*)`
-          : `(?<${groupName(tail[0].slice(1, -1))}>[^/]*)`;
-      pushOptional(`(?:${catchAllGroup}/)?${last}`, false);
+    if (repeat && extra.length === 0 && tail.length === 1 && tail[0] === "*") {
+      const last = `(?<${toRegExpUnnamedKey(idCtr++)}>[^/]*)`;
+      pushOptional(`(?:(?<${groupName(id)}>${ANY})/)?${last}`, false);
       return true;
     }
     const lazy = lazyCatchAll(tail, extra);
     // A plain `/?$` is not exact where the segment before the catch-all can be
-    // empty: the stripped slash would end it (`/a/` matching `/a/:p/**/:y?`).
+    // empty: the stripped slash would end it (`/a/` matching `/a/*/**/:y?`).
     const open =
       lazy &&
       !required &&
@@ -539,7 +603,7 @@ function routeToRegExpSegments(
       tail.every((s) => paramModifier(s) === "?") &&
       !(reSegments.length > 0 && canBeEmpty(reSegments[reSegments.length - 1]));
     const name = groupName(id);
-    const group = `(?<${name}>${lazy ? LAZY_ANY : ANY})`;
+    const group = `(?<${name}>${empty ? ANY : SOME}${lazy ? "?" : ""})`;
     if (open) {
       openTail = nest === 0 ? `(?:/${group})??` : true;
     }
@@ -558,10 +622,10 @@ function routeToRegExpSegments(
 
   // A dynamic segment (or the base of a `?`-modified one) exactly as the tree
   // compiles it (`getParamRegexp`): a whole `:name` is an unchecked param
-  // node, which also takes an empty segment (`/a//b` reaches `/a/:x/b`).
+  // node, which needs a value (`/a//b` doesn't reach `/a/:x/b`).
   const dynamic = (segment: string): string => {
-    if (/^:\w+(?:-\w+)*$/.test(segment)) {
-      return `(?<${groupName(segment.slice(1))}>[^/]*)`;
+    if (/^:[A-Za-z_]\w*$/.test(segment)) {
+      return `(?<${groupName(segment.slice(1))}>[^/]+)`;
     }
     const [regexp, next] = getParamRegexp(
       encodeEscapes(segment),
@@ -599,23 +663,24 @@ function routeToRegExpSegments(
     } else if (segment.startsWith("**")) {
       // The separator before a catch-all must stay anchored to the prefix: a
       // bare optional `/?` would let `/api/**` match `/apifoo`. `**` matches
-      // zero or more segments (`/api` too), `**:name` one or more. A segment may
-      // be empty, so one-or-more is the separator plus `ANY` (`/api//` reaches
-      // `/api/**:p` with `p: ""`; `/api/` is `/api` after trailing stripping).
-      // A bare `**` is the `_` param (`params._` in the router).
+      // zero or more segments (`/api` too), `**:name` one or more, with a
+      // value: the separator plus `SOME` (`/api///` reaches `/api/**:p` with
+      // `p: "/"`, `/api//` doesn't). The `**:\uFFFFname` a `:name*` expands to
+      // may be empty (`ANY`). A bare `**` is the `_` param (`params._` in the
+      // router).
       oneCatchAll();
+      const empty = segment.charCodeAt(3) === 0xffff;
+      const id = segment === "**" ? "_" : segment.slice(empty ? 4 : 3);
       if (i < segments.length - 1) {
         // Segments follow: they take the end of the path, the `**` what is
         // between (see `pushCatchAll`).
-        if (pushCatchAll(segment === "**" ? "_" : segment.slice(3), segment !== "**", i)) {
-          break;
-        }
+        pushCatchAll(id, segment !== "**", i, false, empty || segment === "**");
         continue;
       }
-      const name = groupName(segment === "**" ? "_" : segment.slice(3));
+      const name = groupName(id);
       starStar = segment === "**";
       if (!starStar) {
-        reSegments.push(`(?<${name}>${ANY})`);
+        reSegments.push(`(?<${name}>${empty ? ANY : SOME})`);
       } else if (reSegments.length > 0) {
         pushOptional(`(?<_>${ANY})`, false);
       } else {
@@ -624,13 +689,22 @@ function routeToRegExpSegments(
       break;
     } else if (segmentKey(encodeEscapes(segment)) === 1) {
       // Read like `expandModifiers`, with escapes encoded (`\:x?` has none)
-      const modMatch = encodeEscapes(segment).match(/^(.*:\w+(?:-\w+)*(?:\([^)]*\))?)([?+*])$/);
+      const modMatch = encodeEscapes(segment).match(/^(.*)(:[A-Za-z_]\w*(?:\([^)]*\))?)([?+*])$/);
       if (modMatch) {
-        const [, base, mod] = modMatch;
+        const [, pre, base, mod] = modMatch;
 
         if (mod === "?") {
+          if (pre) {
+            // `pre-:x?`: only the param is optional, `pre-(?:(?<x>…))?`
+            // (`inSegmentOptional` made the others groups).
+            const [regex, next] = inPlaceOptional(pre, base, input, idCtr)!;
+            idCtr = next;
+            reSegments.push(regex);
+            nest = 0;
+            continue;
+          }
           // Append optional group to previous segment: /foo(?:/<inner>)?
-          pushOptional(dynamic(base), /^:\w+(?:-\w+)*$/.test(base));
+          pushOptional(dynamic(base), /^:[A-Za-z_]\w*$/.test(base));
           continue;
         }
 
@@ -650,12 +724,12 @@ function routeToRegExpSegments(
           if (mod === "*") {
             pushOptional(`(?<${name}>${ANY})`, false);
           } else {
-            reSegments.push(`${reSegments.pop()}/(?<${name}>${ANY})`);
+            reSegments.push(`${reSegments.pop()}/(?<${name}>${SOME})`);
             nest = 0;
           }
         } else {
           // `+` needs at least one segment, so its separator is required.
-          reSegments.push(mod === "+" ? `(?<${name}>${ANY})` : `?(?<${name}>${ANY})`);
+          reSegments.push(mod === "+" ? `(?<${name}>${SOME})` : `?(?<${name}>${ANY})`);
           nest = 0;
         }
 

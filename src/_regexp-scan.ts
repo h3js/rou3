@@ -15,7 +15,7 @@ type Item = [slash: boolean, empty: boolean];
  * Conservative, so a `false` is a proof: it walks each alternative back from
  * its end over the items that can match empty, and asks every char, class or
  * escape reached whether it matches `/`. Backreferences and anything it can't
- * parse count as ending in `/`. rou3's own `[^/]*` / `[^/]+`, literals and
+ * parse count as ending in `/`. rou3's own `[^/]*` / `[^/]+?`, literals and
  * constraints such as `\d+` or `[a-z0-9-]+` do not; `.+`, `[^.]+`, `\S+` do.
  */
 export function canEndInSlash(fragment: string): boolean {
@@ -148,7 +148,7 @@ const SEPARATOR_GROUP = /^\(\?:.*\/\)\?$/s;
 const OPTIONAL_GROUP = /^\(\?:\/.*\)\?$/s;
 
 /**
- * A whole-part catch-all capture (`**`, `**:x`, `:x+`, `:x*`), or a `(.*)`
- * constraint: `[name, body]`.
+ * A whole-part catch-all capture (`**`, `:x*`, and `**:x` / `:x+`, which need
+ * a value: `[\s\S]+`), or a `(.*)` constraint: `[name, body]`.
  */
-export const CATCH_ALL: RegExp = /^\(\?<(\w+)>(\[\\s\\S\]\*|\.\*)\)$/;
+export const CATCH_ALL: RegExp = /^\(\?<(\w+)>(\[\\s\\S\][*+]|\.\*)\)$/;
