@@ -1633,6 +1633,12 @@ export const RESERVED_SYNTAX_ROUTES: readonly string[] = [
   "/:a/:b(x)(\\1)",
   "/:a/((x)\\2)",
   "/a/:x((a)\\1)",
+  // U+FFFD-U+FFFF are internal placeholders (escapes, the `:name*` marker):
+  // written in a route, they read as syntax (`\uFFFD0` as an escaped `:`).
+  "/a/**:\uFFFFx",
+  "/a/\uFFFD0x",
+  "/a/\uFFFEx",
+  "/a/:x\uFFFF",
 ];
 
 /** Whether `addRoute` accepts `pattern`. */

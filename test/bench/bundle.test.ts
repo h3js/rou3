@@ -113,8 +113,11 @@ describe("benchmark", () => {
     // `findRoute` sends paths with an empty segment through the
     // `findAllRoutes` walk (`_findRanked`, so the tree walk never checks), and
     // `:name*` marks its `**:name` expansion, which may still be empty.
-    expect(bytes).toBeLessThanOrEqual(10330); // <10.33kb
-    expect(gzipSize).toBeLessThanOrEqual(4320); // <4.32kb
+    // +~68B raw / +~25B gzip: addRoute rejects U+FFFD-U+FFFF, the internal
+    // placeholders a route could write as syntax (`\uFFFD0` as an escaped `:`,
+    // the `:name*` marker).
+    expect(bytes).toBeLessThanOrEqual(10370); // <10.37kb
+    expect(gzipSize).toBeLessThanOrEqual(4330); // <4.33kb
   });
 });
 

@@ -31,8 +31,9 @@ import {
  * (`/foo?`), a `**` in the middle of a segment (`/a**b`), an empty or `(?`
  * group, a `:` without a valid name (`/:0`, `/:café`), more after `**:name`
  * in its segment, a repeated param name, more than one `**`, a `\` that
- * escapes no char of its segment (`\/`), and an anchor, look-around,
- * backreference or capturing group in a constraint (`/:x((a))`; use `(?:…)`).
+ * escapes no char of its segment (`\/`), an anchor, look-around,
+ * backreference or capturing group in a constraint (`/:x((a))`; use `(?:…)`),
+ * and a U+FFFD-U+FFFF char (internal placeholders).
  */
 export function addRoute<T>(
   ctx: RouterContext<T>,

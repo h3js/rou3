@@ -52,6 +52,10 @@ export function segmentKey(segment: string): string | 1 | 2 {
 }
 
 /**
+ * Throws on U+FFFD-U+FFFF: internal placeholders (`encodeEscapes`, `\uFFFE` in
+ * `getParamRegexp`, the `:name*` marker of `expandModifiers`), which a route
+ * could otherwise write as syntax (`\uFFFD0` read as an escaped `:`).
+ *
  * Throws when a `(...)` group in `route` never closes (`/files/(2024`, #199)
  * or contains a `/` (`:id([^/]+)`): the pattern is split on `/` before groups
  * are read, which cut it in two. Either way `new RegExp` threw a raw
@@ -70,7 +74,10 @@ export function segmentKey(segment: string): string | 1 | 2 {
  * escapes nothing. Braces inside a group are regex.
  */
 export function checkConstraints(route: string): void {
-  if (!/[\\({}]/.test(route)) return;
+  if (!/[\\({}\uFFFD-\uFFFF]/.test(route)) return;
+  if (/[\uFFFD-\uFFFF]/.test(route)) {
+    invalidSyntax("a U+FFFD-U+FFFF char", route);
+  }
   // `\1`-`\9` -> `\0` (a backreference), any other escape -> `_` (a literal,
   // so `\(?=` is no look-ahead)
   let s = route.replace(/\\([^/])/g, (_, c) => (c > "0" && c <= "9" ? "\0" : "_"));

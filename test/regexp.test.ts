@@ -980,12 +980,18 @@ const OTHER_EXPANSION: CaptureDiff = {
     }),
 };
 
-/** The routes `addRoute` registers for `pattern` (groups, then modifiers). */
+/**
+ * The routes `addRoute` registers for `pattern` (groups, then modifiers). A
+ * `:x*`'s `**:x` (marked `**:\uFFFFx`, which `addRoute` rejects as written)
+ * is written back as `:x*`: the same route, plus the one without it.
+ */
 function expansions(pattern: string): string[] {
   const groups = expandGroupDelimiters(pattern);
   if (groups) return groups.flatMap((route) => expansions(route));
   const modifiers = expandModifiers(splitRoute(pattern));
-  return modifiers ? modifiers.flatMap((route) => expansions(route)) : [pattern];
+  return modifiers
+    ? modifiers.flatMap((route) => expansions(route))
+    : [pattern.replace(/\*\*:\uFFFF(\w+)/, ":$1*")];
 }
 
 /** Sweep patterns whose captures differ from the router beyond the accepted gap. */
