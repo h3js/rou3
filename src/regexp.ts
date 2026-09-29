@@ -89,9 +89,9 @@ function toRegExp(route: string, input: string): RegExp {
   // A `?` on a param that does not start its segment makes only the param
   // optional (see `expandModifiers`). Where it can't compile in place,
   // `*-:x?` is `*-{:x}?`; in a route with groups already, it is read once
-  // they are expanded.
+  // they are expanded (an escaped `\{` is no group).
   const inSegment = inSegmentOptional(route, input);
-  if (inSegment !== route && !route.includes("{")) {
+  if (inSegment !== route && !encodeEscapes(route).includes("{")) {
     route = inSegment;
   }
   // Compile a single optional group (`{...}?`) inline as `(?:...)?`
@@ -145,11 +145,13 @@ function toRegExp(route: string, input: string): RegExp {
  * `route` with every in-segment optional param (`pre-:x?`, see
  * `expandModifiers`) that can't compile in place written as the group it
  * stands for (`*-:x?` as `*-{:x}?`, see `inPlaceOptional`), read with escapes
- * encoded. In a route with groups already, `toRegExp` expands them first.
+ * encoded and split like `addRoute` (`splitRoute`). In a route with groups
+ * already, `toRegExp` expands them first.
  */
 function inSegmentOptional(route: string, input: string): string {
   if (!route.includes("?")) return route;
-  const encoded = encodeEscapes(route);
+  // Split like `addRoute`: `**-:x?` is `**` then `*-:x?`
+  const encoded = "/" + splitRoute(encodeEscapes(route)).join("/");
   const out = encoded.replace(
     /(^|\/)([^/]*?)(:[A-Za-z_]\w*(?:\([^)]*\))?)\?(?=[/{}]|$)/g,
     (all, sep, pre, param) =>

@@ -109,6 +109,30 @@ describe("routeToRegExp", () => {
 
   // `sweepPatterns()` has no escapes and `sweepPaths()` no escaped chars: a
   // `\x` is a literal `x` in both, wherever it sits in the pattern (#227).
+  // An escaped `\{` / `\}` is no group: `*-:e?` still compiles as `*-{:e}?`.
+  it("reads an escaped brace as no group before an in-segment optional", () => {
+    const paths = ["/{x/a-b", "/{x/a-", "/{x/a", "/a}/a-b", "/a}/a-", "/{x}/a-b-c", "/x/a-b"];
+    for (const route of ["/\\{x/*-:e?", "/a\\}/*-:e?", "/\\{x\\}/*-:e?"]) {
+      if (!DUPLICATE_NAMED_GROUPS) {
+        expect(() => routeToRegExp(route), route).toThrowError(NEEDS_DUPLICATE_NAMES);
+        continue;
+      }
+      const router = createRouter();
+      addRoute(router, "", route, true);
+      const regex = routeToRegExp(route);
+      for (const path of paths) {
+        const found = findRoute(router, "", path);
+        const match = path.match(regex);
+        expect(!!match, `${route} ${path}`).toBe(!!found);
+        if (match) {
+          expect(definedCaptures(normalizeGroups(match.groups)), `${route} ${path}`).toEqual(
+            definedCaptures(found?.params),
+          );
+        }
+      }
+    }
+  });
+
   it("reads escapes like findRoute", () => {
     const chars = [".", "b", "\\", "*", "?", "+", ":", "(", ")", "{", "}", "-", "$", "^", "|", "["];
     const patterns = chars.flatMap((c) => [
@@ -1088,6 +1112,16 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/a/:x:e?/**",
     "/*-:e?/**",
     "/a/*-:e?/**",
+    // `**-:e?` is `**` then `*-:e?`
+    "/a/**-:e?",
+    "/a/**-:e?/a",
+    "/a/**-:e?/:y",
+    "/a/**-:e?/*",
+    "/a/**-:e?/*.png",
+    "/a/**-:e?/x-:y",
+    "/a/**-:e?/x-:y?",
+    "/a/**-:e?/b{.json}?",
+    "/a/**.:ext?",
   ].map((pattern) => [pattern, ZERO_SEGMENT_CATCH_ALL] as const),
   ...[
     "/**/:y?/:z?",
@@ -1101,6 +1135,8 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/a/**{.png}?",
     "/a/:r*/:y?/*",
     "/a/:r*/:y?{/b}?",
+    "/**-:e?/:y?",
+    "/a/**-:e?/:y?",
   ].map((pattern) => [pattern, OTHER_EXPANSION] as const),
   ...[
     "/:x?/*",

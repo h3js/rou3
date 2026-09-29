@@ -1313,6 +1313,26 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   "/a/*-:e?/x-:y?",
   "/*-:e?/b{.json}?",
   "/a/*-:e?/b{.json}?",
+  // ... after a `**` (`**-:e?` is `**` then `*-:e?`).
+  "/**-:e?",
+  "/**-:e?/a",
+  "/**-:e?/:y",
+  "/**-:e?/*",
+  "/**-:e?/:y?",
+  "/**-:e?/*.png",
+  "/**-:e?/x-:y",
+  "/**-:e?/x-:y?",
+  "/**-:e?/b{.json}?",
+  "/a/**-:e?",
+  "/a/**-:e?/a",
+  "/a/**-:e?/:y",
+  "/a/**-:e?/*",
+  "/a/**-:e?/:y?",
+  "/a/**-:e?/*.png",
+  "/a/**-:e?/x-:y",
+  "/a/**-:e?/x-:y?",
+  "/a/**-:e?/b{.json}?",
+  "/a/**.:ext?",
   // A `:x*` before a `*` that is optional in the route without it.
   "/a/:r*/b/*",
   "/:r*/*.png/*",
@@ -1410,6 +1430,8 @@ function allSweepPatterns(): string[] {
     ":x:e?",
     "*-:e?",
     ":x(\\d+)-:e?",
+    // ... after a `**` (`**-:e?` is `**` then `*-:e?`, see `splitRoute`).
+    "**-:e?",
   ];
   const tails = ["", "a", ":y", "*", ":y?", "**", "*.png", "x-:y", "x-:y?", "b{.json}?"];
   const patterns = new Set([
@@ -1497,6 +1519,7 @@ function allSweepPatterns(): string[] {
     "/a{/(\\d+)}?/b",
     "/a{/(\\d+)}?/:q",
     "/a/:x{/(\\d+)}?/b",
+    "/a/**.:ext?",
     ...Object.keys(regexpCases),
     // Removed from `regexpCases` without duplicate named groups.
     ...PCRE2_DUPLICATE_NAME_ROUTES,
