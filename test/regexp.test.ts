@@ -153,6 +153,51 @@ describe("routeToRegExp", () => {
     expect(mismatches).toEqual([]);
   });
 
+  // Hand-picked shapes the sweeps don't generate: escaped modifiers (`\:x?` is
+  // no optional param) and regex chars outside a constraint in a dynamic
+  // segment (`$`, `^`, `|`, `[`, `)` are literals there, as in a static one).
+  it("matches like findRoute for escaped modifiers and literal regex chars", () => {
+    const patterns = [
+      "/a//\\:x?",
+      "///b\\:x?",
+      "/a/*/\\:x?",
+      "/a/:x(\\))?",
+      "/a/:x(a\\)b)?/c",
+      "/\\:x*",
+      "/a//\\:x+",
+      "/a/\\:x+/b",
+      "/api/*$",
+      "/x/^:id",
+      "/x/:id$",
+      "/a/x|:y",
+      "/secret/:id|x/admin",
+      "/a/:x[0-9]",
+      "/a/:x)b",
+      "/a/:x]b",
+      "/a/:x{}b",
+    ];
+    const paths = [
+      ...["/a//:x?", "/a", "/a/", "///b:x?", "/", "/a/:x?", "/a/1/:x?", "/a/)", "/a/)/"],
+      ...["/a/a)b/c", "/a/c", "/:x*", "/:x", "/a//:x+", "/a/:x+/b", "/a/:x/b"],
+      ...["/api/v1$", "/api/v1/", "/api/v1", "/x/^1", "/x/1", "/x/1$", "/x/1/"],
+      ...["/a/x|1", "/other", "/secret/1|x/admin", "/secret/1/anything"],
+      ...["/a/1[0-9]", "/a/15", "/a/1)b", "/a/1]b", "/a/1b"],
+    ];
+    const mismatches: string[] = [];
+    for (const pattern of patterns) {
+      const router = createRouter();
+      addRoute(router, "", pattern, true);
+      const regex = routeToRegExp(pattern);
+      for (const path of paths) {
+        const routed = findRoute(router, "", path) !== undefined;
+        if (routed !== regex.test(path)) {
+          mismatches.push(`${pattern} ${path} (${routed ? "router" : "regex"} only)`);
+        }
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
+
   // The one documented exception to "regex ≡ router": a constraint that can
   // match `/` spans segments in the inline regex, while the tree splits
   // first. The regex may match more (a guard still runs), never less (#227).
@@ -565,6 +610,10 @@ describe("reserved pattern syntax", () => {
     "/a/:x(\\^a\\$)",
     "/a/:x(a\\\\)",
     "/a/:x(a|(?:b))",
+    "/a/:x(\\(?=a)",
+    "/a/:x(\\\\?=a)",
+    "/a/:x(\\\\1)",
+    "/a/:x([\\]$])",
   ])("%s is accepted", (route) => {
     expect(() => addRoute(createRouter(), "", route)).not.toThrow();
     // Accepted syntax whose regex is an alternation repeating a named group

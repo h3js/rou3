@@ -97,8 +97,11 @@ describe("benchmark", () => {
     // `:` / `(` was misread), and a `\/`, a trailing `\` and anchors or
     // look-arounds in a constraint throw: they made `routeToRegExp` match
     // fewer paths than the router (#227).
-    expect(bytes).toBeLessThanOrEqual(9840); // <9.84kb
-    expect(gzipSize).toBeLessThanOrEqual(4090); // <4.09kb
+    // +~69B raw / +~44B gzip: regex chars outside a group in a dynamic segment
+    // (`*$`, `^:id`, `x|:y`, a stray `)`) are literals, and a backreference in
+    // a constraint throws (review of #228: both made the regex match less).
+    expect(bytes).toBeLessThanOrEqual(9910); // <9.91kb
+    expect(gzipSize).toBeLessThanOrEqual(4130); // <4.13kb
   });
 });
 

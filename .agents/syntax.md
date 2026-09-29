@@ -8,8 +8,8 @@ Any `\x` outside a constraint is a literal `x`, as in URLPattern (`/foo\.bar` ma
 
 - `encodeEscapes()` hides `\:` `\(` `\)` `\{` `\}` `\\` behind U+FFFD + their index in `ESCAPABLE` before splitting, so no scan reads them as syntax; `\\` is one of them so pairs read left to right (`\\:x` is `\` + `:x`). This also applies inside constraints (`\)` doesn't close one).
 - Static keys (`segmentKey`): other `\x` → `x`, then `decodeEscapes(s, "")`.
-- Dynamic segments (`getParamRegexp`): other `\x` outside a group → U+FFFE + `x` (`\*` stays an escape so it is no wildcard); placeholders decode to U+FFFE + char after params and groups are named; U+FFFE pairs then become regex-safe literals.
-- `routeToRegExp` classifies segments with `segmentKey(encodeEscapes(s))`, emits static keys regex-escaped and dynamic segments through `getParamRegexp` (with `_N` unnamed keys), so escapes can't drift between the two.
+- Dynamic segments (`getParamRegexp`): other `\x` outside a group → U+FFFE + `x` (`\*` stays an escape so it is no wildcard); placeholders decode to U+FFFE + char after params and groups are named; U+FFFE pairs then become regex-safe literals. Unescaped regex chars outside a group (`. ^ $ | [ ] ) { }`) are literals too, as in a static segment (`/api/*$`, `/x/^:id`, a stray `)`).
+- `routeToRegExp` classifies segments with `segmentKey(encodeEscapes(s))`, reads modifiers from the encoded text too (`\:x?` has none), emits static keys regex-escaped and dynamic segments through `getParamRegexp` (with `_N` unnamed keys), so escapes can't drift between the two.
 
 ## Group delimiters `{…}`
 
@@ -19,7 +19,7 @@ Any `\x` outside a constraint is a literal `x`, as in URLPattern (`/foo\.bar` ma
 
 Syntax with no defined meaning throws `rou3: <what> (<route as written>)` (`invalidSyntax()`), so it can get a meaning later without a breaking change. Checks sit where the pipeline already looks:
 
-- `checkConstraints` (route level): a `(` that does not close in its own segment, including a `/` inside a constraint (one message for both causes, bundle size); a `^` / `$` outside a class or a look-around in a constraint (the tree tests the segment alone, so they see its ends; the inline regex sees the rest of the path); after dropping escapes and constraints, a `\` that escapes nothing (`\/`, a trailing `\`) and unbalanced or nested `{}`. A stray `)` is literal.
+- `checkConstraints` (route level): a `(` that does not close in its own segment, including a `/` inside a constraint (one message for both causes, bundle size); a `^` / `$` outside a class, a look-around or a numbered backreference (`\1`) in a constraint (the tree tests the segment alone, so they see its ends and count its groups; the inline regex sees the rest of the path and all its groups); escapes are replaced by `_` (a backreference by `\0`) first, so `\(?=` is no look-ahead; after dropping escapes and constraints, a `\` that escapes nothing (`\/`, a trailing `\`) and unbalanced or nested `{}`. A stray `)` is literal.
 - `expandGroupDelimiters`: `{…}+`, `{…}*`.
 - `expandModifiers`: `+` / `*` on anything but a whole-segment `:name` (`:x(\d+)?` and `pre-:x?` are fine).
 - `getParamRegexp` (depth 0): `:` without a name; a group that is empty or starts with `?`; a raw `?` / `+` quantifier; a `*` right after a name or group (ambiguous with a modifier).

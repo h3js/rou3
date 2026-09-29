@@ -151,7 +151,7 @@ addRoute(router, "GET", "/files/\\(2024\\)", {}); // matches only "/files/(2024)
 
 ### Invalid patterns
 
-`addRoute` throws a `rou3:` error that quotes the pattern when the syntax has no meaning, instead of silently matching something unexpected. For example: an unclosed `(` or `{`, a nested group, an empty group `()`, a modifier in the wrong place (`*?`, `**+`, `:x.png?`), a repeated param name, a second catch-all, a `\/`, or an anchor (`^`, `$`) or look-around in a regex constraint (it tests one segment, so there is nothing around it to look at).
+`addRoute` throws a `rou3:` error that quotes the pattern when the syntax has no meaning, instead of silently matching something unexpected. For example: an unclosed `(` or `{`, a nested group, an empty group `()`, a modifier in the wrong place (`*?`, `**+`, `:x.png?`), a repeated param name, a second catch-all, a `\/`, or an anchor (`^`, `$`), look-around or numbered backreference (`\1`) in a regex constraint. The router tests a constraint against its segment alone, while `routeToRegExp` puts it inline, where it would see the rest of the path, so the two would match different paths.
 
 ### Differences from URLPattern
 

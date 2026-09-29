@@ -269,10 +269,10 @@ export function getParamRegexp(
         continue;
       }
     }
-    // A literal `.` outside a (...) group is a route separator -> escape it;
-    // a `.` inside a group is opaque regex and stays verbatim (`:id(\d+\.\d+)`).
-    else if (c === 46 && _d === 0) {
-      _s += "\\.";
+    // Regex chars outside a (...) group are literals, as in a static segment
+    // (`:x.json`, `*$`); inside one they are regex (`:id(\d+\.\d+)`).
+    else if (_d === 0 && /[.^$|[\]){}]/.test(segment[j])) {
+      _s += "\\" + segment[j];
       continue;
     }
     _s += segment[j];

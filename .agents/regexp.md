@@ -4,7 +4,7 @@
 
 **Contract:** `routeToRegExp(p).test(path)` ⟺ `findRoute(router with only p, "", path) !== undefined`, and captures follow the router. Consumers use the regex as a guard (h3 `use(route, mw)`), so an under-match is an auth bypass: the regex mirrors the **trie's** tolerances, not URLPattern's. Pinned by the router-vs-regex sweeps (see [testing.md](testing.md)).
 
-**The one exception:** a constraint that can match `/` (`(.*)`, `[^a]`, `\D`) spans segments in the regex (`/foo/(.*)` matches `/foo/a/b`), while the tree splits first. That over-matches only (a guard still runs), and closing it means rewriting every construct that can match `/` in an opaque user regex, so it stays documented (README, JSDoc) and pinned by "over-matches only for constraints that can match `/`" and WPT `ROUTER_KNOWN_DIFFS`. Anything that would make the regex match *less* is rejected instead: anchors and look-arounds in a constraint, a `\/` (see [syntax.md](syntax.md)).
+**The one exception:** a constraint that can match `/` (`(.*)`, `[^a]`, `\D`) spans segments in the regex (`/foo/(.*)` matches `/foo/a/b`), while the tree splits first. That over-matches only (a guard still runs), and closing it means rewriting every construct that can match `/` in an opaque user regex, so it stays documented (README, JSDoc) and pinned by "over-matches only for constraints that can match `/`" and WPT `ROUTER_KNOWN_DIFFS`. Anything that would make the regex match *less* is rejected instead: anchors, look-arounds and numbered backreferences in a constraint, a `\/` (see [syntax.md](syntax.md)).
 
 ### Trailing slash and endings
 

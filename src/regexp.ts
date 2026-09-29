@@ -86,10 +86,12 @@ function toRegExp(route: string, input: string): RegExp {
   }
 
   // Modifiers the inline emitter cannot mirror expand exactly like `addRoute`
-  // (groups first, then modifiers).
+  // (groups first, then modifiers, read with escapes encoded: `\:x?` is none).
   const groupExpanded =
     expandGroupDelimiters(route) ||
-    (needsModifierExpansion(route) ? expandModifiers(splitRoute(route)) : undefined);
+    (needsModifierExpansion(route)
+      ? expandModifiers(splitRoute(encodeEscapes(route)), input)
+      : undefined);
   if (groupExpanded) {
     // Expansions can compile to the same regex (`/a/:x+/b{c}?` is `/a/**:x`
     // either way); keep one copy of each.
@@ -384,9 +386,12 @@ function segmentKind(segment: string): number {
   return /[:(*]/.test(base) ? 2 : 3;
 }
 
-/** The `?`/`+`/`*` modifier of a param segment (`:x?`, `pre-:x(\\d+)+`). */
+/**
+ * The `?`/`+`/`*` modifier of a param segment (`:x?`, `pre-:x(\\d+)+`), read
+ * like `expandModifiers` with escapes encoded (`\:x?` has none).
+ */
 function paramModifier(segment: string): string | undefined {
-  return /:\w+(?:-\w+)*(?:\([^)]*\))?([?+*])$/.exec(segment)?.[1];
+  return /:\w+(?:-\w+)*(?:\([^)]*\))?([?+*])$/.exec(encodeEscapes(segment))?.[1];
 }
 
 function _routeToRegExp(route: string, input: string): RegExp {
@@ -618,7 +623,8 @@ function routeToRegExpSegments(
       }
       break;
     } else if (segmentKey(encodeEscapes(segment)) === 1) {
-      const modMatch = segment.match(/^(.*:\w+(?:-\w+)*(?:\([^)]*\))?)([?+*])$/);
+      // Read like `expandModifiers`, with escapes encoded (`\:x?` has none)
+      const modMatch = encodeEscapes(segment).match(/^(.*:\w+(?:-\w+)*(?:\([^)]*\))?)([?+*])$/);
       if (modMatch) {
         const [, base, mod] = modMatch;
 

@@ -7,10 +7,11 @@
 
 import { fromGroupName } from "./_group-names.ts";
 
-// Chars a literal must be backslash-escaped as so `routeToRegExp` re-emits them
-// verbatim: rou3 route syntax (`: ( ) { } * \`) plus regex metacharacters its
-// dynamic-segment branch does not auto-escape (`? + | ^ $ [ ]`). `.` is omitted
-// on purpose — that branch already escapes `.`, so a literal dot stays raw.
+// Chars a literal is backslash-escaped as so `routeToRegExp` re-emits them
+// verbatim: rou3 route syntax (`: ( ) { } * \`), `?` / `+` (modifiers after a
+// param, rejected raw in a dynamic segment) and `| ^ $ [ ]` (literals there
+// too, but kept escaped so reversed routes keep their spelling). `.` is
+// omitted on purpose: a literal dot stays raw.
 const ROUTE_SPECIAL = new Set([
   ":",
   "(",

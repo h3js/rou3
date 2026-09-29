@@ -1343,6 +1343,11 @@ export const RESERVED_SYNTAX_ROUTES: readonly string[] = [
   "/a/:x(a(?!b))",
   "/a/:x((?<=a)b)",
   "/a/:x((?<!a)b)",
+  // A numbered backreference counts the groups of the segment in the tree and
+  // of the whole path in the regex (`/:a/:b(x)(\1)`: `\1` is `b` or `a`).
+  "/:a/:b(x)(\\1)",
+  "/:a/((x)\\2)",
+  "/a/:x((a)\\1)",
 ];
 
 /** Whether `addRoute` accepts `pattern`. */

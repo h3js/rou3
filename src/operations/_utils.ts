@@ -70,12 +70,14 @@ export function segmentKey(segment: string): string | 1 | 2 {
  */
 export function checkConstraints(route: string): void {
   if (!/[\\({}]/.test(route)) return;
-  let s = route.replace(/\\[^/]/g, "");
+  // `\1`-`\9` -> `\0` (a backreference), any other escape -> `_` (a literal,
+  // so `\(?=` is no look-ahead)
+  let s = route.replace(/\\([^/])/g, (_, c) => (c > "0" && c <= "9" ? "\0" : "_"));
   while (
     s !==
     (s = s.replace(/\([^()/]*\)/g, (group) => {
-      if (/[$^]|^\(\?<?[=!]/.test(group.replace(/\[[^\]]*\]/g, ""))) {
-        invalidSyntax("an anchor or look-around in a constraint", route);
+      if (/[$^\0]|^\(\?<?[=!]/.test(group.replace(/\[[^\]]*\]/g, ""))) {
+        invalidSyntax("an anchor, look-around or backreference in a constraint", route);
       }
       return "";
     }))
