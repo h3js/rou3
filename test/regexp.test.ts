@@ -449,6 +449,10 @@ describe("routeToRegExp: a `(` that does not close in its segment", () => {
 // Syntax with no meaning yet throws, so it can be given one later instead of
 // locking in what it happened to do (see `RESERVED_SYNTAX_ROUTES`).
 describe("reserved pattern syntax", () => {
+  // Accepted routes below whose regex falls back to an alternation with a
+  // repeated named group (see DUPLICATE_NAMED_GROUPS).
+  const ALTERNATION_ROUTES = new Set(["/a/**{.md}?"]);
+
   it.each(RESERVED_SYNTAX_ROUTES)("%s throws", (route) => {
     const message = new RegExp(`^rou3: .*\\(${route.replace(/[$()*+.?[\\\]^{|}]/g, "\\$&")}\\)$`);
     expect(() => addRoute(createRouter(), "", route)).toThrow(message);
@@ -489,7 +493,16 @@ describe("reserved pattern syntax", () => {
     "/a)b",
   ])("%s is accepted", (route) => {
     expect(() => addRoute(createRouter(), "", route)).not.toThrow();
-    expect(() => routeToRegExp(route)).not.toThrow();
+    // Accepted syntax whose regex is an alternation repeating a named group
+    // (a group right after a bare `**`): it compiles only where the engine
+    // has duplicate named groups, and throws the engine error, not a syntax
+    // one, elsewhere (Node 22).
+    if (ALTERNATION_ROUTES.has(route) && !DUPLICATE_NAMED_GROUPS) {
+      expect(() => routeToRegExp(route)).toThrowError(NEEDS_DUPLICATE_NAMES);
+      return;
+    }
+    const regex = routeToRegExp(route);
+    expect(duplicateGroupNames(regex.source).length > 0).toBe(ALTERNATION_ROUTES.has(route));
   });
 
   it("keeps escaped braces literal", () => {
