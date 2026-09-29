@@ -1590,6 +1590,10 @@ export const RESERVED_SYNTAX_ROUTES: readonly string[] = [
   "/a/:x+b",
   "/a/:x*.png",
   "/a/:x(\\d+)?.png",
+  // `**:name?` read the `**` as text before the param (`/p/**:i?` gave
+  // `{ _: "" }` on `/p`, an undeclared param); `**:name+` / `**:name*` throw.
+  "/p/**:i?",
+  "/p/**:i?/b",
   // `{…}+` / `{…}*` always threw an invalid-regex `SyntaxError`.
   "/a/{b}+",
   "/a/{b}*",

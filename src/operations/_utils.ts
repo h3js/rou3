@@ -130,6 +130,7 @@ export const MISPLACED_MODIFIER =
  * drops the segment). `+` / `*` repeat a whole-segment `:name` only: `input`
  * (quoted in the error) repeating a constrained param (`:x(\\d+)+`) or part
  * of a segment (`pre-:x+`) dropped the constraint / the rest of the segment.
+ * A `?` on a `**:name` throws too (the `**` is no text before the param).
  */
 export function expandModifiers(segments: string[], input?: string): string[] | undefined {
   for (let i = 0; i < segments.length; i++) {
@@ -141,7 +142,8 @@ export function expandModifiers(segments: string[], input?: string): string[] | 
     const suf = segments.slice(i + 1);
     // Without the param: the text before it in its segment, or no segment
     const without = "/" + pre.concat(m[1] || [], suf).join("/");
-    if (m[3] === "?") {
+    // A `**` before it is no text: `**:name?` throws like `**:name+`
+    if (m[3] === "?" && m[1] !== "**") {
       return ["/" + pre.concat(m[1] + m[2], suf).join("/"), without];
     }
     if (m[1] || m[2].includes("(")) {

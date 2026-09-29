@@ -116,8 +116,10 @@ describe("benchmark", () => {
     // +~68B raw / +~25B gzip: addRoute rejects U+FFFD-U+FFFF, the internal
     // placeholders a route could write as syntax (`\uFFFD0` as an escaped `:`,
     // the `:name*` marker).
-    expect(bytes).toBeLessThanOrEqual(10370); // <10.37kb
-    expect(gzipSize).toBeLessThanOrEqual(4330); // <4.33kb
+    // +~13B raw / +~4B gzip: `**:name?` throws (it read the `**` as text
+    // before the param and gave an undeclared `_`).
+    expect(bytes).toBeLessThanOrEqual(10378); // <10.38kb
+    expect(gzipSize).toBeLessThanOrEqual(4332); // <4.34kb
   });
 });
 
