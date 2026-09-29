@@ -5,9 +5,6 @@ Lightweight, high-performance JavaScript/TypeScript HTTP router. Zero runtime de
 > [!IMPORTANT]
 > Keep `AGENTS.md` updated with project status.
 
-> [!IMPORTANT]
-> **v1 stability contract:** README "Stability" defines what semver covers (public functions + documented behavior; `RouterContext` is opaque and the tree types are `@internal`; `routeToRegExp` match semantics, not its source; the `routeNodeKeys` key grammar as a set; `RouteComparison` closed; `findAllRoutes` "broader before narrower" only where one route contains the other without optional syntax; `regExpToRoute` / `InferRouteParams` `@experimental`). A change that breaks it needs a major; record user-facing breaking changes in `MIGRATION.md`.
-
 ## Project Structure
 
 ```
