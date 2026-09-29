@@ -170,7 +170,7 @@ describe("routeToRegExp", () => {
       "/a/\\:x+/b",
       "/api/*$",
       "/x/^:id",
-      "/x/:id$",
+      "/x/:id\\$",
       "/a/x|:y",
       "/secret/:id|x/admin",
       "/a/:x[0-9]",
@@ -688,6 +688,18 @@ describe("reserved pattern syntax", () => {
     ]) {
       expect(() => addRoute(createRouter(), "", route), route).toThrow(
         "must follow a whole-segment `:name` (escape a literal one with `\\`)",
+      );
+    }
+  });
+
+  it("names the param a `$` or non-ASCII char would extend", () => {
+    for (const [route, name] of [
+      ["/a/:id$", "id$"],
+      ["/:$x", "$x"],
+      ["/:café", "café"],
+    ]) {
+      expect(() => addRoute(createRouter(), "", route), route).toThrow(
+        `rou3: invalid param name "${name}" (${route})`,
       );
     }
   });

@@ -241,7 +241,8 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(/^\/a\/(?<x>[^/]+)-\/?$/)).toBe("/a/:x-");
     expect(regExpToRoute(/^\/a\/(?<x>[^/]+)-(?<y>[^/]+)\/?$/)).toBe("/a/:x-:y");
     expect(regExpToRoute(/^\/a\/(?<x>\d+)abc\/?$/)).toBe("/a/:x(\\d+)abc");
-    for (const route of ["/a/:x\\abc", "/a/pre-:x-suf", "/a/:x\\é"]) {
+    expect(regExpToRoute(/^\/a\/(?<x>[^/]+)\$\/?$/)).toBe("/a/:x\\$");
+    for (const route of ["/a/:x\\abc", "/a/pre-:x-suf", "/a/:x\\é", "/a/:x\\$"]) {
       expect(routeToRegExp(regExpToRoute(routeToRegExp(route))).source).toBe(
         routeToRegExp(route).source,
       );

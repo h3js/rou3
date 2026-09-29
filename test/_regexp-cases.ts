@@ -1570,6 +1570,13 @@ export const RESERVED_SYNTAX_ROUTES: readonly string[] = [
   "/a/**:café",
   "/a/:x\ud83d\udeb2",
   "/a/:\ud83d\udeb2",
+  // So is a `$` (a JS identifier char): `/a/:id$` was `:id` and a literal `$`
+  // (`/a/:id\\$` still is).
+  "/a/:id$",
+  "/a/:x$.png",
+  "/a/:x$?",
+  "/a/pre-:x$",
+  "/:$x",
   // A name must start with a letter or `_` (`/:0` collided with the unnamed
   // key `"0"`).
   "/:0",

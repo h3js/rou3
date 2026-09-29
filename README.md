@@ -117,8 +117,8 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 <summary>Param naming rules</summary>
 
 - A name starts with a letter or `_` and goes on with word characters (`[A-Za-z_][A-Za-z0-9_]*`), as in URLPattern: `:v2` and `:_0` are names, `:0` and `:1st` throw.
-- Any other ASCII character ends a name, `-` included: `/blog/:year-:month` has two params, and `/users/:user-id` is the param `user` followed by a literal `-id` (write `:user_id` for one param). A group's `{` or `}` ends one too: `/:a{b}?` is the param `a` followed by an optional `b`.
-- A non-ASCII character right after a name throws (`/:café`: it may be part of the name in URLPattern). To end a name early, escape the next character: `/:caf\\é` gives `{ caf }` followed by a literal `é`.
+- Any other ASCII character but `$` ends a name, `-` included: `/blog/:year-:month` has two params, and `/users/:user-id` is the param `user` followed by a literal `-id` (write `:user_id` for one param). A group's `{` or `}` ends one too: `/:a{b}?` is the param `a` followed by an optional `b`.
+- A non-ASCII character or `$` right after a name throws (`/:café`, `/:id$`: URLPattern reads them as part of the name). To end a name early, escape the next character: `/:caf\\é` gives `{ caf }` followed by a literal `é`, and `/:id\\$` gives `{ id }` followed by a literal `$`.
 - A name can appear only once per route: `/a/:x/:x` throws.
 - A `:` must start a name. Write a literal colon as `\\:`.
 - `+` and `*` only repeat a whole-segment `:name` (`:id(\d+)+` and `pre-:x+` throw).
@@ -155,7 +155,7 @@ addRoute(router, "GET", "/files/\\(2024\\)", {}); // matches only "/files/(2024)
 
 ### Invalid patterns
 
-`addRoute` throws a `rou3:` error that quotes the pattern when the syntax has no meaning, instead of silently matching something unexpected. For example: an unclosed `(` or `{`, a nested group, an empty group `()`, a modifier in the wrong place (`*?`, `**+`, `:x.png?`), a `?` after plain text (`/foo?`: lookup paths have no query string, escape a literal one as `\\?`), a `**` in the middle of a segment (`/a**b`), an invalid or repeated param name (`/:0`, `/:café`, `/a/:x/:x`), a second catch-all, a `\/`, a capturing group inside a regex constraint (`/:x((a))`, use `(?:…)`), or an anchor (`^`, `$`), look-around or numbered backreference (`\1`) in a regex constraint, or a character from U+FFFD to U+FFFF (used internally). The router tests a constraint against its segment alone, while `routeToRegExp` puts it inline, where it would see the rest of the path, so the two would match different paths.
+`addRoute` throws a `rou3:` error that quotes the pattern when the syntax has no meaning, instead of silently matching something unexpected. For example: an unclosed `(` or `{`, a nested group, an empty group `()`, a modifier in the wrong place (`*?`, `**+`, `:x.png?`), a `?` after plain text (`/foo?`: lookup paths have no query string, escape a literal one as `\\?`), a `**` in the middle of a segment (`/a**b`), an invalid or repeated param name (`/:0`, `/:café`, `/:id$`, `/a/:x/:x`), a second catch-all, a `\/`, a capturing group inside a regex constraint (`/:x((a))`, use `(?:…)`), or an anchor (`^`, `$`), look-around or numbered backreference (`\1`) in a regex constraint, or a character from U+FFFD to U+FFFF (used internally). The router tests a constraint against its segment alone, while `routeToRegExp` puts it inline, where it would see the rest of the path, so the two would match different paths.
 
 ### Differences from URLPattern
 
@@ -172,7 +172,7 @@ rou3 matches paths segment by segment in a tree, which leads to a few intentiona
 | Case sensitivity              | Can be case-insensitive            | Always case-sensitive                           |
 | Non-`/`-prefixed paths        | Supported                          | Paths must start with `/`                       |
 | Optional param after a greedy capture (`/*-:x?`, `/:a(\d+):b?`) | The greedy capture takes what it can (`/--`: `{ 0: "-" }`; `/12`: `{ a: "12" }`) | The route with the param wins (`/--`: `{ 0: "", x: "-" }`; `/12`: `{ a: "1", b: "2" }`) |
-| Param names                   | Unicode identifiers                | ASCII identifiers (`[A-Za-z_]\w*`)              |
+| Param names                   | Unicode identifiers                | `[A-Za-z_]\w*`; a non-ASCII char or `$` right after one throws |
 | Empty segments in `:name*` / `:name+` | Every repeated segment needs a value (`/foo/:bar*` doesn't match `/foo//`) | A `:name*` may be empty (`/foo/:bar*` on `/foo//` is `{ bar: "" }`), a `:name+` needs a value as a whole (`/foo/:bar+` on `/foo//a` is `{ bar: "/a" }`) |
 | Percent-encoding              | Normalizes `%xx` sequences         | Input is not decoded                            |
 

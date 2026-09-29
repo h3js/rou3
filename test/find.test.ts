@@ -229,6 +229,7 @@ describe("a `-` ends a param name", () => {
     "/g/:name-suffix",
     "/h/:test\\-id",
     "/users/:user-id/posts/:post-id",
+    "/i/:id\\$",
   ]);
   const compiledLookup = compileRouter(router);
   const lookups = [
@@ -253,6 +254,8 @@ describe("a `-` ends a param name", () => {
       expect(match("GET", "/users/1/posts/2")).toBeUndefined();
       // `:x-(\d+)` is `:x`, `-` and an unnamed group, as in URLPattern.
       expect(match("GET", "/f/1-2")?.params).toEqual({ x: "1", "0": "2" });
+      // An escaped `$` is a literal (`/i/:id$` throws: `id$` is one name in URLPattern).
+      expect(match("GET", "/i/1$")?.params).toEqual({ id: "1" });
     });
   }
 });

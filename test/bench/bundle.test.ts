@@ -120,7 +120,8 @@ describe("benchmark", () => {
     // before the param and gave an undeclared `_`).
     // +~62B raw / +~35B gzip: a `{` / `}` ends a param name, as in URLPattern
     // (`scanFirstGroup` escapes a name char after one; `/:a{b}?` was `:ab`).
-    expect(bytes).toBeLessThanOrEqual(10440); // <10.44kb
+    // +1B: a `$` right after a name throws (part of it in URLPattern).
+    expect(bytes).toBeLessThanOrEqual(10441); // <10.45kb
     expect(gzipSize).toBeLessThanOrEqual(4367); // <4.37kb
   });
 });

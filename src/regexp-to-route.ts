@@ -11,7 +11,8 @@ import { fromGroupName } from "./_group-names.ts";
 // Chars a literal is backslash-escaped as so `routeToRegExp` re-emits them
 // verbatim: rou3 route syntax (`: ( ) { } * \`), `?` / `+` (modifiers after a
 // param, rejected raw in a dynamic segment) and `| ^ $ [ ]` (literals there
-// too, but kept escaped so reversed routes keep their spelling). `.` is
+// too, but kept escaped so reversed routes keep their spelling; a raw `$` right
+// after a `:name` throws). `.` is
 // omitted on purpose: a literal dot stays raw.
 const ROUTE_SPECIAL = new Set([
   ":",

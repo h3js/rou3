@@ -30,7 +30,7 @@ import {
  * a `?` / `+` / `*` anywhere but after a whole-segment `:name` (`?` also
  * after `:name(regex)` and in a mixed segment), a raw `?` after plain text
  * (`/foo?`), a `**` in the middle of a segment (`/a**b`), an empty or `(?`
- * group, a `:` without a valid name (`/:0`, `/:café`), more after `**:name`
+ * group, a `:` without a valid name (`/:0`, `/:café`, `/:id$`), more after `**:name`
  * in its segment, a repeated param name, more than one `**`, a `\` that
  * escapes no char of its segment (`\/`), an anchor, look-around,
  * backreference or capturing group in a constraint (`/:x((a))`; use `(?:…)`),
@@ -269,10 +269,10 @@ export function getParamRegexp(
     const c = segment.charCodeAt(j);
     if (_d === 0) {
       if (c === 58 /* : */) {
-        // A name is `[A-Za-z_]\w*` (a `-` ends it); a non-ASCII char can't
-        // follow it (it may be part of the name in URLPattern)
+        // A name is `[A-Za-z_]\w*` (a `-` ends it); a `$` or non-ASCII char
+        // can't follow it (part of the name in URLPattern: `:id$` is `id$`)
         _e =
-          j + 1 + addName(names, /^[\w\x80-\ufffc]*/.exec(segment.slice(j + 1))![0], input).length;
+          j + 1 + addName(names, /^[\w$\x80-\ufffc]*/.exec(segment.slice(j + 1))![0], input).length;
       } else if (c === 40 /* ( */ && /[?)]/.test(segment[j + 1])) {
         invalidSyntax("empty or `(?` group", input);
       } else if (c === 63 /* ? */ || c === 43 /* + */ || (c === 42 /* * */ && j === _e)) {
