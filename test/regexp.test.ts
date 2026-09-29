@@ -114,9 +114,10 @@ describe("routeToRegExp", () => {
   it("reads an escaped brace as no group before an in-segment optional", () => {
     const paths = ["/{x/a-b", "/{x/a-", "/{x/a", "/a}/a-b", "/a}/a-", "/{x}/a-b-c", "/x/a-b"];
     paths.push("/12", "/123", "/12/a-b", "/12/a-", "/1/a-b");
-    const routes = ["/\\{x/*-:e?", "/a\\}/*-:e?", "/\\{x\\}/*-:e?", "/(\\d{2}):e?"];
-    for (const route of routes.concat("/:x(\\d{2})/*-:e?")) {
-      if (!DUPLICATE_NAMED_GROUPS) {
+    // All but `/(\d{2}):e?` fall back to an alternation repeating a group name
+    const alternation = ["/\\{x/*-:e?", "/a\\}/*-:e?", "/\\{x\\}/*-:e?", "/:x(\\d{2})/*-:e?"];
+    for (const route of alternation.concat("/(\\d{2}):e?")) {
+      if (!DUPLICATE_NAMED_GROUPS && alternation.includes(route)) {
         expect(() => routeToRegExp(route), route).toThrowError(NEEDS_DUPLICATE_NAMES);
         continue;
       }
