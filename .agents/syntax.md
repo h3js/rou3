@@ -13,7 +13,7 @@ Any `\x` outside a constraint is a literal `x`, as in URLPattern (`/foo\.bar` ma
 
 ## Group delimiters `{…}`
 
-`_group-delimiters.ts` expands `{…}` and `{…}?` before insert/remove/regexp. `scanFirstGroup()` is shared with `inlineOptionalGroup()` (`regexp.ts`) so both classify groups identically; it returns a `[pre, body, suf, mod]` tuple (smaller core bundle than an object).
+`_group-delimiters.ts` expands `{…}` and `{…}?` before insert/remove/regexp. `scanFirstGroup()` is shared with `inlineOptionalGroup()` (`regexp.ts`) so both classify groups identically; it returns a `[pre, body, suf, mod]` tuple (smaller core bundle than an object). A `{` / `}` ends a param name, as in URLPattern: `scanFirstGroup` escapes a name char (`[\w$]` or non-ASCII, `NAME_CHAR`) that starts `body` or `suf`, which would otherwise join onto a `:name` once expanded (`/:a{b}?` → `/:a\b` + `/:a`, `/:foo{}bar` → `/:foo\bar`). Both start outside any constraint, where a `\x` is always a literal `x`, so the escape is a no-op after anything but a name and needs no check (bundle size).
 
 ## Reserved syntax
 
@@ -39,7 +39,7 @@ URLPattern semantics, so the same pattern splits a segment the same way everywhe
 
 ## Param names and capture-group names
 
-Name grammar everywhere: `[A-Za-z_]\w*`, as in URLPattern restricted to ASCII: a `-` ends a name (`:test-id` is `:test` + `-id`, `:year-:month` two params), a digit can't start one (`:0` would collide with the unnamed key `"0"`), and a non-ASCII char right after one throws (it may be part of the name in URLPattern; `:caf\é` is a literal). Sites to keep in sync: `addName`, `getParamRegexp` and `_add` (`add.ts`), `expandModifiers`, every `regexp.ts` site, `paramName()` / the name-extending-literal escape in `reverseSegment` (`regexp-to-route.ts`), `ExtractParams` / `TakeName` (`types.ts`; `ExtractParams` skips the `:` of `(?:`).
+Name grammar everywhere: `[A-Za-z_]\w*`, as in URLPattern restricted to ASCII: a `-` ends a name (`:test-id` is `:test` + `-id`, `:year-:month` two params), a digit can't start one (`:0` would collide with the unnamed key `"0"`), and a non-ASCII char right after one throws (it may be part of the name in URLPattern; `:caf\é` is a literal). Sites to keep in sync: `addName`, `getParamRegexp` and `_add` (`add.ts`), `expandModifiers`, `NAME_CHAR` (`_group-delimiters.ts`), every `regexp.ts` site, `paramName()` / the name-extending-literal escape in `reverseSegment` (`regexp-to-route.ts`), `ExtractParams` / `TakeName` (`types.ts`; `ExtractParams` skips the `:` of `(?:`).
 
 Named capture groups need identifiers, so every regex-emitting path goes through `_group-names.ts`:
 

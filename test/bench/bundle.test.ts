@@ -118,8 +118,10 @@ describe("benchmark", () => {
     // the `:name*` marker).
     // +~13B raw / +~4B gzip: `**:name?` throws (it read the `**` as text
     // before the param and gave an undeclared `_`).
-    expect(bytes).toBeLessThanOrEqual(10378); // <10.38kb
-    expect(gzipSize).toBeLessThanOrEqual(4332); // <4.34kb
+    // +~62B raw / +~35B gzip: a `{` / `}` ends a param name, as in URLPattern
+    // (`scanFirstGroup` escapes a name char after one; `/:a{b}?` was `:ab`).
+    expect(bytes).toBeLessThanOrEqual(10440); // <10.44kb
+    expect(gzipSize).toBeLessThanOrEqual(4367); // <4.37kb
   });
 });
 

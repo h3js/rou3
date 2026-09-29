@@ -350,6 +350,40 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/blog/123-my-post", { id: "123", title: "my-post" }],
     ],
   },
+  // A `{` / `}` ends a param name, as in URLPattern (the text after one was
+  // joined onto it: `/:a{b}?` was a param `ab`).
+  "/:a{b}?": {
+    regex: /^\/(?<a>[^/]+?)(?:b)?\/?$/,
+    match: [
+      ["/x", { a: "x" }],
+      ["/xb", { a: "x" }],
+      ["/xbb", { a: "xb" }],
+    ],
+    noMatch: ["/", "/x/b"],
+  },
+  "/:a{b}": {
+    regex: /^\/(?<a>[^/]+?)b\/?$/,
+    match: [["/xb", { a: "x" }]],
+    noMatch: ["/x", "/b"],
+  },
+  "/:foo{}bar": {
+    regex: /^\/(?<foo>[^/]+?)bar\/?$/,
+    match: [["/xbar", { foo: "x" }]],
+    noMatch: ["/x", "/bar"],
+  },
+  "/c/{:a}b": {
+    regex: /^\/c\/(?<a>[^/]+?)b\/?$/,
+    match: [["/c/xb", { a: "x" }]],
+    noMatch: ["/c/x"],
+  },
+  "/x/:a{-:b}?": {
+    regex: /^\/x\/(?<a>[^/]+?)(?:-(?<b>[^/]+?))?\/?$/,
+    match: [
+      ["/x/q", { a: "q", b: undefined }],
+      ["/x/q-r", { a: "q", b: "r" }],
+      ["/x/q-r-s", { a: "q", b: "r-s" }],
+    ],
+  },
   "/foo{/bar}?": {
     regex: /^\/foo(?:\/bar)?\/?$/,
     match: [["/foo"], ["/foo/bar"]],

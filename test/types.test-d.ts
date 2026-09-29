@@ -157,6 +157,13 @@ describe("types", () => {
       expectTypeOf<InferRouteParams<"/static\\:path/:id">>().toEqualTypeOf<{ id: string }>();
     });
 
+    it("should end param names at a `{` / `}`", () => {
+      expectTypeOf<InferRouteParams<"/:a{b}?">>().toEqualTypeOf<{ a: string }>();
+      expectTypeOf<InferRouteParams<"/:a{b}">>().toEqualTypeOf<{ a: string }>();
+      expectTypeOf<InferRouteParams<"/:foo{}bar">>().toEqualTypeOf<{ foo: string }>();
+      expectTypeOf<InferRouteParams<"/c/{:a}b">>().toEqualTypeOf<{ a: string }>();
+    });
+
     it("should infer mixed params", () => {
       type Params = InferRouteParams<"/test/:id/*/foo/:name/**">;
       type Expected = { id: string; "0": string; name: string; _: string };

@@ -117,7 +117,7 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 <summary>Param naming rules</summary>
 
 - A name starts with a letter or `_` and goes on with word characters (`[A-Za-z_][A-Za-z0-9_]*`), as in URLPattern: `:v2` and `:_0` are names, `:0` and `:1st` throw.
-- Any other ASCII character ends a name, `-` included: `/blog/:year-:month` has two params, and `/users/:user-id` is the param `user` followed by a literal `-id` (write `:user_id` for one param).
+- Any other ASCII character ends a name, `-` included: `/blog/:year-:month` has two params, and `/users/:user-id` is the param `user` followed by a literal `-id` (write `:user_id` for one param). A group's `{` or `}` ends one too: `/:a{b}?` is the param `a` followed by an optional `b`.
 - A non-ASCII character right after a name throws (`/:café`: it may be part of the name in URLPattern). To end a name early, escape the next character: `/:caf\\é` gives `{ caf }` followed by a literal `é`.
 - A name can appear only once per route: `/a/:x/:x` throws.
 - A `:` must start a name. Write a literal colon as `\\:`.

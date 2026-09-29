@@ -257,6 +257,51 @@ describe("a `-` ends a param name", () => {
   }
 });
 
+describe("a `{` / `}` ends a param name", () => {
+  // As in URLPattern (and `InferRouteParams`): group expansion joined the text
+  // after a `{` / `}` onto the name (`/:a{b}?` gave `{ ab: "x" }` on `/x`).
+  const routes = [
+    "/o/:a{b}?",
+    "/r/:a{b}",
+    "/e/:foo{}bar",
+    "/c/{:a}b",
+    "/w/:a{-x}?y",
+    "/x/:a{-:b}?",
+  ];
+  const router = createRouter(routes);
+  const compiledLookup = compileRouter(router);
+  // eslint-disable-next-line no-new-func
+  const aotLookup = new Function(
+    `return ${compileRouterToString(router)}`,
+  )() as typeof compiledLookup;
+  const lookups = [
+    { name: "findRoute", match: (p: string) => findRoute(router, "GET", p) },
+    { name: "compiledLookup", match: (p: string) => compiledLookup("GET", p) },
+    { name: "aotLookup", match: (p: string) => aotLookup("GET", p) },
+  ];
+  for (const { name, match } of lookups) {
+    it(`reads the text after it as a literal (${name})`, () => {
+      expect(match("/o/x")?.params).toEqual({ a: "x" });
+      expect(match("/o/xb")?.params).toEqual({ a: "x" });
+      expect(match("/r/xb")?.params).toEqual({ a: "x" });
+      expect(match("/r/x")).toBeUndefined();
+      expect(match("/e/xbar")?.params).toEqual({ foo: "x" });
+      expect(match("/e/x")).toBeUndefined();
+      expect(match("/c/xb")?.params).toEqual({ a: "x" });
+      expect(match("/w/qy")?.params).toEqual({ a: "q" });
+      expect(match("/w/q-xy")?.params).toEqual({ a: "q" });
+      expect(match("/x/q")?.params).toEqual({ a: "q" });
+      expect(match("/x/q-r")?.params).toEqual({ a: "q", b: "r" });
+    });
+  }
+
+  it("removes by the pattern as written", () => {
+    const r = createRouter(routes);
+    for (const route of routes) removeRoute(r, "GET", route);
+    expect(r.root).toEqual(createEmptyRouter().root);
+  });
+});
+
 describe("params sharing a segment (URLPattern)", () => {
   const router = createRouter([
     "/a/:a-:b",
