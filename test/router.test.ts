@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
 import type { RouterContext } from "../src/types.ts";
 import { createRouter, formatTree } from "./_utils.ts";
-import { addRoute, findRoute, removeRoute } from "../src/index.ts";
+import {
+  addRoute,
+  findOverlappingRoutes,
+  findRoute,
+  removeRoute,
+  routeToRegExp,
+} from "../src/index.ts";
 import { compileRouter, compileRouterToString } from "../src/compiler.ts";
 
 type TestRoute = {
@@ -804,6 +810,105 @@ const PERCENT_ENCODED_CASES: [string, string, Record<string, string> | null][] =
   ["/:x(a\\{1\\})", "/a{1}", { x: "a{1}" }],
 ];
 
+// `pre{:x}?` (after text, ending its segment) is `pre:x?`, as in URLPattern,
+// but a `**` is no text: `/a/**{:x}?` stays two routes (`**:x?` throws).
+describe("Router: `{:name}?` group after text in its segment", () => {
+  const data = { path: "x" };
+  const lookup = (routes: string[], path: string) => {
+    const router = createRouter([]);
+    for (const route of routes) addRoute(router, "GET", route, data);
+    const found = findRoute(router, "GET", path);
+    return found && { ...found.params };
+  };
+
+  it("keeps a group after `**` two routes", () => {
+    for (const [route, routes] of [
+      ["/a/**{:x}?", ["/a/**:x", "/a/**"]],
+      ["/**{:x}?", ["/**:x", "/**"]],
+      ["/a/**{:x}?/b", ["/a/**:x/b", "/a/**/b"]],
+      // Only a lone param ending its segment is rewritten, after text
+      ["/x{:a/b}?", ["/x:a/b", "/x"]],
+      ["/{:a:b}?", ["/:a:b", "/"]],
+      ["/a/{:x}?", ["/a/:x", "/a"]],
+      // An escaped `\**` is text: `:x?` there
+      ["/a/\\**{:x}?", ["/a/\\**:x?"]],
+    ] as [string, string[]][]) {
+      expect(() => addRoute(createRouter([]), "GET", route), route).not.toThrow();
+      expect(() => routeToRegExp(route), route).not.toThrow();
+      const paths = ["/a", "/a/", "/a/b", "/a/b/c", "/a/b/b", "/a//b", "/b", "/x", "/x1/b"];
+      paths.push("/xy", "/a/*1", "/a/*", "/");
+      for (const path of paths) {
+        expect(lookup([route], path), `${route} ${path}`).toEqual(lookup(routes, path));
+      }
+    }
+    // More after `**:name` in its segment throws, naming what follows
+    expect(() => addRoute(createRouter([]), "GET", "/a/**:r{:x}?")).toThrow(
+      'invalid param name "r:x"',
+    );
+  });
+
+  // The group after it is left out on its own, so its unnamed captures use up
+  // their numbers (#234), in the router and its regex alike.
+  it("numbers unnamed captures after `{:x}?` like `:x?`", () => {
+    for (const [route, path, params] of [
+      ["/a/*{:x}?/b{/(\\d+)}?/*", "/a/q/b/z", { "0": "q", "2": "z" }],
+      ["/a/*{:x}?/b{/(\\d+)}?/*", "/a/q/b/1/z", { "0": "q", "1": "1", "2": "z" }],
+      ["/a/*-{:x}?/b{/*}?/*", "/a/q-/b/z", { "0": "q", "2": "z" }],
+      ["/a/*-{:x}?/b{/*}?/*", "/a/q-/b/y/z", { "0": "q", "1": "y", "2": "z" }],
+    ] as [string, string, Record<string, string>][]) {
+      const same = route.replace("{:x}?", ":x?");
+      expect(lookup([route], path), `${route} ${path}`).toEqual(params);
+      expect(lookup([same], path), `${same} ${path}`).toEqual(params);
+      // (A `{/*}?` before a `*` alternates in the regex, whose first branch
+      // captures the other expansion's way on `/a/q-/b/z`, as without `x`.)
+      if (route.includes("{/*}?")) continue;
+      let regex: RegExp;
+      try {
+        regex = routeToRegExp(route);
+      } catch (error) {
+        // Its alternation repeats group names: Node 22 has no support for it
+        expect((error as Error).message).toMatch(/duplicate named groups support/);
+        continue;
+      }
+      const groups = regex.exec(path)?.groups || {};
+      const captures = Object.fromEntries(
+        Object.entries(groups)
+          .filter(([, v]) => v !== undefined)
+          .map(([k, v]) => [k.replace(/^_(\d+)$/, "$1"), v]),
+      );
+      expect(captures, `${route} ${path} (regex)`).toEqual(params);
+    }
+  });
+
+  it("gives `{:x}?` the identity of `:x?`", () => {
+    for (const [route, same] of [
+      ["/a/*-{:x}?", "/a/*-:x?"],
+      ["/a/pre-{:x}?", "/a/pre-:x?"],
+      ["/a/:id(\\d+){:x}?/b", "/a/:id(\\d+):x?/b"],
+      // ... also next to another group (the identity is the text before
+      // expansion, with `{:x}?` read as `:x?`)
+      ["/a/*-{:x}?/b{.json}?", "/a/*-:x?/b{.json}?"],
+      ["/a/:id(\\d+){:x}?{/c}?", "/a/:id(\\d+){:x}?{/c}?"],
+      ["/a/*-{:x}?/b-{:y}?", "/a/*-:x?/b-:y?"],
+      ["/a/pre{:x(\\d+)}?/b{s}?", "/a/pre:x(\\d+)?/b{s}?"],
+    ]) {
+      for (const [add, remove] of [
+        [route, same],
+        [same, route],
+      ]) {
+        const router = createRouter([add]);
+        removeRoute(router, "GET", remove);
+        expect(formatTree(router.root), `${add} - ${remove}`).toBe("<root>");
+      }
+      // Registered both ways with the same data: one route
+      const router = createRouter([]);
+      addRoute(router, "GET", route, data);
+      addRoute(router, "GET", same, data);
+      expect(findOverlappingRoutes(router, "GET", same), route).toHaveLength(1);
+    }
+  });
+});
+
 describe("Router: percent-encoded literal text", () => {
   for (const [pattern, path, params] of PERCENT_ENCODED_CASES) {
     it(`${JSON.stringify(pattern)} on ${JSON.stringify(path)}`, () => {
@@ -858,11 +963,35 @@ describe("Router: percent-encoded literal text", () => {
       ["/a\\{b\\}", "/a%7Bb%7D"],
       ["/x/**/é", "/x/**/é"],
       ["/a\uD800", "/a\uD800"],
+      // A dynamic segment's literal text too, outside its constraints
+      ["/café-:id", "/caf%C3%A9-:id"],
+      ["/caf%C3%A9-:id", "/café-:id"],
+      ["/x/^:id", "/x/%5E:id"],
+      ["/x/:id-é(\\d+)", "/x/:id-%C3%A9(\\d+)"],
+      ["/x/**/é-:id", "/x/**/%C3%A9-:id"],
+      ["/café-:id?", "/caf%C3%A9-:id?"],
+      ["/x/*-é:id?", "/x/*-%C3%A9:id?"],
+      ["/x/:a-é/:b?", "/x/:a-%C3%A9/:b?"],
+      ["/x/:id-é{-:y}?", "/x/:id-%C3%A9{-:y}?"],
     ]) {
       const router = createRouter([route]);
       removeRoute(router, "GET", remove);
       expect(formatTree(router.root), `${route} - ${remove}`).toBe("<root>");
       expect(router.static, `${route} - ${remove}`).toEqual({});
+    }
+  });
+
+  it("keeps routes that only look alike once encoded", () => {
+    // A constraint is regex, never encoded: `é` and `%C3%A9` differ there.
+    for (const [route, remove] of [
+      ["/:x(é)", "/:x(%C3%A9)"],
+      ["/x/:a((?:b)é)", "/x/:a((?:b)%C3%A9)"],
+      ["/x/:a(é)-é", "/x/:a(%C3%A9)-é"],
+      ["/x/:id-%c3%a9", "/x/:id-é"],
+    ]) {
+      const router = createRouter([route]);
+      removeRoute(router, "GET", remove);
+      expect(formatTree(router.root), `${route} - ${remove}`).not.toBe("<root>");
     }
   });
 });

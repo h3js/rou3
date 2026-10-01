@@ -485,13 +485,13 @@ function compileFinalMatch(
       } else {
         const tmp = `_m${tmpCount++}`;
         conditions.push(`(${tmp}=${regexp}.exec(${params[i]}))!==null`);
-        // An optional param ending the segment (`*-:x?` is `…(?:(?<x>…))?$`)
+        // The in-place optional param (`*-:x?`, flagged by `getParamRegexp`)
         // gets no key when absent, as in the interpreter
-        const optional = map[1].source.endsWith("))?$") && groups.names[groups.names.length - 1];
         for (const name of groups.names) {
-          const prop = `${propKey(fromGroupName(name))}:${tmp}.groups.${name}`;
+          const param = fromGroupName(name);
+          const prop = `${propKey(param)}:${tmp}.groups.${name}`;
           paramsCode +=
-            name === optional ? `...(${tmp}.groups.${name}!==void 0&&{${prop}}),` : `${prop},`;
+            param === map[4] ? `...(${tmp}.groups.${name}!==void 0&&{${prop}}),` : `${prop},`;
         }
       }
     }
@@ -789,11 +789,12 @@ function rankRef(ctx: CompilerContext): string {
 
 function rankDescriptor(ctx: CompilerContext, data?: MethodData<any>): string {
   const descriptor = [-1, data?.suffix ? data.suffix[1] : 0];
-  for (const [index, name] of data?.paramsMap || []) {
+  for (const [index, name, , plain] of data?.paramsMap || []) {
     if (index < 0) {
       descriptor[0] = -(index + 1);
     } else {
-      descriptor.push(index, typeof name === "string" ? 0 : 2);
+      // As `kindAt` (operations/_suffix.ts)
+      descriptor.push(index, typeof name === "string" || plain ? 0 : 2);
     }
   }
   const key = JSON.stringify(descriptor);

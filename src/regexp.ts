@@ -166,6 +166,8 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
   // A group with more of its segment after it (`/{:x}?(\d+)`)
   const inSegment = suf !== "" && suf.charCodeAt(0) !== 47; /* '/' */
   if (
+    // `pre{:x}?` is `pre:x?`, one route (see `expandGroupDelimiters`)
+    expandGroupDelimiters(route)!.length < 2 ||
     // Only a single group is handled inline; bail if another one is left.
     scanFirstGroup(pre) ||
     scanFirstGroup(body) ||
@@ -253,7 +255,11 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
         // longer route matches (`/media/*{.webp}?`, see `appendsCleanly`).
         appendsCleanly(prefix, last.slice(k))
       ) {
-        merged = `${prefix}(?:${last.slice(k)})?`;
+        // A lone catch-all before more of the route (`{/:x+}?/b`) is a
+        // mid-route `:x*`: lazy like it (see `pushCatchAll`), one regex per
+        // route.
+        const lazy = suf !== "" && /^\/\(\?<\w+>\[\\s\\S\]\+\)$/.test(last.slice(k));
+        merged = `${prefix}(?:${last.slice(k)})?${lazy ? "?" : ""}`;
       }
     }
     if (!merged || ((suf !== "" || lookahead) && !fixedHead())) {
@@ -526,11 +532,14 @@ function routeToRegExpSegments(
   // `x`, as the router does unless `/a/:y` wins it (a `*` or a constrained
   // `:y`). A `:x` needs a value, so one that can be empty (`*`, `**`) or
   // start with an empty segment (`:y*`) doesn't nest in it (`/a/:x?/*` on
-  // `/a//` is `/a/*`), and follows it instead (`free`). `nest` counts the
-  // `)?` closers to insert before, `nestValue` whether the innermost group
-  // needs a value.
+  // `/a//` is `/a/*`), and follows it instead (`free`). A `:y*`, which can't
+  // be empty, leaves only the groups that need a value, and stays in an
+  // enclosing `*` one (`/a/*/:x?/:y*` on `/a/b//` is no match). `nest` counts
+  // the `)?` closers to insert before, `levels[i]` whether the group at depth
+  // `i` needs a value, `nestValue` the innermost one's.
   let nest = 0;
   let nestValue = false;
+  const levels: boolean[] = [];
   const pushOptional = (
     inner: string,
     nestable: boolean,
@@ -538,7 +547,14 @@ function routeToRegExpSegments(
     free = canBeEmpty(inner),
   ) => {
     const group = `(?:/${inner})?${lazy ? "?" : ""}`;
-    if (nestValue && free) nest = 0;
+    if (nestValue && free) {
+      if (canBeEmpty(inner)) {
+        nest = 0;
+      } else {
+        while (nest > 0 && levels[nest - 1]) nest--;
+        nestValue = false;
+      }
+    }
     if (reSegments.length === 0) {
       ownSeparator = true;
       reSegments.push(group);
@@ -548,7 +564,7 @@ function routeToRegExpSegments(
       reSegments.push(`${prev.slice(0, at)}${group}${prev.slice(at)}`);
     }
     if (nestable) {
-      nest++;
+      levels[nest++] = !free;
       nestValue = !free;
     }
   };

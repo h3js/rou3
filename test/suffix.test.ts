@@ -222,6 +222,19 @@ describe("segments after `**`: priority", () => {
     // Narrower wins even when the broader one diverges earlier
     [["/a/*/**", "/a/**/x"], "/a/q/x", ["/a/*/**", "/a/**/x"]],
     [["/*/**/p", "/**/b/p"], "/b/p", ["/*/**/p", "/**/b/p"]],
+    // An in-place optional after a lone `:name` / `*` restricts nothing: it
+    // ranks like a plain param, not a regex one (same node: it weighs as one)
+    [["/b/:id", "/**/:a:b?"], "/b/x", ["/**/:a:b?", "/b/:id"]],
+    [["/b/**", "/**/*:x?"], "/b/x", ["/**/*:x?", "/b/**"]],
+    [["/b/**", "/**/:a:b?"], "/b/x", ["/**/:a:b?", "/b/**"]],
+    [["/**/:id", "/**/:a:b?"], "/b/x", ["/**/:id", "/**/:a:b?"]],
+    // ... and so does any segment of captures alone with at most one required
+    // `:name` (it matches any non-empty value, or any value)
+    [["/b/:id", "/**/*:a"], "/b/x", ["/**/*:a", "/b/:id"]],
+    [["/b/**", "/**/*:a:b?"], "/b/x", ["/**/*:a:b?", "/b/**"]],
+    [["/b/:id", "/**/*:a:b?"], "/b/x", ["/**/*:a:b?", "/b/:id"]],
+    // Two required names need two chars: narrower, a regex param
+    [["/b/:id", "/**/:a:b"], "/b/xy", ["/b/:id", "/**/:a:b"]],
     // Paths no suffix route matches keep the tree order
     [["/api/**", "/**", "/**/_payload.json"], "/api/users", ["/**", "/api/**"]],
     [
@@ -278,6 +291,8 @@ describe("segments after `**`: priority", () => {
       "/**/1/p",
       "/**/:n(\\d+)",
       "/**/*.p",
+      // an in-place optional that restricts nothing more than `:y`
+      "/**/:y:z?",
     ];
     // `""`: an empty segment, which a `:a` / `**:n` can't take (#229), in
     // paths up to 3 segments (the sweep's cost grows with the paths)

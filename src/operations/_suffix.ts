@@ -123,19 +123,22 @@ export function rankFromEnd<T>(matches: MethodData<T>[], segments: string[]): Me
 }
 
 /**
- * 3 literal, 2 regex param, 0 plain param at path segment `p`, or where the
- * `**` covers it (ranked as 0), `~start` of the segments it takes.
+ * 3 literal, 2 regex param, 0 plain param (or a `plain` regex, which
+ * restricts no more, `*:a`, `:a:b?`: else `/**\/:a:b?` would beat the
+ * narrower `/b/:id`) at path
+ * segment `p`, or where the `**` covers it (ranked as 0), `~start` of the
+ * segments it takes.
  */
 function kindAt(m: MethodData<unknown>, n: number, p: number): number {
   const suffix = m.suffix;
   const end = suffix ? n - suffix[1] : n;
-  for (const [index, name] of m.paramsMap || []) {
+  for (const [index, name, , plain] of m.paramsMap || []) {
     if (index < 0) {
       if (p >= ~index && p < end) {
         return index;
       }
     } else if ((suffix && index > suffix[0] ? index - suffix[0] - 1 + end : index) === p) {
-      return typeof name === "string" ? 0 : 2;
+      return typeof name === "string" || plain ? 0 : 2;
     }
   }
   return 3;

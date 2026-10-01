@@ -26,9 +26,11 @@ const ESCAPABLE = ":(){}\\";
 /**
  * Where a route-pattern segment goes in the tree, exactly as `addRoute` inserts
  * it: `2` = `node.wildcard`, `1` = `node.param`, otherwise the returned string
- * is the `node.static` key, where any `\x` is a literal `x` (an escaped `\*` /
- * `\*\*` is the literal `*` / `**`: the escape is what keeps it out of the
- * wildcard/param branches) and `\uFFFD` placeholders decode back to `:(){}\`.
+ * is the `node.static` key: the literal text, where any `\x` is a literal `x`
+ * (an escaped `\*` / `\*\*` is the literal `*` / `**`: the escape is what
+ * keeps it out of the wildcard/param branches) and `encodeEscapes`'
+ * placeholders are their chars again (`:(){}\`), percent-encoded like
+ * URLPattern (`encodeLiteral`: `\{` and `é` key as `%7B` and `%C3%A9`).
  *
  * Shared by `addRoute` and `removeRoute`: the two must classify *and* key
  * segments identically, otherwise removal walks to a different — usually
@@ -50,6 +52,30 @@ export function segmentKey(segment: string): string | 1 | 2 {
   if (segment.includes("\\")) segment = segment.replace(/\\([\s\S])/g, "$1");
   if (segment.includes("\uFFFD")) segment = decodeEscapes(segment, "");
   return encodeLiteral(segment);
+}
+
+/**
+ * A dynamic (param / wildcard) segment's literal text percent-encoded like
+ * `getParamRegexp` does, so `café-:id` and `caf%C3%A9-:id` read as one route
+ * (see `routeId`). Constraints are regex and stay as written; `?` / `{` / `}`
+ * are syntax here (literal ones are escaped, `encodeEscapes`).
+ */
+export function dynamicKey(segment: string): string {
+  if (!/[\0- "#<>^`\x7F-\uFFFC]/.test(segment)) return segment;
+  let d = 0;
+  return segment.replace(/[()]|[\0- "#<>^`\x7F-\uFFFC]+/g, (c) =>
+    c === "(" ? (d++, c) : c === ")" ? (d && d--, c) : d ? c : encodeLiteral(c),
+  );
+}
+
+/**
+ * A registration identity (`MethodData.route`) in canonical form, for the
+ * places that compare them (`removeRoute`, `findOverlappingRoutes`): each
+ * segment through `dynamicKey` (a no-op on a static key, already encoded).
+ * Kept off `addRoute`, so routers that never compare don't pay for it.
+ */
+export function routeId(id: string): string {
+  return id.split("/").map(dynamicKey).join("/");
 }
 
 /**
@@ -254,7 +280,7 @@ export function splitRoute(path: string): string[] {
  * modifiers), shared by `addRoute` and `removeRoute`: its pre-expansion text
  * with trailing empties dropped and static segments keyed like the tree, so
  * spellings the tree cannot tell apart (`/a/:x?/` vs `/a/:x?`, `\)` vs `)`)
- * share one identity.
+ * share one identity (compared through `routeId`).
  */
 export function expandedRouteId(path: string): string {
   return (

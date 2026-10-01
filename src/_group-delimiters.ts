@@ -70,6 +70,23 @@ export function expandGroupDelimiters(path: string, input: string = path): strin
     invalidSyntax(`unsupported \`{}${mod}\``, input);
   }
 
+  // An optional lone param after text, ending its segment (`*-{:x}?`,
+  // `pre{:x(\d+)}?`), is `:x?` there, as in URLPattern: `getParamRegexp`
+  // compiles it in place after a capture, `expandModifiers` expands it after
+  // text. One that starts its segment (`/{:x}?`) is a group, and so is one
+  // in a `**` segment, which has no text (`/a/**{:x}?` is `/a/**:x` or
+  // `/a/**`; an escaped `\**` is text). (A name char starting `suf` is
+  // escaped, so it can't end the name.)
+  if (
+    mod === "?" &&
+    /^(?!\*\*)./.test(pre.slice(pre.lastIndexOf("/") + 1)) &&
+    /^:[A-Za-z_]\w*(\([^)]*\))?$/.test(body) &&
+    (!suf || suf[0] === "/")
+  ) {
+    // Alone: the caller expands (and numbers, `skipGroup`) the next group
+    return [pre + body + "?" + suf];
+  }
+
   const full = joinGroup(joinGroup(pre, body, input), suf, input);
   return mod ? [full, joinGroup(pre, suf, input)] : [full];
 }
