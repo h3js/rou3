@@ -1,4 +1,4 @@
-import { invalidSyntax } from "./operations/_utils.ts";
+import { absolutePattern, invalidSyntax, MISPLACED_MODIFIER } from "./operations/_utils.ts";
 
 /** `[pre, body, suf, mod]` split of a `{...}` group, or `undefined`. */
 export type GroupDelimiter = [pre: string, body: string, suf: string, mod: string | undefined];
@@ -56,6 +56,15 @@ const NAME_CHAR = /^[\w$\x80-￼]/;
  * Expand the first `{...}` / `{...}?` group of `path` into the routes it
  * stands for. `{...}+` / `{...}*` repetition is not supported: `input` (quoted
  * in the error) is rejected.
+ *
+ * A pattern starting with a group gets no `/` in front (see `addRoute`): each
+ * expansion is read on its own. One starting with `/` is absolute, as in
+ * URLPattern (`{/:a}?/b` is `/:a/b` or `/b`); any other one, the empty one
+ * too, is relative and gets a `/` like a pattern (`{a}?/b` is `/a/b` or `/b`,
+ * `{/:a}?` is `/:a` or `/`). One starting with `{` is left to the next group.
+ * Text right after a leading `{/…}?` (`{/a}?b`, `{/:a}?.png`, `{/a}?{b}?/c`)
+ * throws: without the group the route would be relative, a form URLPattern
+ * gives no meaning (it matches only `/ab`), so a `/b` would be a guess.
  */
 export function expandGroupDelimiters(path: string, input: string = path): string[] | undefined {
   if (!path.includes("{")) return;
@@ -70,5 +79,55 @@ export function expandGroupDelimiters(path: string, input: string = path): strin
     invalidSyntax(`unsupported \`{}${mod}\``, input);
   }
 
-  return mod ? [pre + body + suf, pre + suf] : [pre + body + suf];
+  // An optional lone param after text, ending its segment (`*-{:x}?`,
+  // `pre{:x(\d+)}?`), is `:x?` there, as in URLPattern: `getParamRegexp`
+  // compiles it in place after a capture, `expandModifiers` expands it after
+  // text. One that starts its segment (`/{:x}?`) is a group, and so is one
+  // in a `**` segment, which has no text (`/a/**{:x}?` is `/a/**:x` or
+  // `/a/**`; an escaped `\**` is text). (A name char starting `suf` is
+  // escaped, so it can't end the name.)
+  if (
+    mod === "?" &&
+    /^(?!\*\*)./.test(pre.slice(pre.lastIndexOf("/") + 1)) &&
+    /^:[A-Za-z_]\w*(\([^)]*\))?$/.test(body) &&
+    (!suf || suf[0] === "/")
+  ) {
+    // Alone: the caller expands (and numbers, `skipGroup`) the next group
+    return [pre + body + "?" + suf];
+  }
+
+  const full = joinGroup(joinGroup(pre, body, input), suf, input);
+  const expanded = mod ? [full, joinGroup(pre, suf, input)] : [full];
+  if (pre) return expanded;
+  // After a leading `{/…}?`: `/`, another `{/…}` group or nothing
+  if (mod && body.charCodeAt(0) === 47 /* '/' */ && suf && !/^\{?\//.test(suf)) {
+    invalidSyntax("text after a leading `{/...}?`", input);
+  }
+  return expanded.map(absolutePattern);
+}
+
+/**
+ * `a` + `b`, two parts of a route a `{` / `}` stood between. A `{` / `}` ends
+ * a param name (see {@link scanFirstGroup}), so where `a` ends in a bare
+ * `:name` and `b` starts with a regex group, the group is an unnamed capture
+ * next to the param, as in URLPattern, not its constraint: the param gets the
+ * lazy constraint a `:name` sharing its segment has anyway (`[^/]+?`, spelled
+ * without a `/`, which would split the segment). A `?` / `+` / `*` there, or
+ * after a constraint, group or `*`, would be a modifier on it (`/*{*}` a
+ * `**`), which it is not in URLPattern: `input` (quoted in the error) is
+ * rejected.
+ */
+export function joinGroup(a: string, b: string, input?: string): string {
+  // `a` ends in a `:name` (not a `**:name`, which ends its segment anyway; an
+  // invalid name throws later), a group of its segment (a stray `)` is a
+  // literal) or a `*`, none escaped, and `b` starts with a `(`, `?`, `+` or
+  // `*` (an empty `b` appends `"undefined"`, which ends in none of them)
+  const m = /(?<!\\)(\\\\)*((?<!\*\*):\w+|\([^/]*[^\\]\)|\*)([(?+*])$/.exec(a + b[0]);
+  if (m) {
+    // `m[3]` is no `(` (`?`, `+` and `*` sort after it)
+    if (m[3] > "(") invalidSyntax(MISPLACED_MODIFIER, input!);
+    // Only a `:name` starts with a char after `*` (`(` and `*` don't)
+    if (m[2] > "*") a += "([^\\x2f]+?)";
+  }
+  return a + b;
 }

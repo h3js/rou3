@@ -1,9 +1,10 @@
-import { expandGroupDelimiters, scanFirstGroup } from "../_group-delimiters.ts";
+import { expandGroupDelimiters, joinGroup, scanFirstGroup } from "../_group-delimiters.ts";
 import { toGroupName, toUnnamedGroupKey } from "../_group-names.ts";
 import { createRouter } from "../context.ts";
 import { NullProtoObj } from "../object.ts";
 import type { Node, RouterContext, ParamsIndexMap } from "../types.ts";
 import {
+  absolutePattern,
   checkConstraints,
   decodeEscapes,
   encodeEscapes,
@@ -24,17 +25,25 @@ import {
  *
  * Param names are `[A-Za-z_]\w*`: a `-` ends one (`:test-id` is `:test` and a
  * literal `-id`), and so does a group's `{` / `}` (`/:a{b}?` is `:a` and an
- * optional `b`), as in URLPattern. Also as there, a `:name` sharing its
+ * optional `b`; `/{:a}(\\d+)` is `:a` and an unnamed `(\\d+)`, not its
+ * constraint), as in URLPattern. Also as there, a `:name` sharing its
  * segment takes as little as it can (`/:a-:b` on `/x-y-z` is `x` and `y-z`),
  * and a `?` on one after text makes only the param optional (`/pre-:x?`
  * matches `/pre-` and `/pre-a`; `/{pre-:x}?` drops the segment). After a
  * capture the segment is one regex, so a greedy capture takes what it can
  * (`/*-:x?` on `/--` is `{ 0: "-" }`, `/:a(\\d+):b?` on `/12` `{ a: "12" }`).
  *
+ * A pattern without a leading `/` gets one (`foo/:id`). One starting with a
+ * group gets it per expansion (`absolutePattern`): `{/:a}?/b` is absolute, as
+ * in URLPattern (`/:a/b` or `/b`), while `{a}?/b` is `/a/b` or `/b`. Text
+ * right after a leading `{/…}?` throws (`{/a}?b`: without the group the route
+ * would be relative).
+ *
  * @throws a `rou3:` error for pattern syntax with no meaning (yet), quoting
  * the pattern: an unclosed `(`, unbalanced or nested `{}`, `{…}+` / `{…}*`,
  * a `?` / `+` / `*` anywhere but after a whole-segment `:name` (`?` also
- * after `:name(regex)` and in a mixed segment), a raw `?` after plain text
+ * after `:name(regex)` and in a mixed segment; never after a group's `{` /
+ * `}`: `/{:a}{*}`, `/{:a}?*`), a raw `?` after plain text
  * (`/foo?`), a `**` in the middle of a segment (`/a**b`), an empty or `(?`
  * group, a `:` without a valid name (`/:0`, `/:café`, `/:id$`), more after `**:name`
  * in its segment, a repeated param name, more than one `**`, a `\` that
@@ -49,9 +58,7 @@ export function addRoute<T>(
   data?: T,
 ): void {
   method = method.toUpperCase();
-  if (path.charCodeAt(0) !== 47 /* '/' */) {
-    path = `/${path}`;
-  }
+  path = absolutePattern(path);
   checkConstraints(path);
   _add(ctx, method, path, data);
 }
@@ -80,7 +87,8 @@ function _add<T>(
 ): number {
   const groupExpanded = expandGroupDelimiters(path, input);
   if (groupExpanded) {
-    route ??= expandedRouteId(path);
+    // A single expansion (`/a/*-{:x}?` is `/a/*-:x?`) is that route
+    if (groupExpanded[1] !== undefined) route ??= expandedRouteId(path);
     _add(ctx, method, groupExpanded[0], data, route, input, unnamed);
     if (groupExpanded[1] !== undefined) {
       // A pattern without a `*` or `(` has no unnamed capture to renumber
@@ -207,6 +215,7 @@ function _insert<T>(
               : addName(names, segment.slice(3), input),
         segment.length === 2 /* optional */,
         empty,
+        undefined,
         i === join,
       ]);
       if (i === segments.length - 1) {
@@ -231,7 +240,7 @@ function _insert<T>(
       if (!/^:[A-Za-z_]\w*$/.test(segment)) {
         // The last piece of a split `*` starts with it: its number
         const tail = i === join + 1 && segment.charCodeAt(0) === 42; /* * */
-        const [regexp, nextIndex] = getParamRegexp(
+        const [regexp, nextIndex, inPlace] = getParamRegexp(
           segment,
           _unnamedParamIndex - (tail ? 1 : 0),
           names,
@@ -243,7 +252,17 @@ function _insert<T>(
         if (!suffix) {
           node.hasRegexParam = true;
         }
-        paramsMap.push([i, regexp, false, false, tail]);
+        // Captures alone with at most one required `:name` (`*:a`, `:a:b?`,
+        // `*:x?`) restrict the segment no more than a `:name` / `*`: they
+        // rank from the end like one (`kindAt`)
+        paramsMap.push([
+          i,
+          regexp,
+          false,
+          /^(?!(?:[\s\S]*:\w+(?![\w?])){2})(?:\*|:[A-Za-z_]\w*)+\??$/.test(segment),
+          inPlace,
+          tail,
+        ]);
       } else {
         paramsMap.push([i, addName(names, segment.slice(1), input), false]);
       }
@@ -327,7 +346,10 @@ export function skipGroup(path: string, input: string, unnamed: Unnamed = same):
   if (!/[*(]/.test(body) && !pre.endsWith("*")) return unnamed;
   const count = (p: string) => _add(createRouter(), "", p, undefined, undefined, input);
   const before = count(pre);
-  const skip = count(pre + body) - before;
+  // Joined like `expandGroupDelimiters` joins them: `/:a{(\d+)}?` holds an
+  // unnamed `(\d+)`, not `:a`'s constraint; a relative leading group is
+  // read after its `/` (`{(\d+)}?/*`)
+  const skip = count(absolutePattern(joinGroup(pre, body, input))) - before;
   return skip ? (index) => unnamed(index < before ? index : index + skip) : unnamed;
 }
 
@@ -365,7 +387,8 @@ function addName(names: string[], name: string, input: string): string {
  * stays greedy (URLPattern's `*` is a greedy `(.*)`). A `?` ending the
  * segment after a `:name` / `:name(…)` makes it optional in place
  * (`(?:(?<x>…))?`, unset when absent; `expandModifiers` leaves it here after
- * a capture), so the captures split the segment like URLPattern's regex.
+ * a capture), so the captures split the segment like URLPattern's regex. Its
+ * name is the third element of the result.
  */
 export function getParamRegexp(
   segment: string,
@@ -373,8 +396,10 @@ export function getParamRegexp(
   names: string[],
   input: string,
   groupKey: (index: number) => string = toUnnamedGroupKey,
-): [RegExp, number] {
+): [RegExp, number, string?] {
   let _i = unnamedStart;
+  // The in-place optional param's name
+  let _o: string | undefined;
   // Replace \x escapes outside (...) with a \uFFFE placeholder
   let _s = "",
     _d = 0,
@@ -441,14 +466,16 @@ export function getParamRegexp(
   }
   const regex = decodeEscapes(
     _s
-      // Names were checked and recorded above; a `\uFFFE:` is inside a group
-      .replace(/(?<!\uFFFE):([A-Za-z_]\w*)(?:\(([^)]*)\))?(\?$)?/g, (_, id, p, o) => {
-        const group = `(?<${toGroupName(id)}>${p || "[^/]+?"})`;
-        return o ? `(?:${group})?` : group;
+      // Names were checked and recorded above; a `\uFFFE:` is inside a group.
+      // `[^\x2f]+?` before a group is the `:name` `joinGroup` constrained,
+      // emitted as `[^/]+?` (alone it stays as written).
+      .replace(/(?<!\uFFFE):([A-Za-z_]\w*)(?:\(([^)]*)\))?(\?$)?/g, (m, id, p, o, i, s) => {
+        const group = `(?<${toGroupName(id)}>${p && p + s[i + m.length] != "[^\\x2f]+?(" ? p : "[^/]+?"})`;
+        return o ? ((_o = id), `(?:${group})?`) : group;
       })
       .replace(/\((?![?<])/g, () => `(?<${groupKey(_i++)}>`),
     "\uFFFE",
   ).replace(/\uFFFE([\s\S])/g, (_, c) => (/[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c));
 
-  return [new RegExp(`^${regex}$`), _i];
+  return [new RegExp(`^${regex}$`), _i, _o];
 }

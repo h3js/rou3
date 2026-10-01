@@ -1,9 +1,11 @@
 import { expandGroupDelimiters } from "../_group-delimiters.ts";
 import type { RouterContext, Node } from "../types.ts";
 import {
+  absolutePattern,
   encodeEscapes,
   expandedRouteId,
   expandModifiers,
+  routeId,
   segmentKey,
   splitRoute,
   splitStar,
@@ -22,32 +24,42 @@ import {
 export function removeRoute<T>(ctx: RouterContext<T>, method: string = "", path: string): void {
   // Normalize exactly like `addRoute`, or removal targets a different route
   method = method.toUpperCase();
-  if (path.charCodeAt(0) !== 47 /* '/' */) {
-    path = `/${path}`;
-  }
-  _removeRoute(ctx, method, path);
+  _removeRoute(ctx, method, absolutePattern(path));
 }
 
-/** Mirrors `_add` in add.ts, including how the `route` identity is derived. */
-function _removeRoute(ctx: RouterContext, method: string, path: string, route?: string): void {
-  const groupExpanded = expandGroupDelimiters(path);
+/**
+ * Mirrors `_add` in add.ts, including how the `route` identity is derived.
+ * `input` is the pattern as written, quoted in errors (as `addRoute` does).
+ */
+function _removeRoute(
+  ctx: RouterContext,
+  method: string,
+  path: string,
+  route?: string,
+  input: string = path,
+): void {
+  const groupExpanded = expandGroupDelimiters(path, input);
   if (groupExpanded) {
-    route ??= expandedRouteId(path);
+    // As in `_add`: a single expansion is that route
+    if (groupExpanded.length > 1) route ??= expandedRouteId(path);
     for (const expandedPath of groupExpanded) {
-      _removeRoute(ctx, method, expandedPath, route);
+      _removeRoute(ctx, method, expandedPath, route, input);
     }
     return;
   }
+  // A malformed `{…` (no group to expand, `addRoute` rejects it) has no
+  // leading `/`: it registered nothing
+  if (path.charCodeAt(0) !== 47 /* '/' */) return;
 
   path = encodeEscapes(path);
 
   const segments = splitRoute(path);
 
-  const modExpanded = expandModifiers(segments);
+  const modExpanded = expandModifiers(segments, input);
   if (modExpanded) {
     route ??= expandedRouteId(path);
     for (const expandedPath of modExpanded) {
-      _removeRoute(ctx, method, expandedPath, route);
+      _removeRoute(ctx, method, expandedPath, route, input);
     }
     return;
   }
@@ -85,9 +97,10 @@ function _remove(
     const methods = node.methods;
     const entries = methods?.[method];
     if (!entries) return;
-    route ??= key || "/";
+    // Compared canonically: `/café-:id` is `/caf%C3%A9-:id` (`routeId`)
+    const id = routeId(route ?? (key || "/"));
     for (let i = entries.length - 1; i >= 0; i--) {
-      if (entries[i].route === route) entries.splice(i, 1);
+      if (routeId(entries[i].route) === id) entries.splice(i, 1);
     }
     if (entries.length === 0) {
       delete methods[method];

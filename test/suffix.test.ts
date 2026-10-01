@@ -226,6 +226,13 @@ describe("segments after `**`: priority", () => {
     // A `*` ranks like a `**` over the segments it takes
     [["/a/*", "/a/:x/p"], "/a/b/p", ["/a/*", "/a/:x/p"]],
     [["/*/p", "/b/:s/p"], "/b/q/p", ["/*/p", "/b/:s/p"]],
+    // An in-place optional after a lone `:name` restricts nothing: it ranks
+    // like a plain param, not a regex one (same node: it weighs as one)
+    [["/b/:id", "/**/:a:b?"], "/b/x", ["/**/:a:b?", "/b/:id"]],
+    [["/b/**", "/**/:a:b?"], "/b/x", ["/**/:a:b?", "/b/**"]],
+    [["/**/:id", "/**/:a:b?"], "/b/x", ["/**/:id", "/**/:a:b?"]],
+    // Two required names need two chars: narrower, a regex param
+    [["/b/:id", "/**/:a:b"], "/b/xy", ["/b/:id", "/**/:a:b"]],
     // Paths no suffix route matches keep the tree order
     [["/api/**", "/**", "/**/_payload.json"], "/api/users", ["/**", "/api/**"]],
     [
@@ -287,6 +294,8 @@ describe("segments after `**`: priority", () => {
       "/b/*",
       "/*/p",
       "/b/*/p",
+      // an in-place optional that restricts nothing more than `:y`
+      "/**/:y:z?",
     ];
     // `""`: an empty segment, which a `:a` / `**:n` can't take (#229), in
     // paths up to 3 segments (the sweep's cost grows with the paths)

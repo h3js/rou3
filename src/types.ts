@@ -6,14 +6,27 @@ export interface RouterContext<T = unknown> {
 /**
  * One entry per param: its route index (`-(i + 1)` for a catch-all at `i`),
  * its name (`"0"`, `"1"`, … for a `*` or a bare `**`) or segment regex,
- * whether it may match no segment (a bare `**`; a trailing `*` after a
- * trailing slash only, see `matchesZero`), whether a catch-all that needs a
- * segment may capture `""` (a `*`, the `**:name` a `:name*` expands to; a
- * `:name` / `**:name` needs a value), and whether it adds to the capture of a
- * `*` inside a segment that an earlier piece started (see `splitStar`).
+ * whether it may match no segment (a bare `**`; a trailing `*` is optional
+ * too, see `matchesZero`), then:
+ * - a catch-all: whether one that needs a segment may capture `""` (a `*`;
+ *   a `:name` / `**:name` needs a value);
+ * - a segment regex: whether it restricts the segment no more than a plain
+ *   `:name` / `*` (`plain`: captures alone with at most one required
+ *   `:name`, `*:a`, `:a:b?`), so that the from-end ranking reads it as one
+ *   (`kindAt`), and the name of its in-place optional param (`*-:x?`: `x`,
+ *   unset when absent), as `getParamRegexp` built it;
+ * - and whether it adds to the capture of a `*` inside a segment that an
+ *   earlier piece started (see `splitStar`).
  */
 export type ParamsIndexMap = Array<
-  [Index: number, name: string | RegExp, optional: boolean, empty?: boolean, join?: boolean]
+  [
+    Index: number,
+    name: string | RegExp,
+    optional: boolean,
+    emptyOrPlain?: boolean,
+    inPlace?: string,
+    join?: boolean,
+  ]
 >;
 export type MethodData<T = unknown> = {
   data: T;

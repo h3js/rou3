@@ -163,7 +163,7 @@ function pushSorted<T>(matches: MethodData<T>[], match: MethodData<T>[]): void {
         // A required last param, a trailing `*` (it matches what a `**` does)
         // one point only
         const last = pm?.[pm.length - 1];
-        if (last && !last[2]) w += last[3] ? 1 : 2;
+        if (last && !last[2]) w += last[0] < 0 && last[3] ? 1 : 2;
         return [m, w];
       })
       .sort((a, b) => a[1] - b[1])

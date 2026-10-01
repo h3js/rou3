@@ -73,7 +73,7 @@ export function bareCatchAllKeys(node: Node<unknown> | undefined, join = false):
   if (!node) return [];
   const keys: string[] = [];
   for (const entries of Object.values(node.methods || {})) {
-    for (const [index, name, optional, , joins] of entries?.flatMap((m) => m.paramsMap || []) ||
+    for (const [index, name, optional, , , joins] of entries?.flatMap((m) => m.paramsMap || []) ||
       []) {
       if (index < 0 && optional && !joins === !join) keys.push(name as string);
     }

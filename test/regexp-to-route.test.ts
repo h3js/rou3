@@ -89,9 +89,10 @@ describe("regExpToRoute", () => {
       [/^\/path\/(?<_0>[^/]*)\/foo\/?$/, "/path/([^\\x2f]*)/foo"],
       [/^\/path\/(?<_0>[^/]*)\.png\/?$/, "/path/([^\\x2f]*).png"],
       [/^\/path(?:\/(?<_0>[^/]*))??\/?$/, "/path{/([^\\x2f]*)}?"],
-      // At the root: `/{…}?` (`/X` or `/`), as 0.11 emitted `/*` and `/*/:x?`
-      [/^(?:\/(?<_0>[^/]*))??\/?$/, "/{([^\\x2f]*)}?"],
-      [/^(?:\/(?<_0>[^/]*)(?:\/(?<x>[^/]+))?)??\/?$/, "/{([^\\x2f]*)/:x?}?"],
+      // At the root: a leading `{/…}?` (`/X` or `/`), as 0.11 emitted `/*`
+      // and `/*/:x?`
+      [/^(?:\/(?<_0>[^/]*))??\/?$/, "{/([^\\x2f]*)}?"],
+      [/^(?:\/(?<_0>[^/]*)(?:\/(?<x>[^/]+))?)??\/?$/, "{/([^\\x2f]*)/:x?}?"],
     ] as const) {
       expect(regExpToRoute(re), re.source).toBe(route);
       const router = createRouter<string>();
@@ -105,7 +106,7 @@ describe("regExpToRoute", () => {
     }
     // 0.11's `/*/:x*` (its `:x*` could be empty, a `:x*` can't now)
     expect(regExpToRoute(/^(?:\/(?<_0>[^/]*)(?:\/(?<x>(?:[\s\S]*[^/])?\/*?))??)??\/?$/)).toBe(
-      "/{([^\\x2f]*)/:x*}?",
+      "{/([^\\x2f]*)/:x*}?",
     );
     // No route matches what these do: a hand-written trailing one matches `""`
     // on `/path/` (a route's last segment can't be empty there), and 0.11's
@@ -153,6 +154,12 @@ describe("regExpToRoute", () => {
     // `{/:w+}?` is `:w*` (both need a value), which reverses in one spelling.
     expect(routeToRegExp("/a/c{/:w+}?").source).toBe(routeToRegExp("/a/c/:w*").source);
     expect(regExpToRoute(routeToRegExp("/a/c{/:w+}?"))).toBe("/a/c/:w*");
+    // ... also mid-route, where a `:w*` is lazy (`{/**:w}?` too).
+    for (const route of ["/a{/:w+}?/b", "/a{/**:w}?/b", "/a{/:w+}?/:y", "/{/:w+}?/b"]) {
+      const star = route.replace(/\{\/(?:\*\*:w|:w\+)\}\?/, "/:w*");
+      expect(routeToRegExp(route).source, route).toBe(routeToRegExp(star).source);
+      expect(regExpToRoute(routeToRegExp(route)), route).toBe(star);
+    }
     // `{/**}?` is `**` (both unset over zero segments), which reverses in one
     // spelling.
     expect(routeToRegExp("/a{/**}?").source).toBe(routeToRegExp("/a/**").source);
@@ -326,16 +333,41 @@ describe("regExpToRoute", () => {
         routeToRegExp(route).source,
       );
     }
-    // A group right after `:name` would read as its constraint, a `*` after a
-    // group as a modifier and a `*` after a `*` as a `**`: no route emits
-    // these, so they throw.
+    // A group right after `:name` would read as its constraint: the name gets
+    // the one it has, spelled without a `/` (`{:x}(\d+)` expands to the lazy
+    // one, see `joinGroup`).
+    expect(regExpToRoute(/^\/a\/(?<x>[^/]+?)(?<_0>\d+)\/?$/)).toBe("/a/:x([^\\x2f]+?)(\\d+)");
+    expect(regExpToRoute(/^\/a\/(?<x>[^/]+)(\d+)\/?$/)).toBe("/a/:x([^\\x2f]+)(\\d+)");
+    for (const route of ["/a/{:x}(\\d+)", "/a/:x{}(.*)", "/a/b-{:x}(c)"]) {
+      expect(routeToRegExp(regExpToRoute(routeToRegExp(route))).source).toBe(
+        routeToRegExp(route).source,
+      );
+    }
+    // The rest of a segment after an in-segment optional group is part of
+    // that segment: a `(.+)` there is no `:_0+`, and an in-place optional
+    // param after it (`-:bar?`) is no `{:bar}?` group (it routes otherwise)
+    for (const route of ["/{:foo}?(.+)", "/{a-}?(.+)", "/{x}?(.+)", "/{:foo(\\d+)}?(.+)"]) {
+      const back = regExpToRoute(routeToRegExp(route));
+      expect(() => addRoute(createRouter(), "", back), `${route} -> ${back}`).not.toThrow();
+      expect(routeToRegExp(back).source, route).toBe(routeToRegExp(route).source);
+    }
+    for (const route of ["/{:foo}?([^y]+)-:bar?", "/{:foo}?(.+)-:bar?"]) {
+      expect(() => regExpToRoute(routeToRegExp(route)), route).toThrow(/^rou3: /);
+    }
+    // A hand-written `[^\x2f]+?` constraint with no group after it is kept as
+    // written (only the `:name` before a group reads as `[^/]+?`)
+    for (const route of ["/a/:x([^\\x2f]+?)", "/a/pre-:x([^\\x2f]+?)"]) {
+      expect(routeToRegExp(route).source, route).toContain("(?<x>[^\\x2f]+?)");
+      expect(regExpToRoute(routeToRegExp(route)), route).toBe(route);
+    }
+    // A `*` after a group would read as a modifier and a `*` after a `*` as a
+    // `**`: no route emits these, so they throw.
     for (const re of [
       /^\/a(?<_0>[\s\S]*)(?<_1>[\s\S]*)\/?$/,
       /^\/a(?<_0>[\s\S]*)(?<_1>[\s\S]*)b\/?$/,
       /^\/(?<_0>[\s\S]*)(?<_1>[\s\S]*)\/?$/,
       /^\/a\/(?<x>[^/]+)(?<_0>[\s\S]*)\/?$/,
       /^\/a\/(?<x>\d+)(?<_0>[\s\S]*)\/?$/,
-      /^\/a\/(?<x>[^/]+)(\d+)\/?$/,
     ]) {
       expect(() => regExpToRoute(re), re.source).toThrow(/rou3: /);
     }
@@ -381,6 +413,20 @@ describe("regExpToRoute", () => {
     }
     // Inside a constraint it is regex, kept as written
     expect(regExpToRoute(/^\/a\/(?<x>é)\/?$/)).toBe("/a/:x(é)");
+    // The error quotes the whole char and its encoded form
+    expect(() => regExpToRoute(/^\/a😀\/?$/)).toThrow(
+      'rou3: no route has a literal "😀" (route text is percent-encoded, write it as %F0%9F%98%80) in "a😀"',
+    );
+    // An escaped one too (a string: a lint autofix would drop the escape)
+    expect(() => regExpToRoute(new RegExp("^\\/a\\é\\/?$"))).toThrow('literal "é" (');
+    expect(() => regExpToRoute(/^\/caf\/?$/)).not.toThrow();
+    // U+FFFD-U+FFFF are internal placeholders: no route has them either
+    for (const code of [0xfffd, 0xfffe, 0xffff]) {
+      const ch = String.fromCharCode(code);
+      expect(() => regExpToRoute(`^\\/a${ch}\\/?$`), ch).toThrow(
+        `write it as ${encodeURIComponent(ch)})`,
+      );
+    }
   });
 
   it("re-escapes literal route-syntax characters", () => {
@@ -439,6 +485,25 @@ describe("regExpToRoute", () => {
 
   it("throws when an optional group has no preceding segment", () => {
     expect(() => regExpToRoute(/^(?:foo)?\/?$/)).toThrow(/preceding segment/);
+  });
+
+  it("throws where the route would nest a group or follow a leading one with text", () => {
+    // `addRoute` rejects `{/a{/b}?}?/c`, `/z{/a{/b}?}?/c` (nested `{}`) and
+    // `{/a}?{b}?/c` (text after a leading group)
+    for (const re of [
+      /^(?:\/a(?:\/b)?)?\/c\/?$/,
+      /^\/z(?:\/a(?:\/b)?)?\/c\/?$/,
+      /^(?:\/a)?(?:b)?\/c\/?$/,
+      /^(?:\/a)?b\/?$/,
+    ]) {
+      expect(() => regExpToRoute(re), re.source).toThrow(/^rou3: /);
+    }
+    // The error quotes the whole route, not the expansion that holds the text
+    expect(() => regExpToRoute(/^(?:\/a)?(?:\/b)?(?:c)?\/d\/?$/)).toThrow(
+      "rou3: text after a leading `{/...}?` ({/a}?{/b}?{c}?/d)",
+    );
+    // ... while a leading group followed by a segment or another group reads back
+    expect(regExpToRoute(/^(?:\/a)?(?:\/b)?\/c\/?$/)).toBe("{/a}?{/b}?/c");
   });
 
   it("rejects out-of-dialect constructs instead of corrupting", () => {
@@ -531,7 +596,9 @@ describe("regExpToRoute", () => {
     for (const [re, route] of cases) {
       expect(regExpToRoute(re), re.source).toBe(route);
     }
-    for (const route of ["/a{/(\\d+)}?/b", "/a{/(\\d+)}?"]) {
+    // A root one starts the route with the group (absolute, as in URLPattern)
+    expect(regExpToRoute(/^(?:\/(?<_0>\d+))?\/b\/?$/)).toBe("{/(\\d+)}?/b");
+    for (const route of ["/a{/(\\d+)}?/b", "/a{/(\\d+)}?", "{/(\\d+)}?/b", "{/a}?/b"]) {
       const re = routeToRegExp(route);
       expect(regExpToRoute(re), route).toBe(route);
     }
@@ -540,11 +607,9 @@ describe("regExpToRoute", () => {
     // regex over-matches the route), and reads back as `**` too.
     expect(regExpToRoute(/^\/a(?:\/(?<_0>(?:[\s\S]*[^/])?\/*?))??\/?$/)).toBe("/a/**");
     expect(routeToRegExp("/a{/([\\s\\S]*)}?").source).toBe(routeToRegExp("/a/**").source);
-    // Unnamed `[^/]+` has no route form, nor does a root one (no segment to
-    // hold the `{/…}?` group).
+    // Unnamed `[^/]+` has no route form.
     expect(() => regExpToRoute(/^\/a(?:\/(?<_0>[^/]+))?\/?$/)).toThrow(/cannot contain/);
     expect(() => regExpToRoute(/^\/a(?:\/(?<_0>[^/]+)(?:\/b)?)?\/?$/)).toThrow(/cannot contain/);
-    expect(() => regExpToRoute(/^(?:\/(?<_0>\d+))?\/b\/?$/)).toThrow(/preceding segment/);
     // Nor an unnamed catch-all (no `:_0*`).
     expect(() => regExpToRoute(/^\/a(?:\/(?:(?<_0>[\s\S]*)\/)?(?<y>[^/]*))?\/?$/)).toThrow(
       /^rou3: /,
@@ -606,6 +671,7 @@ const KNOWN_NON_EQUIVALENT: Record<string, readonly [back: string, reason: strin
   "/a{/*}?/b": ["/a/**/b", "the `**` also reports `_`"],
   "/a{/*}?/:q": ["/a/**/:q", "the `**` also reports `_`"],
   "/{/*}?/b": ["//**/b", "the `**` also reports `_`"],
+  "{/*}?/b": ["/**/b", "the `**` also reports `_`"],
 };
 
 /** Sweep paths, also under the route's leading static segments (`/path/…`). */

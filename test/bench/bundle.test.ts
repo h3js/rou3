@@ -151,6 +151,35 @@ describe("benchmark", () => {
     // the one with it (`skipGroup`, counted by `_add` itself).
     // +67B raw / +25B gzip: early bails keep `{…}?` groups without unnamed
     // captures as fast as before (no `skipGroup` counting).
+    // +~224B raw / +~119B gzip: a regex group right after a `{…}` group
+    // ending in a param is an unnamed capture next to it, as in URLPattern
+    // (`joinGroup` gives the param its lazy constraint, emitted as `[^/]+?`
+    // only before a group; `/{:foo}(.*)` was `/:foo(.*)`), and a `?` / `+` /
+    // `*` group right after a param, constraint, group or `*` throws
+    // (`/*{*}` was `/**`). `skipGroup` counts a left-out group joined the
+    // same way, so unnamed keys after it line up (`/:a{(\d+)}?/*`).
+    // +136B raw / +60B gzip: a dynamic segment's registration identity is its
+    // literal text percent-encoded like its regex (`dynamicKey`), so
+    // `removeRoute` takes `/caf%C3%A9-:id` for `/café-:id`.
+    // +54B raw / +20B gzip: an in-place optional after a lone `:name` / `*`
+    // (`:a:b?`) is flagged `plain`, so the from-end ranking reads it as a
+    // plain param (`/**\/:a:b?` beat the narrower `/b/:id`).
+    // +155B raw / +70B gzip: a group holding only an optional param inside its
+    // segment (`*-{:x}?`) is rewritten to `*-:x?`, as URLPattern reads it
+    // (not after a `**`, which is no text).
+    // +16B raw / +10B gzip: `getParamRegexp` returns the in-place optional
+    // param's name and `paramsMap` keeps it, for the compiler (it read the source).
+    // -98B raw / -33B gzip: `dynamicKey` left `addRoute` (`removeRoute` and
+    // the overlap dedupe compare identities through `routeId`), less the wider
+    // `plain` check (any capture-only segment with one required name).
+    // -29B raw / -19B gzip: `expandGroupDelimiters` returns a `{:x}?` rewrite alone
+    // (the caller expands the next group).
+    // +~165B raw / +~83B gzip: a pattern starting with a `{…}` group gets no
+    // `/` in front (`absolutePattern`); each of its expansions does unless it
+    // starts with one, so `{/:a}?/b` is `/:a/b` or `/b`, not `//b`. Its
+    // removal identity is marked apart from `/{…}`'s (`{a}?/b` vs `/{a}?/b`),
+    // `skipGroup` counts a relative one's captures after its `/`, and text
+    // right after a leading `{/…}?` (`{/a}?b`) throws.
     // +361B raw / +217B gzip: a `*` is a greedy catch-all as in URLPattern
     // (one segment or more, none after the lookup path's trailing slash):
     // `matchesZero` and the `slash` flag through both walks, a whole-segment
@@ -166,8 +195,10 @@ describe("benchmark", () => {
     // ignores it; only `getMatchParams` reads it, for the `""` capture).
     // Weights are doubled so that a `*` outweighs a `**` (a trailing one: same
     // paths) by less than a regex param.
-    expect(bytes).toBeLessThanOrEqual(11675); // <11.68kb
-    expect(gzipSize).toBeLessThanOrEqual(4975); // <4.98kb
+    // Merged with main at 11935B / 5064B: the greedy `*` above is +396B raw
+    // / +225B gzip on top of it.
+    expect(bytes).toBeLessThanOrEqual(12331); // <12.34kb
+    expect(gzipSize).toBeLessThanOrEqual(5289); // <5.29kb
   });
 });
 

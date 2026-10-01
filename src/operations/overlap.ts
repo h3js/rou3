@@ -2,6 +2,7 @@ import { mayMatchAt, routeToShapes, shapeOf, shapesOverlap, visitSuffixTrie } fr
 import { shapeSubsumes } from "../_subsume.ts";
 import type { Edge, RouteShape } from "../_overlap.ts";
 import type { MatchedRoute, MethodData, Node, RouterContext } from "../types.ts";
+import { routeId } from "./_utils.ts";
 
 // Matches reported so far, per method bucket (`""`, then the queried method):
 // data -> registration identities (`MethodData.route`).
@@ -217,12 +218,14 @@ function _collectBucket<T>(
     // registration identity (`entry.route`, what `removeRoute` splices by)
     // and the same data. The identity alone would merge distinct data
     // registered on one route; the data alone, distinct routes sharing it.
+    // (canonical: `/café-:id` is `/caf%C3%A9-:id`, see `routeId`)
     const routes = seen.get(d);
-    if (routes?.has(entry.route)) continue;
+    const id = routeId(entry.route);
+    if (routes?.has(id)) continue;
     const shape = shapeOf(edges, entry);
     if (query.some((q) => shapesOverlap(q, shape))) {
-      if (routes) routes.add(entry.route);
-      else seen.set(d, new Set([entry.route]));
+      if (routes) routes.add(id);
+      else seen.set(d, new Set([id]));
       matches.push({ data: d });
     }
   }

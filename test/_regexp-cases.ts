@@ -416,6 +416,39 @@ export const regexpCases: Record<string, RegExpCase> = {
     match: [["/xb", { a: "x" }]],
     noMatch: ["/x", "/b"],
   },
+  // A pattern starting with a `{/…}` group is absolute, as in URLPattern: no
+  // `/` in front, so no empty first segment (`//b`). A relative expansion
+  // gets one (`{a}?/b` is `/a/b` or `/b`).
+  "{/:a}?/b": {
+    regex: /^(?:\/(?<a>[^/]+))?\/b\/?$/,
+    match: [
+      ["/b", { a: undefined }],
+      ["/x/b", { a: "x" }],
+      ["/x/b/", { a: "x" }],
+    ],
+    noMatch: ["//b", "//x/b", "/x/y/b", "/"],
+  },
+  "{/:a}/b": {
+    regex: /^\/(?<a>[^/]+)\/b\/?$/,
+    match: [["/x/b", { a: "x" }]],
+    noMatch: ["/b", "//x/b", "//b"],
+  },
+  "{/*}?/b": {
+    regex: /^(?:\/(?<_0>[\s\S]*))?\/b\/?$/,
+    match: [
+      ["/b", { "0": undefined }],
+      ["//b", { "0": "" }],
+      ["/x/b", { "0": "x" }],
+      ["///b", { "0": "/" }],
+      ["/x/y/b", { "0": "x/y" }],
+    ],
+    noMatch: ["/xb", "/x/bc"],
+  },
+  "{a}?/b": {
+    regex: /^(?:\/a)?\/b\/?$/,
+    match: [["/b"], ["/a/b"]],
+    noMatch: ["//b", "/ab", "/a"],
+  },
   "/:foo{}bar": {
     regex: /^\/(?<foo>[^/]+?)bar\/?$/,
     match: [["/xbar", { foo: "x" }]],
@@ -425,6 +458,62 @@ export const regexpCases: Record<string, RegExpCase> = {
     regex: /^\/c\/(?<a>[^/]+?)b\/?$/,
     match: [["/c/xb", { a: "x" }]],
     noMatch: ["/c/x"],
+  },
+  // ... and a regex group after one is an unnamed capture, not the param's
+  // constraint (`/{:foo}(.*)` was `/:foo(.*)`): the param is lazy, as there.
+  "/{:foo}(barbaz)": {
+    regex: /^\/(?<foo>[^/]+?)(?<_0>barbaz)\/?$/,
+    match: [
+      ["/foobarbaz", { foo: "foo", "0": "barbaz" }],
+      ["/xbarbaz", { foo: "x", "0": "barbaz" }],
+    ],
+    noMatch: ["/barbaz", "/foo/barbaz"],
+  },
+  "/{:foo}(\\d+)": {
+    regex: /^\/(?<foo>[^/]+?)(?<_0>\d+)\/?$/,
+    match: [
+      ["/a12", { foo: "a", "0": "12" }],
+      ["/123", { foo: "1", "0": "23" }],
+    ],
+    noMatch: ["/12/3", "/ab", "/1"],
+  },
+  "/:foo{}(\\d+)": {
+    regex: /^\/(?<foo>[^/]+?)(?<_0>\d+)\/?$/,
+    match: [["/a12", { foo: "a", "0": "12" }]],
+    noMatch: ["/a"],
+  },
+  "/{:foo}{(\\d+)}": {
+    regex: /^\/(?<foo>[^/]+?)(?<_0>\d+)\/?$/,
+    match: [["/a12", { foo: "a", "0": "12" }]],
+  },
+  // An optional group starting its segment, before more of it, is inlined
+  // too: `(?:X)?C` tries `XC` then `C`, the router's order (no duplicate `_0`)
+  "/x/{:foo}?(\\d+)": {
+    regex: /^\/x\/(?:(?<foo>[^/]+?))?(?<_0>\d+)\/?$/,
+    match: [
+      ["/x/a12", { foo: "a", "0": "12" }],
+      ["/x/12", { foo: "1", "0": "2" }],
+      ["/x/1", { foo: undefined, "0": "1" }],
+    ],
+    noMatch: ["/x/a", "/x/"],
+  },
+  // ... also leading a relative pattern: both expansions get their `/`, so
+  // the one without the group lines up (no alternation, no duplicate `_0`)
+  "{:x}?(\\d+)": {
+    regex: /^\/(?:(?<x>[^/]+?))?(?<_0>\d+)\/?$/,
+    match: [
+      ["/a12", { x: "a", "0": "12" }],
+      ["/1", { x: undefined, "0": "1" }],
+    ],
+    noMatch: ["/a", "/1/2"],
+  },
+  "/:foo{(\\d+)}?": {
+    regex: /^\/(?<foo>[^/]+?)(?:(?<_0>\d+))?\/?$/,
+    match: [
+      ["/a12", { foo: "a", "0": "12" }],
+      ["/ab", { foo: "ab", "0": undefined }],
+    ],
+    noMatch: ["/"],
   },
   "/x/:a{-:b}?": {
     regex: /^\/x\/(?<a>[^/]+?)(?:-(?<b>[^/]+?))?\/?$/,
@@ -645,6 +734,24 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/png-x", { a: "png" }],
       ["/jpg-x.gz", { a: "jpg" }],
     ],
+  },
+  // ... also where the segment and its extension end the same way (`-x`): the
+  // captures can't take the `-` after them (`appendsCleanly`'s last clause).
+  "/:id(\\d+)-x{-x}?": {
+    regex: /^\/(?<id>\d+)-x(?:-x)?\/?$/,
+    match: [
+      ["/1-x", { id: "1" }],
+      ["/1-x-x", { id: "1" }],
+    ],
+    noMatch: ["/1-x-x-x", "/a-x", "/1-"],
+  },
+  "/:a(png|jpg)-x{-x}?": {
+    regex: /^\/(?<a>png|jpg)-x(?:-x)?\/?$/,
+    match: [
+      ["/png-x", { a: "png" }],
+      ["/jpg-x-x", { a: "jpg" }],
+    ],
+    noMatch: ["/png-x-x-x", "/gif-x"],
   },
   "/*-x{.png}?": {
     regex: /^\/(?<_0>[\s\S]*)-x(?:\.png)?\/?$/,
@@ -1364,12 +1471,26 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   "/a/:x{.:e}?/**",
   "/a/:x{.:e}?/*",
   "/a/:x{.:e}?/:y?",
+  "/:x{(\\d+)}?/*",
+  "/:x{(\\d+)}?/**",
+  "/:x{(\\d+)}?/:y?",
+  "/:x{(\\d+)}?/b{.json}?",
+  "/a/:x{(\\d+)}?/*",
+  "/a/:x{(\\d+)}?/**",
+  "/a/:x{(\\d+)}?/:y?",
+  "/a/:x{(\\d+)}?/b{.json}?",
+  "{/:x}?/:y?",
   // An empty segment followed only by optional ones expands like the router.
   "/{en}?/:page?",
   "/docs/{v2}?/:page?",
   // Two groups.
   "/:x{.:e}?/b{.json}?",
   "/a/:x{.:e}?/b{.json}?",
+  "/{:x}?(\\d+)/b{.json}?",
+  "/a/{:x}?(\\d+)/b{.json}?",
+  "/{a-}?(\\d+)/b{.json}?",
+  "/a/{a-}?(\\d+)/b{.json}?",
+  "{/a}?{/:x}?/c",
   // A mid-segment optional group after a greedy capture, also where both can
   // end the same way (`-x` / `-x-x`). (An optional param, `*-:x?`, compiles
   // in place like the tree.)
@@ -1499,6 +1620,14 @@ function allSweepPatterns(): string[] {
     ":x(\\d+)-:e?",
     // ... after a `**` (`**-:e?` is `**` then `*-:e?`, see `splitRoute`).
     "**-:e?",
+    // A regex group after a `{…}` group ending in a param is an unnamed
+    // capture next to it (the param is lazy), also in an optional group.
+    "{:x}(\\d+)",
+    ":x{(\\d+)}?",
+    // ... and an optional group starting its segment, before more of it
+    // (inlined as `(?:X)?rest`)
+    "{:x}?(\\d+)",
+    "{a-}?(\\d+)",
   ];
   const tails = ["", "a", ":y", "*", ":y?", "**", "*.png", "x-:y", "x-:y?", "b{.json}?"];
   const patterns = new Set([
@@ -1509,6 +1638,9 @@ function allSweepPatterns(): string[] {
     "/{en}?/:page?",
     // An optional group spanning segments ends in an empty-capable one.
     "/a{/b/:x}?",
+    // A mid-route `{/:x+}?` is a `:x*` (same regex).
+    "/a{/:x+}?/b",
+    "/a{/**:x}?/:y",
     // Required segments that can be empty, then optionals, nested ones too.
     "/a/:x/:y/:z?",
     "/a/:x/:y?/:z?",
@@ -1604,6 +1736,25 @@ function allSweepPatterns(): string[] {
     "/a{/(\\d+)}?/**",
     "/x{(\\d+)}?/*",
     "/a{/**}?/*-:x?",
+    // A pattern starting with a group: an expansion starting with `/` is
+    // absolute, any other gets one (`{a}?/b`, `{a}?b`, the empty one of
+    // `{/:x}?`); several leading groups, and the same group after a `/`.
+    "{/:x}?/b",
+    "{/:x}?",
+    "{/:x}?/:y?",
+    "{/:x(\\d+)}?/:y",
+    "{/a}?{/:x}?/c",
+    "{/a}?{/b}?",
+    "{/a/:x}?",
+    "{/a/*}?/b",
+    "{/**}?/b",
+    "{/:x*}?/b",
+    "{/:x}/b",
+    "{a}?/b",
+    "{:x}?/b",
+    "{a}?{/b}?/c",
+    "{a}?b",
+    "/{/:x}?/b",
     ...Object.keys(regexpCases),
     // Removed from `regexpCases` without duplicate named groups.
     ...PCRE2_DUPLICATE_NAME_ROUTES,
@@ -1653,6 +1804,7 @@ export const TWO_CATCH_ALL_ROUTES: readonly string[] = [
   "/a/**/:y+",
   "/**.md/**",
   "/x/:seg*/old/**",
+  "/a/*/:y?/:x*",
   "/x/:seg+/old/**",
   "/x{/y}?/:seg+/old/**",
   String.raw`/\:x/:seg+/:rest+`,
@@ -1689,6 +1841,12 @@ export const UNCLOSED_GROUP_ROUTES: readonly string[] = [
  * wrong or silent meaning, or threw a raw `SyntaxError`.
  */
 export const RESERVED_SYNTAX_ROUTES: readonly string[] = [
+  // Text right after a leading `{/…}?` group: without the group the route
+  // would be relative, a form URLPattern gives no meaning (it matched `/b`
+  // for `{/a}?b`).
+  "{/a}?b",
+  "{/:a}?.png",
+  "{/a}?{.json}?",
   // A repeat modifier on a constrained param dropped the constraint in the
   // tree (`/a/b/c` matched with `x: "b/c"`, the regex kept it).
   "/a/:x(\\d+)+",
@@ -1838,6 +1996,26 @@ export const RESERVED_SYNTAX_ROUTES: readonly string[] = [
   "/:a/:b(x)(\\1)",
   "/:a/((x)\\2)",
   "/a/:x((a)\\1)",
+  // A `?` / `+` / `*` right after a group that ends in a param joined onto it
+  // as a modifier (`/{:x}{*}` was `/:x*`, URLPattern's is `:x` then `*`).
+  "/a/{:x}{*}",
+  "/a/{:x}?*",
+  "/a/:x{}?*",
+  "/a/{:x}{?}",
+  "/a/{:x}{+}",
+  "/a/{pre-:x}{*}",
+  // ... and so did a modifier on the unnamed group after one (`/{:x}(y)?`
+  // was an optional `:x(y)`, URLPattern's is `:x` then an optional `(y)`).
+  "/a/{:x}(y)?",
+  // ... and after a constraint, an unnamed group or a `*` (`/{:x(\d+)}{?}`
+  // was an optional `:x(\d+)`, `/*{*}` a `**`: URLPattern rejects `{?}` and
+  // reads two `*`s)
+  "/a/{:x(\\d+)}{?}",
+  "/a/:x(\\d+){?}",
+  "/a/{(\\d+)}{+}",
+  "/a/{*}{*}",
+  "/a/*{*}",
+  "/a/b-*{*}",
   // U+FFFD-U+FFFF are reserved for internal placeholders (escapes, and
   // U+FFFF for the next one): written in a route, they would read as syntax
   // (`\uFFFD0` as an escaped `:`).

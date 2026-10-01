@@ -195,7 +195,9 @@ function normalizeGroups(groups: Record<string, string> | undefined): Record<str
  * 9. Percent-encoding: both encode the pattern's literal text; URLPattern
  *    also encodes the input, rou3 takes it encoded (`new URL().pathname`), so
  *    the strategies get it through `encodePathname`
- * 10. Relative paths: rou3 reads every pattern as absolute (`/`-prefixed)
+ * 10. Relative paths: rou3 reads every pattern as absolute (`/`-prefixed;
+ *    a leading group per expansion, so `{/:a}?/b` is `/:a?/b` as in
+ *    URLPattern, and `{:foo}bar` is `/:foo\bar`, see `LEADING_GROUP_CASES`)
  */
 
 /**
@@ -239,7 +241,10 @@ const KNOWN_DIFFS = diffs<Result | Split>({
   // `/api`): no key (URLPattern: no match)
   "/foo/* → /foo [no match]": split({ "0": undefined }, {}),
 
-  // Patterns without leading `/` — rou3 always prefixes `/` in regex
+  // Patterns without leading `/` — rou3 prefixes `/` (a leading `{:foo}`
+  // group's expansions too), so the regex never matches a relative input
+  // (the router skips relative inputs). With a leading `/`, the `{:foo}(…)`
+  // ones agree (`GROUP_PARAM_CASES`).
   ":name → foobar [match]": null,
   "(foo)(.*) → foobarbaz [match]": null,
   "{(foo)bar}(.*) → foobarbaz [match]": null,
@@ -637,6 +642,102 @@ describe("wpt urlpattern compatibility: percent-encoding", () => {
   });
 });
 
+// Not in the WPT data (only as `expected_obj`: `/:foo\bar` is `{/:foo}bar`):
+// a pattern starting with a `{/…}` group is absolute, so it gets no `/` in
+// front (`{/:a}?/b` is `/:a?/b`, never `//b`). `[pattern, input, groups]` (as
+// for `EMPTY_SEGMENT_CASES`), checked against the runtime's URLPattern.
+const LEADING_GROUP_CASES: [string, string, Result][] = [
+  ["{/:a}?/b", "/b", { a: undefined }],
+  ["{/:a}?/b", "/x/b", { a: "x" }],
+  ["{/:a}?/b", "//b", null],
+  ["{/:a}?/b", "//x/b", null],
+  ["{/:a}/b", "/x/b", { a: "x" }],
+  ["{/:a}/b", "//x/b", null],
+  ["{/:a}?", "/x", { a: "x" }],
+  ["{/:a}?", "//x", null],
+  ["{/:foo}bar", "/bazbar", { foo: "baz" }],
+  ["{/:a(\\d+)}?/b", "/1/b", { a: "1" }],
+  ["{/:a(\\d+)}?/b", "/b", { a: undefined }],
+  ["{/:a(\\d+)}?/b", "/x/b", null],
+  ["{/a/:b}?", "/a/x", { b: "x" }],
+  ["{/a/:b}?", "//a/x", null],
+  ["{/a}b", "/ab", {}],
+  ["{/}a", "/a", {}],
+  ["{}/a", "/a", {}],
+  ["{}/a", "//a", null],
+  ["{/a}?{/:b}?/c", "/c", { b: undefined }],
+  ["{/a}?{/:b}?/c", "/a/c", { b: undefined }],
+  ["{/a}?{/:b}?/c", "/x/c", { b: "x" }],
+  ["{/a}?{/:b}?/c", "/a/x/c", { b: "x" }],
+  ["{/a}?{/:b}?/c", "//c", null],
+  ["{a}?/b", "/b", {}],
+  ["{a}?/b", "//b", null],
+  ["{:x}?/b", "/b", { x: undefined }],
+  ["{:x}?/b", "//b", null],
+  // With a regex group after the param's group (`joinGroup`), a `{:x}?`
+  // rewrite after text, and unnamed numbering over the whole pattern
+  ["{/:foo}(\\d+)", "/a12", { foo: "a", "0": "12" }],
+  ["{/:foo}(\\d+)", "/a", null],
+  ["{/a}/*-{:x}?", "/a/b-c", { "0": "b", x: "c" }],
+  ["{/a}/*-{:x}?", "/a/--", { "0": "-", x: undefined }],
+  ["{/a}?/*-{:x}?", "/b-c", { "0": "b", x: "c" }],
+  ["{/a}?/*-{:x}?", "/a/b-", { "0": "b", x: undefined }],
+  ["{/(\\d+)}?/*", "/b", { "0": undefined, "1": "b" }],
+  ["{/(\\d+)}?/*", "/1/b", { "0": "1", "1": "b" }],
+];
+
+// Where rou3 differs: an expansion that does not start with `/` is relative
+// and gets one, as a relative pattern does (URLPattern never matches it on an
+// absolute path), and `{/:a}?` matches `/` like `/:a?` (URLPattern matches
+// the empty pathname instead, which rou3 reads as `/`). `[pattern, input, rou3's params]`.
+const LEADING_GROUP_DIFFS: [string, string, Record<string, string>][] = [
+  ["{/:a}?", "/", {}],
+  ["{a}/b", "/a/b", {}],
+  ["{:x}/b", "/y/b", { x: "y" }],
+  ["{a}?/b", "/a/b", {}],
+  ["{:x}?/b", "/y/b", { x: "y" }],
+  // Each expansion gets its `/`, also the one `inlineOptionalGroup` reads
+  // without the group (`{:x}?(\d+)` is `/:x…(\d+)` or `/(\d+)`)
+  ["{:foo}(\\d+)", "/a12", { foo: "a", "0": "12" }],
+  ["{:x}?(\\d+)", "/a12", { x: "a", "0": "12" }],
+  ["{:x}?(\\d+)", "/12", { x: "1", "0": "2" }],
+  ["{:x}?(\\d+)", "/1", { "0": "1" }],
+];
+
+describe("wpt urlpattern compatibility: leading groups", () => {
+  for (const strategy of strategies) {
+    for (const [pattern, input, groups] of LEADING_GROUP_CASES) {
+      // An alternation fallback (`{/a}?{/:b}?/c`) needs duplicate named groups (not Node 22)
+      const skip = !strategy.router && needsDuplicateNames(pattern);
+      it.skipIf(skip)(`${strategy.name}: ${pattern} → ${input}`, () => {
+        const { matched, params } = strategy.match(pattern, input);
+        expect(matched ? params : null).toStrictEqual(expectedGroups(strategy, groups));
+      });
+    }
+    for (const [pattern, input, params] of LEADING_GROUP_DIFFS) {
+      it(`${strategy.name}: ${pattern} → ${input} (rou3 only)`, () => {
+        const result = strategy.match(pattern, input);
+        expect(result.matched).toBe(true);
+        // `routeToRegExp` reports an unset group as `undefined`
+        expect(expectedGroups({ ...strategy, router: true }, result.params)).toStrictEqual(params);
+      });
+    }
+  }
+
+  it.runIf(URLPatternCtor)("agrees with URLPattern", () => {
+    for (const [pattern, input, groups] of LEADING_GROUP_CASES) {
+      const result = new URLPatternCtor({ pathname: pattern }).exec({ pathname: input });
+      expect(result ? { ...result.pathname.groups } : null, `${pattern} → ${input}`).toStrictEqual(
+        groups,
+      );
+    }
+    for (const [pattern, input] of LEADING_GROUP_DIFFS) {
+      const result = new URLPatternCtor({ pathname: pattern }).exec({ pathname: input });
+      expect(result, `${pattern} → ${input}`).toBeNull();
+    }
+  });
+});
+
 // Where rou3 still differs (see the README): `:name+` / `:name*` / `**` take
 // empty segments between others (URLPattern's `:name+` / `:name*` need a
 // value in each).
@@ -646,6 +747,71 @@ const EMPTY_SEGMENT_DIFFS: [string, string, Record<string, string>][] = [
   ["/foo/:bar*", "/foo//a", { bar: "/a" }],
   ["/foo/:bar*", "/foo/a//", { bar: "a/" }],
 ];
+
+// Not in the WPT data with a leading `/` (only the relative `{:foo}(.*)`
+// forms, see `KNOWN_DIFFS`): a regex group right after a `{…}` group that
+// ends in a param is an unnamed capture next to it, not its constraint.
+// Single-segment inputs, so the tree's segment-scoped `(.*)` agrees.
+// `[pattern, input, groups]` (as for `EMPTY_SEGMENT_CASES`).
+const GROUP_PARAM_CASES: [string, string, Result][] = [
+  ["/{:foo}(.*)", "/foobarbaz", { foo: "f", "0": "oobarbaz" }],
+  ["/{:foo}(.*)", "/f", { foo: "f", "0": "" }],
+  ["/{:foo}(barbaz)", "/foobarbaz", { foo: "foo", "0": "barbaz" }],
+  ["/{:foo}(barbaz)", "/barbaz", null],
+  ["/{:foo}{(.*)}", "/foobarbaz", { foo: "f", "0": "oobarbaz" }],
+  ["/{:foo}{bar(.*)}", "/foobarbaz", { foo: "foo", "0": "baz" }],
+  ["/{:foo}:bar(.*)", "/foobarbaz", { foo: "f", bar: "oobarbaz" }],
+  ["/{:foo}?(.*)", "/foobarbaz", { foo: "f", "0": "oobarbaz" }],
+  ["/:foo{}(.*)", "/foobarbaz", { foo: "f", "0": "oobarbaz" }],
+  ["/:foo{}(.*)", "/foobar", { foo: "f", "0": "oobar" }],
+  ["/{:foo(\\d+)}(.*)", "/123abc", { foo: "123", "0": "abc" }],
+  ["/:foo{(x)}?", "/abcx", { foo: "abc", "0": "x" }],
+  ["/:foo{(x)}?", "/x", { foo: "x", "0": undefined }],
+  // A stray `)` is a literal, no group a `*` would modify
+  ["/a){*}", "/a)x", { "0": "x" }],
+  // An optional group in the middle of its segment (not inlined)
+  ["/a{b}?c", "/abc", {}],
+  ["/a{b}?c", "/ac", {}],
+  ["/a{b}?c", "/abbc", null],
+];
+
+// URLPattern syntax of the same shape with a `*` or a modifier after the
+// group: rou3 throws instead of reading it as a modifier on the param.
+const GROUP_PARAM_RESERVED = [
+  "/{:foo}{*}",
+  "/{:foo}?*",
+  "/:foo{}?*",
+  "/{:foo}(x)?",
+  // ... and after a `*` (two wildcards in URLPattern, a `**` once joined)
+  "/{*}{*}",
+  "/*{*}",
+];
+
+describe("wpt urlpattern compatibility: a regex group after a param's group", () => {
+  for (const strategy of strategies) {
+    for (const [pattern, input, groups] of GROUP_PARAM_CASES) {
+      it(`${strategy.name}: ${pattern} → ${input}`, () => {
+        const { matched, params } = strategy.match(pattern, input);
+        expect(matched ? params : null).toStrictEqual(expectedGroups(strategy, groups));
+      });
+    }
+    it.each(GROUP_PARAM_RESERVED)(`${strategy.name}: %s throws`, (pattern) => {
+      expect(() => strategy.match(pattern, "/")).toThrow(/^rou3: /);
+    });
+  }
+
+  it.runIf(URLPatternCtor)("agrees with URLPattern", () => {
+    for (const [pattern, input, groups] of GROUP_PARAM_CASES) {
+      const result = new URLPatternCtor({ pathname: pattern }).exec({ pathname: input });
+      expect(result ? { ...result.pathname.groups } : null, `${pattern} → ${input}`).toStrictEqual(
+        groups,
+      );
+    }
+    for (const pattern of GROUP_PARAM_RESERVED) {
+      expect(() => new URLPatternCtor({ pathname: pattern }), pattern).not.toThrow();
+    }
+  });
+});
 
 describe("wpt urlpattern compatibility: empty segments", () => {
   for (const strategy of strategies) {
@@ -688,6 +854,15 @@ const UNNAMED_CAPTURE_CASES: [string, string, Result][] = [
   ["/x{(\\d+)}?/*", "/x/b", { "0": undefined, "1": "b" }],
   ["/a{/*}?/(\\d+)", "/a/1", { "0": undefined, "1": "1" }],
   ["/(\\d+)/**", "/1/b/c", { "0": "1", "1": "b/c" }],
+  // A regex group after a param's group is an unnamed capture (see
+  // `GROUP_PARAM_CASES`); left out, it still uses up its number, so the `*`
+  // after it is `1` in both expansions (`skipGroup` joins it like the router)
+  ["/:a{(\\d+)}?/*", "/x1/b", { a: "x", "0": "1", "1": "b" }],
+  ["/:a{(\\d+)}?/*", "/x/b", { a: "x", "0": undefined, "1": "b" }],
+  ["/:a{(\\d+)}?/**", "/x/b/c", { a: "x", "0": undefined, "1": "b/c" }],
+  ["/:a{(\\d+)}?/*.png", "/x/b.png", { a: "x", "0": undefined, "1": "b" }],
+  ["/{:foo}?(\\d+)/*", "/a1/b", { foo: "a", "0": "1", "1": "b" }],
+  ["/{:foo}?(\\d+)/*", "/1/b", { foo: undefined, "0": "1", "1": "b" }],
 ];
 
 describe("wpt urlpattern compatibility: unnamed captures", () => {

@@ -122,32 +122,41 @@ describe("routeToRegExp", () => {
 
   // `sweepPatterns()` has no escapes and `sweepPaths()` no escaped chars: a
   // `\x` is a literal `x` in both, wherever it sits in the pattern (#227).
-  // An escaped `\{` / `\}` or a `{}` quantifier in a constraint is no group:
-  // `*-:e?` still compiles in place, one regex (no alternation) like the tree.
-  it("reads an escaped brace as no group before an in-segment optional", () => {
-    const paths = ["/{x/a-b", "/{x/a-", "/{x/a", "/a}/a-b", "/a}/a-", "/{x}/a-b-c", "/x/a-b"];
-    paths.push("/12", "/123", "/12/a-b", "/12/a-", "/1/a-b", "/12/--");
-    for (const route of [
-      "/\\{x/*-:e?",
-      "/a\\}/*-:e?",
-      "/\\{x\\}/*-:e?",
-      "/:x(\\d{2})/*-:e?",
-      "/(\\d{2}):e?",
+  // An escaped `\{` / `\}` or a `{n}` quantifier in a constraint is no group,
+  // and a `{:e}?` group after them is the in-place `:e?` (one regex, no
+  // alternation) in the tree and the regex alike. Paths are encoded (`%7B`).
+  it("reads `{:e}?` as `:e?` past escaped braces and constraint quantifiers", () => {
+    const paths = ["/%7Bx%7D", "/%7Bx%7Dab", "/%7Bx%7D/a-b", "/%7Bx%7D/a-", "/%7Bx%7D/--"];
+    paths.push("/a%7D/a-b", "/a%7D/a-", "/12", "/123", "/1", "/12/a-b", "/12/a-", "/12/--");
+    for (const [route, same] of [
+      ["/\\{x\\}{:e}?", "/\\{x\\}:e?"],
+      ["/\\{x\\}/*-{:e}?", "/\\{x\\}/*-:e?"],
+      ["/a\\}/*-{:e}?", "/a\\}/*-:e?"],
+      ["/:x(\\d{2}){:e}?", "/:x(\\d{2}):e?"],
+      ["/(\\d{2}){:e}?", "/(\\d{2}):e?"],
+      ["/:x(\\d{2})/*-{:e}?", "/:x(\\d{2})/*-:e?"],
     ]) {
+      const regex = routeToRegExp(route);
+      expect(regex.source, route).toBe(routeToRegExp(same).source);
+      expect(regex.source, route).not.toContain("|");
       const router = createRouter();
       addRoute(router, "", route, true);
-      const regex = routeToRegExp(route);
-      expect(regex.source, route).not.toContain("|");
+      const other = createRouter();
+      addRoute(other, "", same, true);
+      let matched = 0;
       for (const path of paths) {
         const found = findRoute(router, "", path);
+        expect(found?.params, `${route} ${path}`).toEqual(findRoute(other, "", path)?.params);
         const match = path.match(regex);
         expect(!!match, `${route} ${path}`).toBe(!!found);
         if (match) {
+          matched++;
           expect(definedCaptures(normalizeGroups(match.groups)), `${route} ${path}`).toEqual(
             routerCaptures(router, found?.params),
           );
         }
       }
+      expect(matched, route).toBeGreaterThan(1);
     }
   });
 
@@ -579,14 +588,12 @@ describe("routeToRegExp", () => {
       if (duplicateGroupNames(source).length > 0) duplicates.push(pattern);
     }
     // Without duplicate named groups (Node 22) `sweepPatterns()` leaves out
-    // the ones that need them, look-behind ones included
-    const swept = new Set(sweepPatterns());
-    expect(lookbehind.sort()).toEqual(
-      [...SWEEP_LOOKBEHIND_PATTERNS].filter((p) => swept.has(p)).sort(),
-    );
-    expect(lookahead.sort()).toEqual(
-      [...SWEEP_LOOKAHEAD_PATTERNS].filter((p) => swept.has(p)).sort(),
-    );
+    // the ones that need them, look-behind ones included.
+    // Drop only those, so a stale or misspelled entry still fails.
+    const unsupported = new Set(unsupportedSweepPatterns());
+    const kept = (set: ReadonlySet<string>) => [...set].filter((p) => !unsupported.has(p)).sort();
+    expect(lookbehind.sort()).toEqual(kept(SWEEP_LOOKBEHIND_PATTERNS));
+    expect(lookahead.sort()).toEqual(kept(SWEEP_LOOKAHEAD_PATTERNS));
     // Without duplicate named groups, `sweepPatterns()` leaves exactly these out.
     expect((DUPLICATE_NAMED_GROUPS ? duplicates : unsupportedSweepPatterns()).sort()).toEqual(
       [...SWEEP_DUPLICATE_NAME_PATTERNS].sort(),
@@ -778,6 +785,10 @@ describe("reserved pattern syntax", () => {
       ["/a/**:x\\:y", "x\\:y"],
       ["/a/**:x\\.json", "x\\.json"],
       ["/a/**:x\\(y\\)", "x\\(y\\)"],
+      // A group's `}` before a `(` adds no constraint after a `**:name`
+      // (`joinGroup`): the name runs to its segment's end anyway
+      ["/a/**:x{}(y)", "x(y)"],
+      ["/a/{**:x}(y)", "x(y)"],
     ]) {
       expect(() => addRoute(createRouter(), "", route), route).toThrow(
         `rou3: invalid param name "${name}" (${route})`,

@@ -188,10 +188,32 @@ describe("types", () => {
       expectTypeOf<InferRouteParams<"/:a{b}">>().toEqualTypeOf<{ a: string }>();
       expectTypeOf<InferRouteParams<"/:foo{}bar">>().toEqualTypeOf<{ foo: string }>();
       expectTypeOf<InferRouteParams<"/c/{:a}b">>().toEqualTypeOf<{ a: string }>();
+      // A regex group after one is an unnamed capture, not a constraint
+      expectTypeOf<InferRouteParams<"/{:foo}(.*)">>().toEqualTypeOf<{ foo: string; "0": string }>();
+      expectTypeOf<InferRouteParams<"/:foo{}(\\d+)">>().toEqualTypeOf<{
+        foo: string;
+        "0": string;
+      }>();
+      expectTypeOf<InferRouteParams<"/{:foo}?(.*)">>().toEqualTypeOf<{
+        foo: string | undefined;
+        "0": string;
+      }>();
       // A `**:name` too
       expectTypeOf<InferRouteParams<"/a{/**:x}?">>().toEqualTypeOf<{ x: string | undefined }>();
       expectTypeOf<InferRouteParams<"/a/**:x{/b}?">>().toEqualTypeOf<{ x: string }>();
       expectTypeOf<InferRouteParams<"/a/**:x{s}?">>().toEqualTypeOf<{ x: string }>();
+    });
+
+    it("should read a pattern starting with a group", () => {
+      expectTypeOf<InferRouteParams<"{/:a}?/b">>().toEqualTypeOf<{ a: string | undefined }>();
+      expectTypeOf<InferRouteParams<"{/:a}/b">>().toEqualTypeOf<{ a: string }>();
+      expectTypeOf<InferRouteParams<"{/:a}?">>().toEqualTypeOf<{ a: string | undefined }>();
+      expectTypeOf<InferRouteParams<"{/:foo}bar">>().toEqualTypeOf<{ foo: string }>();
+      expectTypeOf<InferRouteParams<"{/a}?{/:b}?/c">>().toEqualTypeOf<{
+        b: string | undefined;
+      }>();
+      expectTypeOf<InferRouteParams<"{:x}?/b">>().toEqualTypeOf<{ x: string | undefined }>();
+      expectTypeOf<InferRouteParams<"{:x}/b">>().toEqualTypeOf<{ x: string }>();
     });
 
     // Types read names like `addRoute` but don't validate routes: a name it

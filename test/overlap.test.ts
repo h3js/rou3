@@ -161,6 +161,11 @@ describe("compareRoutes", () => {
     ["/a{/b}?", "/a/*", "subset", "a trailing * matches `/a` too"],
     ["/a{/*}?", "/a/**", "equal", "an optional * group is a **"],
     ["/a{/b}?", "/a/c", "disjoint", "optional group rejects other suffix"],
+    ["{/:a}?/b", "/:a?/b", "equal", "leading group is absolute (URLPattern form)"],
+    ["{/:a}?/b", "//b", "disjoint", "leading group adds no empty segment"],
+    ["{/:a}?", "/", "superset", "leading group's empty expansion is the root"],
+    ["/{/:a}?/b", "//b", "superset", "a group after a `/` keeps it"],
+    ["{a}?/b", "/a{/b}?", "partial", "relative expansion gets a `/`"],
 
     // regex-constrained segments
     ["/user/:id(\\d+)", "/user/42", "superset", "regex accepts literal (precise)"],
@@ -176,6 +181,12 @@ describe("compareRoutes", () => {
     // verdict degrades to the proven containment, never to a wrong "equal".
     ["/user/:id(42)", "/user/42", "superset", "regex==literal degrades to containment"],
     ["/u/:id([\\s\\S]+)", "/u/:x", "subset", "regex==any-param degrades to containment"],
+    // A regex group after a `{…}` group ending in a param is no constraint of
+    // it (`/{:x}(.*)` read as `/:x(.*)`, "equal")
+    ["/a/{:x}(.*)", "/a/:x(.*)", "partial", "group after a param's group is a capture"],
+    ["/a/{:x}(y)", "/a/:x([^\\x2f]+?)(y)", "equal", "the lazy param it stands for"],
+    ["/a/{:x}?(y)", "/a/(y)", "superset", "optional param before a group"],
+    ["/a/{:x}(y)", "/a/:z", "subset", "param + group needs a value"],
 
     // escaping
     ["/a/\\*", "/a/*", "subset", "escaped star is one literal of trailing *"],

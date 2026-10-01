@@ -471,7 +471,7 @@ function compileFinalMatch(
     // A `*` inside a segment is split around a `**` (see `splitStar`): its
     // pieces' values, joined by `/` into one property where the first one is
     // (`\0`), the `**`'s only where it has a segment
-    const join = paramsMap.find((map) => map[4] && map[0] < 0)?.[1];
+    const join = paramsMap.find((map) => map[5] && map[0] < 0)?.[1];
     const pieces: [value: string, nonEmpty?: string][] = [];
     const prop = (key: string, value: string, nonEmpty?: string) => {
       if (key !== join) return `${propKey(key)}:${value},`;
@@ -482,14 +482,14 @@ function compileFinalMatch(
     for (let i = 0; i < paramsMap.length; i++) {
       const map = paramsMap[i];
       if (typeof map[1] === "string") {
-        let code = prop(map[1], params[i], map[4] ? suffixGuard || `l>${currentIdx}` : undefined);
-        if (map[0] < 0 && map[2] && !map[4]) {
+        let code = prop(map[1], params[i], map[5] ? suffixGuard || `l>${currentIdx}` : undefined);
+        if (map[0] < 0 && map[2] && !map[5]) {
           // Also `_` (deprecated alias): the tail is computed once, into `_w`
           code = `${propKey(map[1])}:_w=${params[i]},_:_w,`;
           ctx.starStarTemp = true;
           starStar = [paramsCode.length, paramsCode.length + code.length];
           present = suffixGuard || `l>${currentIdx}`;
-        } else if (map[0] < 0 && map[3] && !map[4] && currentIdx !== -1) {
+        } else if (map[0] < 0 && map[3] && !map[5] && currentIdx !== -1) {
           starStar = [paramsCode.length, paramsCode.length + code.length];
           ctx.slash = true;
           present = `(l>${currentIdx}||t)`;
@@ -520,13 +520,12 @@ function compileFinalMatch(
       } else {
         const tmp = `_m${tmpCount++}`;
         conditions.push(`(${tmp}=${regexp}.exec(${params[i]}))!==null`);
-        // An optional param ending the segment (`*-:x?` is `…(?:(?<x>…))?$`)
+        // The in-place optional param (`*-:x?`, flagged by `getParamRegexp`)
         // gets no key when absent, as in the interpreter
-        const optional = map[1].source.endsWith("))?$") && groups.names[groups.names.length - 1];
         for (const name of groups.names) {
           const key = fromGroupName(name);
           paramsCode +=
-            name === optional
+            key === map[4]
               ? `...(${tmp}.groups.${name}!==void 0&&{${propKey(key)}:${tmp}.groups.${name}}),`
               : prop(key, `${tmp}.groups.${name}`);
         }
@@ -832,11 +831,12 @@ function rankRef(ctx: CompilerContext): string {
 
 function rankDescriptor(ctx: CompilerContext, data?: MethodData<any>): string {
   const descriptor = [-1, data?.suffix ? data.suffix[1] : 0];
-  for (const [index, name] of data?.paramsMap || []) {
+  for (const [index, name, , plain] of data?.paramsMap || []) {
     if (index < 0) {
       descriptor[0] = -(index + 1);
     } else {
-      descriptor.push(index, typeof name === "string" ? 0 : 2);
+      // As `kindAt` (operations/_suffix.ts)
+      descriptor.push(index, typeof name === "string" || plain ? 0 : 2);
     }
   }
   const key = JSON.stringify(descriptor);
