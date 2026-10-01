@@ -199,8 +199,10 @@ describe("benchmark", () => {
     // / +225B gzip on top of it.
     // +35B raw / +15B gzip: a `pre*` ending its segment also registers the
     // segment as written (ranked on its node), its `**` needing a segment.
-    expect(bytes).toBeLessThanOrEqual(12366); // <12.37kb
-    expect(gzipSize).toBeLessThanOrEqual(5304); // <5.31kb
+    // +37B raw / +21B gzip: in a suffix trie a capture-only regex (`plain`)
+    // weighs a point only, below a `*` (`/*/:y` over `/**/:a:b?`).
+    expect(bytes).toBeLessThanOrEqual(12403); // <12.41kb
+    expect(gzipSize).toBeLessThanOrEqual(5325); // <5.33kb
   });
 });
 

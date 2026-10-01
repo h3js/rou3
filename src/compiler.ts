@@ -421,8 +421,9 @@ function compileFinalMatch(
   // they must not raise `weight` — otherwise an optional `**` tail ties with a
   // required `**:name` and the weight-sorted emit order flips (#186).
   let guardConditions = 0;
-  // A `*` weighs a point over a `**` (a trailing one matches the same paths),
-  // below a regex (each condition weighs two, see `_selectMatcher`)
+  // A `*` weighs two points over a `**` (a trailing one matches the same
+  // paths), below a regex (each condition weighs four, see `_selectMatcher`
+  // and `collectSuffix`); in a suffix trie a capture-only regex one
   let starWeight = 0;
   // A `**:name` / `*` before the suffix must take a segment (as in
   // `collectSuffix`: a `**:name` weighs a condition, a `*` a point)
@@ -432,7 +433,7 @@ function compileFinalMatch(
     conditions.push(suffixGuard);
     if (catchAll[3]) {
       guardConditions++;
-      starWeight = 1;
+      starWeight = 2;
     }
   }
 
@@ -444,7 +445,7 @@ function compileFinalMatch(
     if (currentIdx !== -1) {
       // A trailing `*` matches zero segments like a `**` (see `matchesZero`)
       const star = !lastParam[2] && (lastParam[1] as string) < ":" && !lastParam[5];
-      if (star) starWeight = 1;
+      if (star) starWeight = 2;
       if (!lastParam[2] && !star) {
         // It needs a segment (a `**:name`)
         conditions.push(`l>${currentIdx}`);
@@ -509,6 +510,12 @@ function compileFinalMatch(
       // test (regex params are always single-segment param nodes).
       const regexp = serializeRegExp(ctx, map[1]);
       const groups = scanRegExpGroups(map[1].source);
+      // In a suffix trie a capture-only regex (`plain`: `:a:b?`) restricts no
+      // more than a `:name`: no weight (see `collectSuffix`)
+      if (map[3] && data.suffix) {
+        guardConditions++;
+        starWeight++;
+      }
       if (!groups) {
         // Unrecognized group name — fall back to runtime normalization
         const tmp = `_m${tmpCount++}`;
@@ -569,7 +576,7 @@ function compileFinalMatch(
     (conditions.length > 0 ? `if(${conditions.join("&&")})` : "") +
     (ctx.opts?.matchAll ? push : `return ${ret};`);
 
-  return { code, weight: 2 * (conditions.length - guardConditions) + starWeight };
+  return { code, weight: 4 * (conditions.length - guardConditions) + starWeight };
 }
 
 function compileNode(

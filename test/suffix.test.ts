@@ -231,6 +231,9 @@ describe("segments after `**`: priority", () => {
     [["/b/:id", "/**/:a:b?"], "/b/x", ["/**/:a:b?", "/b/:id"]],
     [["/b/**", "/**/:a:b?"], "/b/x", ["/**/:a:b?", "/b/**"]],
     [["/**/:id", "/**/:a:b?"], "/b/x", ["/**/:id", "/**/:a:b?"]],
+    // ... also against a narrower `*` on the same suffix node
+    [["/*/:y", "/**/:a:b?"], "/b/b", ["/**/:a:b?", "/*/:y"]],
+    [["/**/:a:b?", "/*/:y"], "/b/b", ["/**/:a:b?", "/*/:y"]],
     // Two required names need two chars: narrower, a regex param
     [["/b/:id", "/**/:a:b"], "/b/xy", ["/b/:id", "/**/:a:b"]],
     // Paths no suffix route matches keep the tree order
