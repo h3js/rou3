@@ -214,9 +214,10 @@ function _insert<T>(
             : empty
               ? String(unnamed(_unnamedParamIndex++))
               : addName(names, segment.slice(3), input),
-        // optional, but not the `**` of a `pre*` ending its segment (its one
-        // segment case is the segment as written, see `splitStar`)
-        segment.length === 2 && !(i === join && i === segments.length - 1),
+        // optional, but not the `**` of a `pre*` ending its segment, before
+        // more of the route too (its one segment case is the segment as
+        // written, see `splitStar`); before a `*post` piece it may be empty
+        segment.length === 2 && !(i === join && segments[i + 1]?.charCodeAt(0) !== 42) /* * */,
         empty,
         undefined,
         i === join,

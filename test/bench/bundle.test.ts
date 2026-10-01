@@ -202,8 +202,10 @@ describe("benchmark", () => {
     // +37B raw / +21B gzip: in a suffix trie a capture-only regex (`plain`)
     // weighs a point only, below a `*` (`/*/:y` over `/**/:a:b?`).
     // +7B raw / +3B gzip: the `**` of a split `*` may capture `""` (`empty`).
-    expect(bytes).toBeLessThanOrEqual(12410); // <12.42kb
-    expect(gzipSize).toBeLessThanOrEqual(5328); // <5.33kb
+    // +12B raw / +7B gzip: that `**` needs a segment before more of the
+    // route too (a `pre*` route is listed once per path).
+    expect(bytes).toBeLessThanOrEqual(12422); // <12.43kb
+    expect(gzipSize).toBeLessThanOrEqual(5335); // <5.34kb
   });
 });
 

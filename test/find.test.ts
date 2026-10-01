@@ -1723,6 +1723,11 @@ describe("empty segments (compiled parity, sweep)", () => {
     "/a/:x([a-z]+)",
     "/a/pre-*",
     "/pre-*",
+    // A `pre*` before more of the route
+    "/pre-*/b",
+    "/pre-*/:y",
+    "/a/pre-*/:y?",
+    "/pre-*{/b}?",
   ];
   const paths = ["/", "//"];
   for (let depth = 1, prev = [""]; depth <= 3; depth++) {
@@ -1759,6 +1764,17 @@ describe("empty segments (compiled parity, sweep)", () => {
         ]);
         if (JSON.stringify(all) !== JSON.stringify(compiledAll)) {
           failures.push(`matchAll [${routes}] ${path}: ${compiledAll} vs ${all}`);
+        }
+        // A pattern is listed at most once per path and expansion (a `*`
+        // inside a segment is split into routes that never match the same
+        // path; an optional after a catch-all can match with and without it,
+        // as on main: `/a/**/:y?` on `/a/x/b`)
+        const listed = all.map(([data]) => data as string);
+        for (const route of new Set(listed)) {
+          const count = listed.filter((data) => data === route).length;
+          if (count > 2 ** (route.split("?").length - 1)) {
+            failures.push(`listed ${count} times [${routes}] ${path}: ${route}`);
+          }
         }
       }
     }

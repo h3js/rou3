@@ -325,6 +325,23 @@ describe("`*` vs `**` priority and ordering", () => {
     }
   });
 
+  it("lists a `pre*` route once per path", () => {
+    for (const [route, path, count] of [
+      ["/x-*/b", "/x-a/b"],
+      ["/x-*/:y", "/x-a/b"],
+      ["/a/pre*/c/d", "/a/pre1/c/d"],
+      ["/x-*", "/x-a"],
+      // With and without the optional segment, as `/a/**/:y?` on `main`
+      ["/a/x-*/:y?", "/a/x-1/b", 2],
+      ["/x-*{/b}?", "/x-a/b", 2],
+    ] as [string, string, number?][]) {
+      const router = createRouter<string>();
+      addRoute(router, "GET", route, route);
+      expect(findAllRoutes(router, "GET", path).length, route).toBe(count ?? 1);
+      expect(compileRouter(router, { matchAll: true })("GET", path).length, route).toBe(count ?? 1);
+    }
+  });
+
   it("leaves a `**` with regex params and a `**:name` tied, as before (no `*`)", () => {
     // A regex param weighs what a required `**:name` does: registration order
     // decides, in every matcher
