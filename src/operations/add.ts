@@ -128,10 +128,16 @@ function _add<T>(
         node.wildcard = { key: "**" };
       }
       node = node.wildcard;
+      // A bare `**` is optional and an unnamed capture (`"0"`, `"1"`, ...,
+      // numbered with `*` and unnamed groups), as in URLPattern. Its value is
+      // also reported as `_` (deprecated, see `getMatchParams`), so that name
+      // is taken.
       paramsMap.push([
         -(i + 1),
-        addName(names, segment.length === 2 ? "_" : segment.slice(3), input),
-        segment.length === 2 /* no id */,
+        segment.length === 2
+          ? (addName(names, "_", input), String(_unnamedParamIndex++))
+          : addName(names, segment.slice(3), input),
+        segment.length === 2 /* optional */,
       ]);
       if (i === segments.length - 1) {
         break;

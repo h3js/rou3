@@ -120,28 +120,29 @@ describe("route matching", () => {
       // Wildcard
       expect(match("GET", "/test/foo/123/456")).toMatchObject({
         data: { path: "/test/foo/**" },
-        params: { _: "123/456" },
+        params: { "0": "123/456" },
       });
       expect(match("GET", "/wildcard/foo")).toMatchObject({
         data: { path: "/wildcard/**" },
-        params: { _: "foo" },
+        params: { "0": "foo" },
       });
       expect(match("GET", "/wildcard/foo/bar")).toMatchObject({
         data: { path: "/wildcard/**" },
-        params: { _: "foo/bar" },
+        params: { "0": "foo/bar", _: "foo/bar" },
       });
-      expect(match("GET", "/wildcard")).toMatchObject({
+      // Over zero segments the `**` is unset, as in URLPattern
+      expect(match("GET", "/wildcard")).toEqual({
         data: { path: "/wildcard/**" },
-        params: { _: "" },
+        params: {},
       });
       // Root wildcard
       expect(match("GET", "/anything")).toMatchObject({
         data: { path: "/**" },
-        params: { _: "anything" },
+        params: { "0": "anything" },
       });
       expect(match("GET", "/any/deep/path")).toMatchObject({
         data: { path: "/**" },
-        params: { _: "any/deep/path" },
+        params: { "0": "any/deep/path" },
       });
       // Escaped characters
       expect(match("GET", "/static:path/*/**")).toMatchObject({
@@ -865,13 +866,13 @@ describe("wildcard tail extraction (compiled parity)", () => {
       // required tail must not match empty
       expect(match("GET", "/files")).toBeUndefined();
       expect(match("GET", "/files/")).toBeUndefined();
-      // optional tail matches empty (with and without doubled slash)
-      expect(match("GET", "/opt")).toMatchObject({ data: { path: "OPT" }, params: { _: "" } });
-      expect(match("GET", "/opt/")).toMatchObject({ data: { path: "OPT" }, params: { _: "" } });
-      expect(match("GET", "/opt//")).toMatchObject({ data: { path: "OPT" }, params: { _: "" } });
+      // optional tail matches zero segments (unset) and an empty one
+      expect(match("GET", "/opt")).toEqual({ data: { path: "OPT" }, params: {} });
+      expect(match("GET", "/opt/")).toEqual({ data: { path: "OPT" }, params: {} });
+      expect(match("GET", "/opt//")).toEqual({ data: { path: "OPT" }, params: { 0: "", _: "" } });
       expect(match("GET", "/opt/a/b")).toMatchObject({
         data: { path: "OPT" },
-        params: { _: "a/b" },
+        params: { "0": "a/b" },
       });
       // param before the wildcard: offset is unknown at compile time
       expect(match("GET", "/pre/v/a/b")).toMatchObject({
@@ -922,9 +923,9 @@ describe("at most one trailing slash is ignored (#209)", () => {
         // a slash after a real empty last segment is still the one ignored,
         // and a `:name` needs a value
         expect(match("GET", "/users//")).toBeUndefined();
-        expect(match("GET", "/opt/a/")).toMatchObject({ params: { _: "a" } });
+        expect(match("GET", "/opt/a/")).toMatchObject({ params: { "0": "a" } });
         expect(match("GET", "/users/")).toBeUndefined();
-        expect(match("GET", "/opt/a//")).toMatchObject({ params: { _: "a/" } });
+        expect(match("GET", "/opt/a//")).toMatchObject({ params: { "0": "a/" } });
       });
     }
 
@@ -1025,15 +1026,15 @@ describe("path normalization above the root (normalize: true)", () => {
     ]) {
       expect(match("/x/../../foo/bar")).toEqual({
         data: { route: "/**" },
-        params: { _: "foo/bar" },
+        params: { "0": "foo/bar", _: "foo/bar" },
       });
       expect(match("/../foo/bar")).toEqual({
         data: { route: "/**" },
-        params: { _: "foo/bar" },
+        params: { "0": "foo/bar", _: "foo/bar" },
       });
       expect(match("/../files/a")).toEqual({
         data: { route: "/files/**" },
-        params: { _: "a" },
+        params: { "0": "a", _: "a" },
       });
     }
   });
@@ -1094,7 +1095,7 @@ describe("same-node sibling selection (findRoute/compiled parity)", () => {
       });
       expect(match("GET", "/x/a")).toMatchObject({
         data: { path: "/x/**" },
-        params: { _: "a" },
+        params: { "0": "a", _: "a" },
       });
       expect(match("GET", "/x/7")).toMatchObject({
         data: { path: "/x/:id(\\d+)" },
@@ -1384,3 +1385,111 @@ describe("empty segments (compiled parity, sweep)", () => {
     expect(failures.slice(0, 10)).toEqual([]);
   });
 });
+
+// URLPattern reads `**` as `*` with a `*` modifier: an unnamed capture, keyed
+// like a `*` or an unnamed group (`"0"`, `"1"`, …, in pattern order), and
+// unset over zero segments. The router also reports a bare `**` as `_`
+// (deprecated alias, 0.x compatibility), which the regex and URLPattern don't
+// have. `differs`: URLPattern gives other groups (rou3 ignores one trailing
+// slash, a `*` is one segment, `**.md` is `**\/*.md`, no `**:name` in
+// URLPattern).
+describe("bare `**` capture (URLPattern)", () => {
+  const cases: [route: string, path: string, params: Record<string, string>, differs?: true][] = [
+    ["/foo/**", "/foo/bar/baz", { 0: "bar/baz", _: "bar/baz" }],
+    ["/foo/**", "/foo/bar", { 0: "bar", _: "bar" }],
+    // Zero segments: both keys left out
+    ["/foo/**", "/foo", {}],
+    ["/foo/**", "/foo/", {}, true],
+    ["/foo/**", "/foo//", { 0: "", _: "" }, true],
+    ["/**", "/a/b", { 0: "a/b", _: "a/b" }],
+    ["/**", "/", {}, true],
+    ["/**", "//", { 0: "", _: "" }, true],
+    ["/a/**/b", "/a/b", {}],
+    ["/a/**/b", "/a//b", { 0: "", _: "" }],
+    ["/a/**/b", "/a/x/y/b", { 0: "x/y", _: "x/y" }],
+    ["/**/_payload.json", "/_payload.json", {}],
+    ["/**/_payload.json", "/a/b/_payload.json", { 0: "a/b", _: "a/b" }],
+    ["/*/x/**", "/a/x/b/c", { 0: "a", 1: "b/c", _: "b/c" }],
+    ["/*/x/**", "/a/x", { 0: "a" }],
+    ["/(\\d+)/**", "/1/b/c", { 0: "1", 1: "b/c", _: "b/c" }],
+    ["/file-*/**", "/file-a/b", { 0: "a", 1: "b", _: "b" }, true],
+    ["/**/*", "/a/b", { 0: "a", 1: "b", _: "a" }],
+    ["/**/*", "/a", { 1: "a" }],
+    ["/**/*.png", "/a/b/x.png", { 0: "a/b", 1: "x", _: "a/b" }],
+    ["/**.md", "/docs/intro.md", { 0: "docs", 1: "intro", _: "docs" }, true],
+    ["/:id/**", "/a/b", { id: "a", 0: "b", _: "b" }],
+    ["/:id/**", "/a", { id: "a" }],
+    // A param named `_` without a bare `**` is an ordinary name
+    ["/a/**:_", "/a/b/c", { _: "b/c" }, true],
+    ["/a/:_*", "/a/b/c", { _: "b/c" }],
+  ];
+
+  for (const [route, path, params] of cases) {
+    it(`${route} on ${path}`, () => {
+      const router = createEmptyRouter<string>();
+      addRoute(router, "GET", route, route);
+      addRoute(router, "", route, `any ${route}`);
+      const expected = { data: route, params };
+      expect(findRoute(router, "GET", path)).toEqual(expected);
+      expect(findRoute(router, "", path)).toEqual({ data: `any ${route}`, params });
+      expect(findAllRoutes(router, "GET", path)).toEqual([
+        { data: `any ${route}`, params },
+        expected,
+      ]);
+      const jit = compileRouter(router);
+      expect(jit("GET", path)).toEqual(expected);
+      expect(jit("", path)).toEqual({ data: `any ${route}`, params });
+      expect(compileRouter(router, { matchAll: true })("GET", path)).toEqual(
+        findAllRoutes(router, "GET", path),
+      );
+      const aot = new Function(`return ${compileRouterToString(router)}`)();
+      expect(aot("GET", path)).toEqual(expected);
+      // A key is omitted, never `undefined`
+      expect(Object.keys(findRoute(router, "GET", path)!.params!)).toEqual(Object.keys(params));
+      expect(Object.keys(aot("GET", path).params)).toEqual(Object.keys(params));
+      // `routeToRegExp` names unnamed captures `_N`, and has no `_` alias
+      expect(definedGroups(path.match(routeToRegExp(route))?.groups)).toEqual(
+        withoutAlias(route, params),
+      );
+    });
+  }
+
+  it("reserves `_` for the alias", () => {
+    for (const route of ["/:_/**", "/**/:_", "/a/:_(\\d+)/**", "/**/x-:_"]) {
+      expect(() => addRoute(createEmptyRouter(), "", route), route).toThrowError(
+        `rou3: duplicate param name "_" (${route})`,
+      );
+      expect(() => routeToRegExp(route), route).toThrowError(/^rou3: duplicate param name "_"/);
+    }
+  });
+
+  const URLPatternCtor = (globalThis as { URLPattern?: any }).URLPattern;
+  it.runIf(URLPatternCtor)("agrees with URLPattern", () => {
+    for (const [route, path, params, differs] of cases) {
+      const groups = new URLPatternCtor({ pathname: route }).exec({ pathname: path })?.pathname
+        .groups;
+      if (differs) {
+        expect(definedGroups(groups), `${route} on ${path}`).not.toEqual(
+          withoutAlias(route, params),
+        );
+      } else {
+        expect(definedGroups(groups), `${route} on ${path}`).toEqual(withoutAlias(route, params));
+      }
+    }
+  });
+});
+
+/** `params` without the router-only `_` alias of a bare `**`. */
+function withoutAlias(route: string, params: Record<string, string>): Record<string, string> {
+  if (!/\*\*(?!:)/.test(route)) return params;
+  const { _: _alias, ...rest } = params;
+  return rest;
+}
+
+function definedGroups(groups: Record<string, string | undefined> = {}): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(groups)) {
+    if (value !== undefined) result[/^_\d+$/.test(key) ? key.slice(1) : key] = value;
+  }
+  return result;
+}

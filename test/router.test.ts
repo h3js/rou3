@@ -260,11 +260,11 @@ describe("Router lookup", function () {
       {
         "/anything": {
           data: { path: "/**" },
-          params: { _: "anything" },
+          params: { "0": "anything", _: "anything" },
         },
         "/any/deep/path": {
           data: { path: "/**" },
-          params: { _: "any/deep/path" },
+          params: { "0": "any/deep/path", _: "any/deep/path" },
         },
       },
     );
@@ -292,11 +292,11 @@ describe("Router lookup", function () {
         },
         "/wildcard/abc": {
           data: { path: "/wildcard/**" },
-          params: { _: "abc" },
+          params: { "0": "abc", _: "abc" },
         },
         "/wildcard/abc/def": {
           data: { path: "/wildcard/**" },
-          params: { _: "abc/def" },
+          params: { "0": "abc/def", _: "abc/def" },
         },
         "/dynamic": {
           data: { path: "/dynamic/*" },
@@ -309,7 +309,7 @@ describe("Router lookup", function () {
         },
         "/test/abc": {
           data: { path: "/test/**" },
-          params: { _: "abc" },
+          params: { "0": "abc", _: "abc" },
         },
       },
     );
@@ -329,7 +329,7 @@ describe("Router lookup", function () {
       {
         "/polymer/foo/bar": {
           data: { path: "/polymer/**" },
-          params: { _: "foo/bar" },
+          params: { "0": "foo/bar", _: "foo/bar" },
         },
         "/polymer/route/anon": {
           data: { path: "/polymer/route/*" },
@@ -337,7 +337,7 @@ describe("Router lookup", function () {
         },
         "/polymer/constructor": {
           data: { path: "/polymer/**" },
-          params: { _: "constructor" },
+          params: { "0": "constructor", _: "constructor" },
         },
       },
     );
@@ -716,13 +716,13 @@ describe("Router lookup", function () {
     // Params after a `**` (matched from the end of the path) too
     testRouter(["/**/:file"], undefined, {
       "//": undefined,
-      "/a/": { data: { path: "/**/:file" }, params: { _: "", file: "a" } },
+      "/a/": { data: { path: "/**/:file" }, params: { file: "a" } },
       "/a//": undefined,
     });
     testRouter(["/x/**/:y/z"], undefined, {
       "/x//z": undefined,
       "/x/a//z": undefined,
-      "/x/a/b/z": { data: { path: "/x/**/:y/z" }, params: { _: "a", y: "b" } },
+      "/x/a/b/z": { data: { path: "/x/**/:y/z" }, params: { "0": "a", _: "a", y: "b" } },
     });
   });
 
@@ -939,13 +939,13 @@ describe("Router remove", function () {
 
     expect(findRoute(router, "GET", "/ui/components/snackbars")).to.deep.equal({
       data: { path: "/ui/components/**" },
-      params: { _: "snackbars" },
+      params: { "0": "snackbars", _: "snackbars" },
     });
 
     removeRoute(router, "GET", "/ui/components/**");
     expect(findRoute(router, "GET", "/ui/components/snackbars")).to.deep.equal({
       data: { path: "/ui/**" },
-      params: { _: "components/snackbars" },
+      params: { "0": "components/snackbars", _: "components/snackbars" },
     });
   });
 
@@ -992,12 +992,12 @@ describe("Router remove", function () {
 
     expect(findRoute(router, "GET", "/ui/components/snackbars")).to.deep.equal({
       data: { path: "/ui/components/**" },
-      params: { _: "snackbars" },
+      params: { "0": "snackbars", _: "snackbars" },
     });
     removeRoute(router, "GET", "/ui/components/**");
     expect(findRoute(router, "GET", "/ui/components/snackbars")).to.deep.equal({
       data: { path: "/ui/**" },
-      params: { _: "components/snackbars" },
+      params: { "0": "components/snackbars", _: "components/snackbars" },
     });
   });
 

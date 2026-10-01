@@ -143,8 +143,11 @@ describe("benchmark", () => {
     // instead of expanding into two routes, so a greedy capture before it
     // takes what it can, as in URLPattern; an absent one has no key. Its `?`
     // is kept raw past the percent-encoder (it would be a literal `%3F`).
-    expect(bytes).toBeLessThanOrEqual(10975); // <10.98kb
-    expect(gzipSize).toBeLessThanOrEqual(4595); // <4.60kb
+    // +56B raw / +24B gzip: a bare `**` is an unnamed capture (`"0"`, `"1"`,
+    // …) as in URLPattern, unset over zero segments (`getMatchParams` skips
+    // it), also reported as the deprecated `_` alias.
+    expect(bytes).toBeLessThanOrEqual(11030); // <11.03kb
+    expect(gzipSize).toBeLessThanOrEqual(4620); // <4.62kb
   });
 });
 

@@ -116,23 +116,23 @@ export const regexpCases: Record<string, RegExpCase> = {
     match: [["/path/file-a-b.png", { "0": "a", "1": "b" }]],
   },
   "/path/**": {
-    regex: /^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$/,
+    regex: /^\/path(?:\/(?<_0>(?:[\s\S]*[^/])?\/*?))??\/?$/,
     match: [
-      // The whole catch-all group is skipped, so the regex leaves `_` unset
-      // while the router reports `""`.
-      ["/path", { _: undefined }, { _: "" }],
+      // Over zero segments the `**` is unset, as in the router (and
+      // URLPattern); the lazy group leaves the stripped trailing slash.
+      ["/path", { "0": undefined }],
+      ["/path/", { "0": undefined }],
       // The catch-all leaves the stripped trailing slash out of the capture.
-      ["/path/", { _: "" }],
-      ["/path//", { _: "" }],
-      ["/path/a/", { _: "a" }],
-      ["/path/a//", { _: "a/" }],
-      ["/path/anything/more", { _: "anything/more" }],
+      ["/path//", { "0": "" }],
+      ["/path/a/", { "0": "a" }],
+      ["/path/a//", { "0": "a/" }],
+      ["/path/anything/more", { "0": "anything/more" }],
       // The router splits on `/` only: line terminators are ordinary chars,
       // mid-path and last alike (a JS `.` excludes all four).
-      ["/path/\n", { _: "\n" }],
-      ["/path/a\rb/c", { _: "a\rb/c" }],
-      ["/path/a/\u2028/", { _: "a/\u2028" }],
-      ["/path/\u2029x//", { _: "\u2029x/" }],
+      ["/path/\n", { "0": "\n" }],
+      ["/path/a\rb/c", { "0": "a\rb/c" }],
+      ["/path/a/\u2028/", { "0": "a/\u2028" }],
+      ["/path/\u2029x//", { "0": "\u2029x/" }],
     ],
     noMatch: ["/pathfoo", "/pathfoo/bar", "/path\n/a", "/path\r/a"],
   },
@@ -195,16 +195,16 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/a/1xjson/*-2", "/a/1.json/x-2"],
   },
   "/**": {
-    regex: /^\/?(?<_>(?:[\s\S]*[^/])?\/*?)\/?$/,
+    regex: /^(?:\/?(?<_0>(?:[\s\S]*[^/])?\/*?))??\/?$/,
     match: [
-      ["/", { _: "" }],
-      ["//", { _: "" }],
-      ["/a/", { _: "a" }],
-      ["/a//", { _: "a/" }],
-      ["/anything", { _: "anything" }],
-      ["/any/deep/path", { _: "any/deep/path" }],
-      ["/\u2028\u2029", { _: "\u2028\u2029" }],
-      ["/a\n/b\r/", { _: "a\n/b\r" }],
+      ["/", { "0": undefined }],
+      ["//", { "0": "" }],
+      ["/a/", { "0": "a" }],
+      ["/a//", { "0": "a/" }],
+      ["/anything", { "0": "anything" }],
+      ["/any/deep/path", { "0": "any/deep/path" }],
+      ["/\u2028\u2029", { "0": "\u2028\u2029" }],
+      ["/a\n/b\r/", { "0": "a\n/b\r" }],
     ],
   },
   "/**:path": {
@@ -779,18 +779,17 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/users", "/users/", "/users//", "/users//x", "/users/1/x/y", "/users/1/x//"],
   },
-  // A `**` after a required segment. On zero segments its group matches
-  // nothing, and JS leaves an optional group that matched nothing unset (the
-  // router reports `""`), like the `**` of `/path/**` on `/path`.
+  // A `**` after a required segment, unset over zero segments (like the
+  // `**` of `/path/**` on `/path`).
   "/users/:id/**": {
-    regex: /^\/users\/(?<id>[^/]+)(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$/,
+    regex: /^\/users\/(?<id>[^/]+)(?:\/(?<_0>(?:[\s\S]*[^/])?\/*?))??\/?$/,
     match: [
-      ["/users/1", { id: "1", _: undefined }, { id: "1", _: "" }],
-      ["/users/1/", { id: "1", _: "" }],
-      ["/users/1//", { id: "1", _: "" }],
-      ["/users/1/a/b", { id: "1", _: "a/b" }],
-      ["/users/1/a/b/", { id: "1", _: "a/b" }],
-      ["/users/1/a//", { id: "1", _: "a/" }],
+      ["/users/1", { id: "1", "0": undefined }],
+      ["/users/1/", { id: "1", "0": undefined }],
+      ["/users/1//", { id: "1", "0": "" }],
+      ["/users/1/a/b", { id: "1", "0": "a/b" }],
+      ["/users/1/a/b/", { id: "1", "0": "a/b" }],
+      ["/users/1/a//", { id: "1", "0": "a/" }],
     ],
     noMatch: ["/users", "/users/", "/users//", "/users///", "/usersx/1"],
   },
@@ -956,17 +955,17 @@ export const regexpCases: Record<string, RegExpCase> = {
   // inner `*` / `:x?` / `:x*` stays unset where the router takes the route
   // without it, and no look-behind is needed.
   "/path{/sub/**}?": {
-    regex: /^\/path(?:\/sub(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?)?\/?$/,
+    regex: /^\/path(?:\/sub(?:\/(?<_0>(?:[\s\S]*[^/])?\/*?))??)?\/?$/,
     match: [
-      ["/path", { _: undefined }],
-      ["/path/", { _: undefined }],
-      ["/path/sub/", { _: "" }],
-      ["/path/sub//", { _: "" }],
-      ["/path/sub/a", { _: "a" }],
-      ["/path/sub/a/", { _: "a" }],
-      ["/path/sub/a//", { _: "a/" }],
-      ["/path/sub/a/b", { _: "a/b" }],
-      ["/path/sub/\ra\n/", { _: "\ra\n" }],
+      ["/path", { "0": undefined }],
+      ["/path/", { "0": undefined }],
+      ["/path/sub/", { "0": undefined }],
+      ["/path/sub//", { "0": "" }],
+      ["/path/sub/a", { "0": "a" }],
+      ["/path/sub/a/", { "0": "a" }],
+      ["/path/sub/a//", { "0": "a/" }],
+      ["/path/sub/a/b", { "0": "a/b" }],
+      ["/path/sub/\ra\n/", { "0": "\ra\n" }],
     ],
     noMatch: ["/path//", "/path/subx", "/path/other"],
   },
@@ -1016,29 +1015,29 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/pathx", "/path//"],
   },
   // Segments after `**` match the end of the path, the `**` what is between
-  // (empty segments included). At the root the leading slash doubles as the
-  // separator, so `_` is `""` where it matches no segment, as in the router.
+  // (empty segments included), unset where it matches no segment. At the
+  // root its group carries its own separator.
   "/**/_payload.json": {
-    regex: /^\/?(?<_>[\s\S]*)\/_payload\.json\/?$/,
+    regex: /^(?:\/(?<_0>[\s\S]*))?\/_payload\.json\/?$/,
     match: [
-      ["/_payload.json", { _: "" }],
-      ["//_payload.json", { _: "" }],
-      ["/blog/post/_payload.json", { _: "blog/post" }],
-      ["/blog/post/_payload.json/", { _: "blog/post" }],
-      ["/a//_payload.json", { _: "a/" }],
-      ["/a/\n/_payload.json", { _: "a/\n" }],
+      ["/_payload.json", { "0": undefined }],
+      ["//_payload.json", { "0": "" }],
+      ["/blog/post/_payload.json", { "0": "blog/post" }],
+      ["/blog/post/_payload.json/", { "0": "blog/post" }],
+      ["/a//_payload.json", { "0": "a/" }],
+      ["/a/\n/_payload.json", { "0": "a/\n" }],
     ],
     noMatch: ["/", "/_payload.json//", "/_payload.jsonx", "/x_payload.json", "/_payload.json/x"],
   },
   // After a prefix, the separator stays with it (`/pathx/suffix` must not
-  // match); `_` is unset where it matches no segment (the router: `""`).
+  // match).
   "/path/**/suffix": {
-    regex: /^\/path(?:\/(?<_>[\s\S]*))?\/suffix\/?$/,
+    regex: /^\/path(?:\/(?<_0>[\s\S]*))?\/suffix\/?$/,
     match: [
-      ["/path/suffix", { _: undefined }, { _: "" }],
-      ["/path//suffix", { _: "" }],
-      ["/path/a/b/suffix", { _: "a/b" }],
-      ["/path/suffix/suffix/", { _: "suffix" }],
+      ["/path/suffix", { "0": undefined }],
+      ["/path//suffix", { "0": "" }],
+      ["/path/a/b/suffix", { "0": "a/b" }],
+      ["/path/suffix/suffix/", { "0": "suffix" }],
     ],
     noMatch: ["/path", "/pathsuffix", "/pathx/suffix", "/path/suffix/x", "/path/suffix//"],
   },
@@ -1053,12 +1052,12 @@ export const regexpCases: Record<string, RegExpCase> = {
   },
   // The last segment is fixed by the path, so the greedy `**` can't take it.
   "/a/**/b{.json}?": {
-    regex: /^\/a(?:\/(?<_>[\s\S]*))?\/b(?:\.json)?\/?$/,
+    regex: /^\/a(?:\/(?<_0>[\s\S]*))?\/b(?:\.json)?\/?$/,
     match: [
-      ["/a/b", { _: undefined }, { _: "" }],
-      ["/a/b.json/", { _: undefined }, { _: "" }],
-      ["/a/x/b.json", { _: "x" }],
-      ["/a/b/b", { _: "b" }],
+      ["/a/b", { "0": undefined }],
+      ["/a/b.json/", { "0": undefined }],
+      ["/a/x/b.json", { "0": "x" }],
+      ["/a/b/b", { "0": "b" }],
     ],
     noMatch: ["/a", "/ab", "/ab/b", "/a/b/c", "/a/b.jsonx"],
   },
@@ -1091,63 +1090,63 @@ export const regexpCases: Record<string, RegExpCase> = {
   },
   // `**<rest>` is `**/*<rest>`; a `*` after `**` takes one segment.
   "/**/*.png": {
-    regex: /^\/?(?<_>[\s\S]*)\/(?<_0>[^/]*)\.png\/?$/,
+    regex: /^(?:\/(?<_0>[\s\S]*))?\/(?<_1>[^/]*)\.png\/?$/,
     match: [
-      ["/x.png", { "0": "x", _: "" }],
-      ["/.png", { "0": "", _: "" }],
-      ["/a/b/x.png", { "0": "x", _: "a/b" }],
-      ["/a/x.png/", { "0": "x", _: "a" }],
+      ["/x.png", { "0": undefined, "1": "x" }],
+      ["/.png", { "0": undefined, "1": "" }],
+      ["/a/b/x.png", { "0": "a/b", "1": "x" }],
+      ["/a/x.png/", { "0": "a", "1": "x" }],
     ],
     noMatch: ["/", "/x.jpg", "/x.png/y"],
   },
   "/:id/**/:file(\\w+).json": {
-    regex: /^\/(?<id>[^/]+)(?:\/(?<_>[\s\S]*))?\/(?<file>\w+)\.json\/?$/,
+    regex: /^\/(?<id>[^/]+)(?:\/(?<_0>[\s\S]*))?\/(?<file>\w+)\.json\/?$/,
     match: [
-      ["/1/c.json", { id: "1", _: undefined, file: "c" }, { id: "1", _: "", file: "c" }],
-      ["/1/a/b/c.json", { id: "1", _: "a/b", file: "c" }],
+      ["/1/c.json", { id: "1", "0": undefined, file: "c" }],
+      ["/1/a/b/c.json", { id: "1", "0": "a/b", file: "c" }],
     ],
     noMatch: ["/c.json", "//c.json", "/1/c-d.json", "/1/a/.json"],
   },
   "/**.md": {
-    regex: /^\/?(?<_>[\s\S]*)\/(?<_0>[^/]*)\.md\/?$/,
+    regex: /^(?:\/(?<_0>[\s\S]*))?\/(?<_1>[^/]*)\.md\/?$/,
     match: [
-      ["/readme.md", { "0": "readme", _: "" }],
-      ["/docs/guide/intro.md/", { "0": "intro", _: "docs/guide" }],
+      ["/readme.md", { "0": undefined, "1": "readme" }],
+      ["/docs/guide/intro.md/", { "0": "docs/guide", "1": "intro" }],
     ],
     noMatch: ["/", "/a.mdx", "/a.md/b"],
   },
   "/blog/**.json": {
-    regex: /^\/blog(?:\/(?<_>[\s\S]*))?\/(?<_0>[^/]*)\.json\/?$/,
+    regex: /^\/blog(?:\/(?<_0>[\s\S]*))?\/(?<_1>[^/]*)\.json\/?$/,
     match: [
-      ["/blog/post.json", { "0": "post", _: undefined }, { "0": "post", _: "" }],
-      ["/blog/a/post.json", { "0": "post", _: "a" }],
+      ["/blog/post.json", { "0": undefined, "1": "post" }],
+      ["/blog/a/post.json", { "0": "a", "1": "post" }],
     ],
     noMatch: ["/blog", "/post.json", "/blogpost.json"],
   },
   // A `:x` after `**` needs a value too (`//` is no match).
   "/**/:file": {
-    regex: /^\/?(?<_>[\s\S]*)\/(?<file>[^/]+)\/?$/,
+    regex: /^(?:\/(?<_0>[\s\S]*))?\/(?<file>[^/]+)\/?$/,
     match: [
-      ["/a", { _: "", file: "a" }],
-      ["/a/b/c", { _: "a/b", file: "c" }],
-      ["/a/b/", { _: "a", file: "b" }],
-      ["//a", { _: "", file: "a" }],
+      ["/a", { "0": undefined, file: "a" }],
+      ["/a/b/c", { "0": "a/b", file: "c" }],
+      ["/a/b/", { "0": "a", file: "b" }],
+      ["//a", { "0": "", file: "a" }],
     ],
     noMatch: ["/", "//", "/a//"],
   },
   // A lone optional segment after `**`: it is lazy, so `page` takes the last
   // segment where it has a value, and the `**` takes the rest (an empty last
-  // segment included: `/a/x//` gives `_: "x/"`).
+  // segment included: `/a/x//` gives `0: "x/"`).
   "/a/**/:page?": {
-    regex: /^\/a(?:\/(?<_>[\s\S]*?))??(?:\/(?<page>[^/]+))?\/?$/,
+    regex: /^\/a(?:\/(?<_0>[\s\S]*?))??(?:\/(?<page>[^/]+))?\/?$/,
     match: [
-      ["/a", { _: undefined, page: undefined }, { _: "" }],
-      ["/a/", { _: undefined, page: undefined }, { _: "" }],
-      ["/a/x", { _: undefined, page: "x" }, { _: "", page: "x" }],
-      ["/a/x/y", { _: "x", page: "y" }],
-      ["/a/x/y/", { _: "x", page: "y" }],
-      ["/a//", { _: "", page: undefined }],
-      ["/a/x//", { _: "x/", page: undefined }],
+      ["/a", { "0": undefined, page: undefined }],
+      ["/a/", { "0": undefined, page: undefined }],
+      ["/a/x", { "0": undefined, page: "x" }],
+      ["/a/x/y", { "0": "x", page: "y" }],
+      ["/a/x/y/", { "0": "x", page: "y" }],
+      ["/a//", { "0": "", page: undefined }],
+      ["/a/x//", { "0": "x/", page: undefined }],
     ],
     noMatch: ["/ab", "/b"],
   },
@@ -1165,13 +1164,13 @@ export const regexpCases: Record<string, RegExpCase> = {
   // of the path where they match, and `/?$` is exact (the `**` absorbs a
   // stripped slash).
   "/a/**/:n(\\d+)?": {
-    regex: /^\/a(?:\/(?<_>[\s\S]*?))??(?:\/(?<n>\d+))?\/?$/,
+    regex: /^\/a(?:\/(?<_0>[\s\S]*?))??(?:\/(?<n>\d+))?\/?$/,
     match: [
-      ["/a", { _: undefined, n: undefined }, { _: "" }],
-      ["/a/1", { _: undefined, n: "1" }, { _: "", n: "1" }],
-      ["/a/b/1", { _: "b", n: "1" }],
-      ["/a/b/c", { _: "b/c", n: undefined }],
-      ["/a/b/", { _: "b", n: undefined }],
+      ["/a", { "0": undefined, n: undefined }],
+      ["/a/1", { "0": undefined, n: "1" }],
+      ["/a/b/1", { "0": "b", n: "1" }],
+      ["/a/b/c", { "0": "b/c", n: undefined }],
+      ["/a/b/", { "0": "b", n: undefined }],
     ],
     noMatch: ["/ab"],
   },

@@ -168,12 +168,8 @@ function inlineOptionalGroup(route: string, input: string): RegExp | undefined {
   // segments counted as optional ones (see `lazyCatchAll`). Before more of the
   // route, a catch-all can only be in the shared tail, after the group.
   const extra = suf === "" && body.charCodeAt(0) === 47 /* '/' */ ? splitRoute(body) : [];
-  const [baseSegs, baseOwnSep, , baseOpenTail] = routeToRegExpSegments(pre + suf, input, extra);
-  const [fullSegs, fullOwnSep, starStar, openTail] = routeToRegExpSegments(
-    pre + body + suf,
-    input,
-    extra,
-  );
+  const [baseSegs, baseOwnSep, baseOpenTail] = routeToRegExpSegments(pre + suf, input, extra);
+  const [fullSegs, fullOwnSep, openTail] = routeToRegExpSegments(pre + body + suf, input, extra);
   const baseLen = baseSegs.length;
   const fullLen = fullSegs.length;
   if (
@@ -208,14 +204,12 @@ function inlineOptionalGroup(route: string, input: string): RegExp | undefined {
     const last = fullSegs[i];
     const k = prefix.length;
     let merged: string | undefined;
-    let optional = false;
     let lookahead = false;
     if (last === prefix) {
       // The group adds nothing to the segment.
       merged = last;
     } else if (tail === 0 && last.startsWith(prefix) && isOptionalGroups(last.slice(k))) {
       // Only segments that are optional already (`/a{/:x*}?` is `/a/:x*`).
-      optional = true;
       merged = last;
     } else {
       const capture = mergeCapture(prefix, last);
@@ -235,11 +229,7 @@ function inlineOptionalGroup(route: string, input: string): RegExp | undefined {
     }
     const inlineSegs = baseSegs.slice();
     inlineSegs[i] = merged;
-    // `/a{/**}?` also registers `/a`, which wins where `**` would match no
-    // segment: its group is skipped there like `:_*`'s.
-    return new RegExp(
-      `^${ending(joinSegments(inlineSegs, fullOwnSep), starStar && !optional, tailEnding)}`,
-    );
+    return new RegExp(`^${ending(joinSegments(inlineSegs, fullOwnSep), tailEnding)}`);
   }
 
   // `body` adds one or more whole segments (e.g. `/foo` -> `/foo/bar`); make
@@ -254,7 +244,7 @@ function inlineOptionalGroup(route: string, input: string): RegExp | undefined {
   }
   const added = fullSegs.slice(shared, fullLen - tail).join("/");
   const rest = tail > 0 ? `/${baseSegs.slice(baseLen - tail).join("/")}` : "";
-  return new RegExp(`^${ending(`${head}(?:/${added})?${rest}`, starStar, tailEnding)}`);
+  return new RegExp(`^${ending(`${head}(?:/${added})?${rest}`, tailEnding)}`);
 }
 
 /**
@@ -403,10 +393,10 @@ function paramModifier(segment: string): string | undefined {
 }
 
 function _routeToRegExp(route: string, input: string): RegExp {
-  const [segments, ownSeparator, starStar, openTail] = routeToRegExpSegments(route, input);
+  const [segments, ownSeparator, openTail] = routeToRegExpSegments(route, input);
   const body = joinSegments(segments, ownSeparator);
   // Root: lookup reaches `/` from `/` only (`//` is an empty segment).
-  return new RegExp(segments.length > 0 ? `^${ending(body, starStar, openTail)}` : "^/$");
+  return new RegExp(segments.length > 0 ? `^${ending(body, openTail)}` : "^/$");
 }
 
 /**
@@ -417,9 +407,9 @@ function _routeToRegExp(route: string, input: string): RegExp {
  * the stripped slash does not end one: `/a/**\/:y?/:z?` leaves `z` unset on
  * `/a/b/`, as the router does.
  */
-function ending(body: string, starStar: boolean, openTail: string | boolean): string {
+function ending(body: string, openTail: string | boolean): string {
   if (!openTail) {
-    return withTrailingSlash(body, starStar);
+    return withTrailingSlash(body);
   }
   if (typeof openTail === "string") {
     const at = body.lastIndexOf(openTail) + openTail.length;
@@ -443,22 +433,19 @@ function joinSegments(segments: string[], ownSeparator: boolean): string {
 
 /**
  * Segment regexes for `route`, plus whether the first one is an optional
- * first route segment carrying its own separator (see `joinSegments`),
- * whether the route ends in a bare `**` (its `_` group reads the same as a
- * param named `_`, see `withTrailingSlash`), and whether a plain `/?$` ends
- * it exactly (`openTail`). `extra`: the segments of an inline `{…}?` group
- * that follows `route` (see `lazyCatchAll`). `input`: the pattern `route`
- * expands, quoted in errors.
+ * first route segment carrying its own separator (see `joinSegments`), and
+ * whether a plain `/?$` ends it exactly (`openTail`). `extra`: the segments
+ * of an inline `{…}?` group that follows `route` (see `lazyCatchAll`).
+ * `input`: the pattern `route` expands, quoted in errors.
  */
 function routeToRegExpSegments(
   route: string,
   input: string,
   extra: string[] = [],
-): [segments: string[], ownSeparator: boolean, starStar: boolean, openTail: string | boolean] {
+): [segments: string[], ownSeparator: boolean, openTail: string | boolean] {
   const reSegments: string[] = [];
   let idCtr = 0;
   let ownSeparator = false;
-  let starStar = false;
   // The `**` (or `:x+` / `:x*`) segments after which match from the end of
   // the path: a route (expansion) can have one.
   let catchAll = false;
@@ -527,11 +514,11 @@ function routeToRegExpSegments(
   // match the end of the path and the catch-all what is between, zero or more
   // segments (one or more with a value for `**:name` / `:name+` / `:name*`),
   // empty ones included. The separator stays with the prefix (`/a/**/b` must
-  // not match `/ab`), except at the root, where the leading slash doubles as
-  // it so that `_` is `""` on `/b` as in the router. With optional segments
-  // after it, the router registers several routes; `lazyCatchAll` picks
-  // between them.
-  const pushCatchAll = (id: string, required: boolean, i: number, repeat = false): boolean => {
+  // not match `/ab`); over zero segments the group is unset, as in the
+  // router. With optional segments after it, the router registers several
+  // routes; `lazyCatchAll` picks between them. `name`: the catch-all's group
+  // name.
+  const pushCatchAll = (name: string, required: boolean, i: number, repeat = false): boolean => {
     // A bare `**` may be empty, a `**:name` (`:name+`, `:name*`) needs a value
     const empty = !required && !repeat;
     // `:x*` then a `*`, which is optional in the route `:x*` registers without
@@ -542,7 +529,7 @@ function routeToRegExpSegments(
     const tail = segments.slice(i + 1);
     if (repeat && extra.length === 0 && tail.length === 1 && tail[0] === "*") {
       const last = `(?<${toRegExpUnnamedKey(idCtr++)}>[^/]*)`;
-      pushOptional(`(?:(?<${groupName(id)}>${SOME})/)?${last}`, false);
+      pushOptional(`(?:(?<${name}>${SOME})/)?${last}`, false);
       return true;
     }
     const lazy = lazyCatchAll(tail, extra);
@@ -554,7 +541,6 @@ function routeToRegExpSegments(
       extra.length === 0 &&
       tail.every((s) => paramModifier(s) === "?") &&
       !(reSegments.length > 0 && canBeEmpty(reSegments[reSegments.length - 1]));
-    const name = groupName(id);
     const group = `(?<${name}>${empty ? ANY : SOME}${lazy ? "?" : ""})`;
     if (open) {
       openTail = nest === 0 ? `(?:/${group})??` : true;
@@ -562,12 +548,10 @@ function routeToRegExpSegments(
     if (required) {
       reSegments.push(reSegments.length > 0 ? `${reSegments.pop()}/${group}` : group);
       nest = 0;
-    } else if (repeat || lazy || reSegments.length > 0) {
+    } else {
       // Without optional segments after it, `:name*` is lazy: the router's
       // route without it leaves `name` unset. With them, it picks like `**`.
       pushOptional(group, false, lazy ?? repeat, true);
-    } else {
-      reSegments.push(`?${group}`);
     }
     return false;
   };
@@ -617,24 +601,23 @@ function routeToRegExpSegments(
       // bare optional `/?` would let `/api/**` match `/apifoo`. `**` matches
       // zero or more segments (`/api` too), `**:name` one or more, with a
       // value: the separator plus `SOME` (`/api///` reaches `/api/**:p` with
-      // `p: "/"`, `/api//` doesn't). A bare `**` is the `_` param (`params._`
-      // in the router).
+      // `p: "/"`, `/api//` doesn't). A bare `**` is an unnamed capture (`_N`,
+      // `"N"` in the router), unset over zero segments.
       oneCatchAll();
-      const id = segment === "**" ? "_" : segment.slice(3);
+      const bare = segment === "**";
+      const name = bare ? toRegExpUnnamedKey(idCtr++) : groupName(segment.slice(3));
       if (i < segments.length - 1) {
         // Segments follow: they take the end of the path, the `**` what is
         // between (see `pushCatchAll`).
-        pushCatchAll(id, segment !== "**", i);
+        pushCatchAll(name, !bare, i);
         continue;
       }
-      const name = groupName(id);
-      starStar = segment === "**";
-      if (!starStar) {
+      if (!bare) {
         reSegments.push(`(?<${name}>${SOME})`);
       } else if (reSegments.length > 0) {
-        pushOptional(`(?<_>${ANY})`, false);
+        pushOptional(`(?<${name}>${ANY})`, false);
       } else {
-        reSegments.push(`?(?<_>${ANY})`);
+        reSegments.push(`?(?<${name}>${ANY})`);
       }
       break;
     } else if (segmentKey(encodeEscapes(segment)) === 1) {
@@ -653,18 +636,18 @@ function routeToRegExpSegments(
         }
 
         // + or *: `addRoute` accepts them on a whole-segment `:name` only.
-        const id = base.slice(1);
+        const name = groupName(base.slice(1));
         oneCatchAll();
         if (i < segments.length - 1) {
           // The tree has `**:name` here (`:name*` also registers the route
           // without it), with segments after it.
-          if (pushCatchAll(id, mod === "+", i, mod === "*")) {
+          if (pushCatchAll(name, mod === "+", i, mod === "*")) {
             break;
           }
           continue;
         }
         // `:name*` is `{/:name+}?`
-        const group = `(?<${groupName(id)}>${SOME})`;
+        const group = `(?<${name}>${SOME})`;
         if (mod === "*") {
           pushOptional(group, false, false, true);
         } else {
@@ -685,7 +668,7 @@ function routeToRegExpSegments(
     }
   }
 
-  return [reSegments, ownSeparator, starStar, openTail];
+  return [reSegments, ownSeparator, openTail];
 }
 
 function toRegExpUnnamedKey(index: number): string {

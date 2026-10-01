@@ -64,3 +64,39 @@ function _formatMethods(node: Node<{ path?: string }>) {
     })
     .join(", ")}`;
 }
+
+/** The keys of the bare `**` captures (unnamed, numbered) under `node`. */
+export function bareCatchAllKeys(node: Node<unknown> | undefined): string[] {
+  if (!node) return [];
+  const keys: string[] = [];
+  for (const entries of Object.values(node.methods || {})) {
+    for (const [index, name, optional] of entries?.flatMap((m) => m.paramsMap || []) || []) {
+      if (index < 0 && optional) keys.push(name as string);
+    }
+  }
+  return keys.concat(
+    ...Object.values(node.static || {}).map((child) => bareCatchAllKeys(child)),
+    bareCatchAllKeys(node.param),
+    bareCatchAllKeys(node.wildcard),
+    bareCatchAllKeys(node.suffix),
+  );
+}
+
+/**
+ * A copy of `router`'s `params` without the deprecated `_` alias of a bare
+ * `**` (URLPattern and `routeToRegExp` only have its numbered key). Throws
+ * unless `_` is there exactly when the `**`'s numbered key is, with its value.
+ */
+export function withoutAlias<T extends Record<string, string | undefined>>(
+  router: RouterContext<any>,
+  params: T = {} as T,
+): T {
+  const { _: alias, ...rest } = params;
+  const keys = bareCatchAllKeys(router.root);
+  if (keys.length === 0) return { ...params };
+  const key = keys.find((k) => k in rest);
+  if (key === undefined ? "_" in params : alias !== rest[key]) {
+    throw new Error(`test: \`_\` is no alias of the \`**\` key in ${JSON.stringify(params)}`);
+  }
+  return rest as T;
+}

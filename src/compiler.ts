@@ -196,6 +196,8 @@ interface CompilerContext {
   dataMap?: Map<any, number>;
   regexpMap?: Map<string, number>;
   regexTemps?: number;
+  // Some matcher reads a bare `**`'s tail into `_w` (it is also `_`)
+  starStarTemp?: boolean;
   // The router has routes with segments after `**`: matches are collected
   // with a rank descriptor each (`k`) and ranked from the end of the path
   rank?: boolean;
@@ -231,9 +233,9 @@ function compileRouteMatch(ctx: CompilerContext): string {
   if (match) {
     // Mirror splitPath(): empty segments are kept, so "/a//" (stripped once
     // to "/a/") has a real empty last segment (#209).
-    const temps = ctx.regexTemps
-      ? `let ${Array.from({ length: ctx.regexTemps }, (_, i) => `_m${i}`).join(",")};`
-      : "";
+    const tempNames = Array.from({ length: ctx.regexTemps || 0 }, (_, i) => `_m${i}`);
+    if (ctx.starStarTemp) tempNames.push("_w");
+    const temps = tempNames.length > 0 ? `let ${tempNames.join(",")};` : "";
     code += `let s=p.split("/");let l=s.length;${temps}${match}`;
   }
 
@@ -443,11 +445,21 @@ function compileFinalMatch(
     // `$N` data slots — an inline literal would allocate a fresh RegExp on
     // every evaluation (ES2015+ semantics), measured ~2-6% per match.
     let paramsCode = "";
+    // Where a bare `**`'s properties are in `paramsCode`: they are unset over
+    // zero segments (see `getMatchParams`)
+    let starStar: [start: number, end: number] | undefined;
     let tmpCount = 0;
     for (let i = 0; i < paramsMap.length; i++) {
       const map = paramsMap[i];
       if (typeof map[1] === "string") {
-        paramsCode += `${propKey(map[1])}:${params[i]},`;
+        let code = `${propKey(map[1])}:${params[i]},`;
+        if (map[0] < 0 && map[2]) {
+          // Also `_` (deprecated alias): the tail is computed once, into `_w`
+          code = `${propKey(map[1])}:_w=${params[i]},_:_w,`;
+          ctx.starStarTemp = true;
+          starStar = [paramsCode.length, paramsCode.length + code.length];
+        }
+        paramsCode += code;
         // A `:name` / `**:name` needs a value (see `emptyParam`)
         const guard = nonEmptyGuard(map, params[i], data.suffix);
         if (guard) {
@@ -487,15 +499,20 @@ function compileFinalMatch(
       ctx.regexTemps = tmpCount;
     }
 
-    ret += `,params:{${paramsCode}}`;
+    // The `**` has a segment where it starts before the end of the path (of
+    // its prefix, before a suffix: `suffixGuard`)
+    ret = starStar
+      ? `${suffixGuard || `l>${currentIdx}`}?${ret},params:{${paramsCode}}}:${ret},params:{${paramsCode.slice(0, starStar[0])}${paramsCode.slice(starStar[1])}}`
+      : `${ret},params:{${paramsCode}}`;
   }
+  ret += "}";
 
   const push = ctx.rank
-    ? `{r.push(${ret}});k.push(${rankDescriptor(ctx, data)})}`
-    : `r.push(${ret}});`;
+    ? `{r.push(${ret});k.push(${rankDescriptor(ctx, data)})}`
+    : `r.push(${ret});`;
   const code =
     (conditions.length > 0 ? `if(${conditions.join("&&")})` : "") +
-    (ctx.opts?.matchAll ? push : `return ${ret}};`);
+    (ctx.opts?.matchAll ? push : `return ${ret};`);
 
   return { code, weight: conditions.length - guardConditions };
 }

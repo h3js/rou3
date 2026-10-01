@@ -46,6 +46,7 @@ const findRoute = /* @__PURE__ */ (() => {
     }
     let s = p.split("/");
     let l = s.length;
+    let _w;
     if (l > 1) {
       if (s[1] === "test") {
         if (l > 2) {
@@ -56,7 +57,9 @@ const findRoute = /* @__PURE__ */ (() => {
               }
             }
             if (m === "GET") {
-              return { data: $8, params: { _: p.slice(10) } };
+              return l > 3
+                ? { data: $8, params: { 0: (_w = p.slice(10)), _: _w } }
+                : { data: $8, params: {} };
             }
           }
         }
@@ -79,12 +82,16 @@ const findRoute = /* @__PURE__ */ (() => {
         }
       } else if (s[1] === "wildcard") {
         if (m === "GET") {
-          return { data: $12, params: { _: p.slice(10) } };
+          return l > 2
+            ? { data: $12, params: { 0: (_w = p.slice(10)), _: _w } }
+            : { data: $12, params: {} };
         }
       }
     }
     if (m === "GET") {
-      return { data: $13, params: { _: p.slice(1) } };
+      return l > 1
+        ? { data: $13, params: { 0: (_w = p.slice(1)), _: _w } }
+        : { data: $13, params: {} };
     }
   };
 })();

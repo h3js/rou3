@@ -112,8 +112,10 @@ describe("regExpToRoute", () => {
     // `{/:w+}?` is `:w*` (both need a value), which reverses in one spelling.
     expect(routeToRegExp("/a/c{/:w+}?").source).toBe(routeToRegExp("/a/c/:w*").source);
     expect(regExpToRoute(routeToRegExp("/a/c{/:w+}?"))).toBe("/a/c/:w*");
-    // A lazy `{/**}?` may be empty, unlike `:_*`: the group stays.
-    expect(regExpToRoute(routeToRegExp("/a{/**}?"))).toBe("/a{/**}?");
+    // `{/**}?` is `**` (both unset over zero segments), which reverses in one
+    // spelling.
+    expect(routeToRegExp("/a{/**}?").source).toBe(routeToRegExp("/a/**").source);
+    expect(regExpToRoute(routeToRegExp("/a{/**}?"))).toBe("/a/**");
   });
 
   it("accepts catch-all regexes emitted by older versions", () => {
@@ -476,17 +478,21 @@ describe("regExpToRoute", () => {
       [/^\/(?<y>[^/]+)(?:\/(?<_0>\d+))?\/?$/, "/:y{/(\\d+)}?"],
       [/^\/a(?:\/(?<_0>.*?))??\/?$/, "/a{/(.*)}?"],
       [/^\/a(?:\/(?<_0>\d+))?\/b\/?$/, "/a{/(\\d+)}?/b"],
-      [/^\/a(?:\/(?<_0>(?:[\s\S]*[^/])?\/*?))??\/?$/, "/a{/([\\s\\S]*)}?"],
       [/^\/a(?:\/(?<_0>[\s\S]+))?\/?$/, "/a{/([\\s\\S]+)}?"],
       [/^\/a(?:\/(\d+))?\/?$/, "/a{/(\\d+)}?"],
     ];
     for (const [re, route] of cases) {
       expect(regExpToRoute(re), re.source).toBe(route);
     }
-    for (const route of ["/a{/(\\d+)}?/b", "/a{/([\\s\\S]*)}?"]) {
+    for (const route of ["/a{/(\\d+)}?/b", "/a{/(\\d+)}?"]) {
       const re = routeToRegExp(route);
       expect(regExpToRoute(re), route).toBe(route);
     }
+    // An unnamed catch-all is the bare `**`. A `([\s\S]*)` constraint in an
+    // optional segment compiles to the same regex (it can match `/`, so the
+    // regex over-matches the route), and reads back as `**` too.
+    expect(regExpToRoute(/^\/a(?:\/(?<_0>(?:[\s\S]*[^/])?\/*?))??\/?$/)).toBe("/a/**");
+    expect(routeToRegExp("/a{/([\\s\\S]*)}?").source).toBe(routeToRegExp("/a/**").source);
     // Unnamed `[^/]+` has no route form, nor does a root one (no segment to
     // hold the `{/…}?` group).
     expect(() => regExpToRoute(/^\/a(?:\/(?<_0>[^/]+))?\/?$/)).toThrow(/cannot contain/);

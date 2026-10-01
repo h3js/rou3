@@ -83,8 +83,10 @@ describe("types", () => {
     });
 
     it("should handle catch-all wildcard", () => {
+      // An unnamed capture (as in URLPattern), unset over zero segments, also
+      // under the deprecated `_`
       type Params = InferRouteParams<"/test/**">;
-      type Expected = { _: string };
+      type Expected = { "0": string | undefined; _?: string };
       expectTypeOf<Params>().toEqualTypeOf<Expected>();
     });
 
@@ -95,32 +97,54 @@ describe("types", () => {
     });
 
     it("should handle segments after a wildcard", () => {
-      expectTypeOf<InferRouteParams<"/**/_payload.json">>().toEqualTypeOf<{ _: string }>();
+      expectTypeOf<InferRouteParams<"/**/_payload.json">>().toEqualTypeOf<{
+        "0": string | undefined;
+        _?: string;
+      }>();
       expectTypeOf<InferRouteParams<"/blog/**:path/_payload.json">>().toEqualTypeOf<{
         path: string;
       }>();
-      expectTypeOf<InferRouteParams<"/**/*.png">>().toEqualTypeOf<{ _: string; "0": string }>();
+      expectTypeOf<InferRouteParams<"/**/*.png">>().toEqualTypeOf<{
+        "0": string | undefined;
+        "1": string;
+        _?: string;
+      }>();
       expectTypeOf<InferRouteParams<"/*/**/:file/*">>().toEqualTypeOf<{
         "0": string;
-        _: string;
+        "1": string | undefined;
         file: string;
-        "1": string;
+        "2": string;
+        _?: string;
       }>();
       expectTypeOf<InferRouteParams<"/**:p/:f(.*)">>().toEqualTypeOf<{ p: string; f: string }>();
       // `**<rest>` is `**/*<rest>`
-      expectTypeOf<InferRouteParams<"/**.md">>().toEqualTypeOf<{ _: string; "0": string }>();
+      expectTypeOf<InferRouteParams<"/**.md">>().toEqualTypeOf<{
+        "0": string | undefined;
+        "1": string;
+        _?: string;
+      }>();
       expectTypeOf<InferRouteParams<"/docs/*/**.md">>().toEqualTypeOf<{
         "0": string;
-        _: string;
-        "1": string;
+        "1": string | undefined;
+        "2": string;
+        _?: string;
       }>();
       // `:x+` before the last segment is a `**`: a `*` after it takes a segment
       expectTypeOf<InferRouteParams<"/a/:x+/b/*">>().toEqualTypeOf<{ x: string; "0": string }>();
       // ... but a static segment ending in `+` is not one
       expectTypeOf<InferRouteParams<"/c++/*">>().toEqualTypeOf<{ "0": string | undefined }>();
       // A `}` right after `**` closes a group: no `*` capture follows
-      expectTypeOf<InferRouteParams<"/a{/**}?">>().toEqualTypeOf<{ _: string }>();
-      expectTypeOf<InferRouteParams<"/a{/**}?/b">>().toEqualTypeOf<{ _: string }>();
+      expectTypeOf<InferRouteParams<"/a{/**}?">>().toEqualTypeOf<{
+        "0": string | undefined;
+        _?: string;
+      }>();
+      expectTypeOf<InferRouteParams<"/a{/**}?/b">>().toEqualTypeOf<{
+        "0": string | undefined;
+        _?: string;
+      }>();
+      // No `_` alias without a bare `**`
+      expectTypeOf<InferRouteParams<"/a/**:_">>().toEqualTypeOf<{ _: string }>();
+      expectTypeOf<InferRouteParams<"/a/*">>().toEqualTypeOf<{ "0": string | undefined }>();
     });
 
     it("should end param names at a `-`", () => {
@@ -192,7 +216,13 @@ describe("types", () => {
 
     it("should infer mixed params", () => {
       type Params = InferRouteParams<"/test/:id/*/foo/:name/**">;
-      type Expected = { id: string; "0": string; name: string; _: string };
+      type Expected = {
+        id: string;
+        "0": string;
+        name: string;
+        "1": string | undefined;
+        _?: string;
+      };
       expectTypeOf<Params>().toEqualTypeOf<Expected>();
     });
 

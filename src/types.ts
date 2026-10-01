@@ -58,16 +58,23 @@ export type MatchedRoute<T = unknown> = {
   params?: Record<string, string>;
 };
 
-// Left to right: segments may follow a `**` (matched from the end of the path)
+// `[key, unset over zero segments]` per unnamed `*` / `**` capture, keyed
+// "0", "1", … left to right (segments may follow a `**`, matched from the end
+// of the path)
 type ExtractWildcards<
   TPath extends string,
   Count extends readonly unknown[] = [],
 > = TPath extends `${string}*${infer Rest}`
   ? Rest extends `*:${infer Named}` // Named catch-all (**:name), a key of `ExtractParams`
     ? ExtractWildcards<Named, Count>
-    : Rest extends `*${infer Tail}` // Double wildcard (**) -> "_", `**<rest>` is `**/*<rest>` (a `}` closes a group)
-      ? "_" | ExtractWildcards<Tail extends "" | `${"/" | "}"}${string}` ? Tail : `*${Tail}`, Count>
-      : `${Count["length"]}` | ExtractWildcards<Rest, [...Count, unknown]> // Single wildcard (*) -> "0", "1", etc.
+    : Rest extends `*${infer Tail}` // Double wildcard (**), `**<rest>` is `**/*<rest>` (a `}` closes a group)
+      ?
+          | [`${Count["length"]}`, true]
+          | ExtractWildcards<
+              Tail extends "" | `${"/" | "}"}${string}` ? Tail : `*${Tail}`,
+              [...Count, unknown]
+            >
+      : [`${Count["length"]}`, false] | ExtractWildcards<Rest, [...Count, unknown]> // Single wildcard (*)
   : never; // No more wildcards found
 
 // A trailing bare `*` segment matches zero segments too, so its capture may be
@@ -80,7 +87,7 @@ type ExtractTrailingWildcard<
   : HasRepeatParam<TRoute> extends true
     ? never
     : TPath extends `${infer Prefix}/*${"" | "/"}`
-      ? Exclude<ExtractWildcards<TPath>, ExtractWildcards<Prefix>>
+      ? Exclude<ExtractWildcards<TPath>, ExtractWildcards<Prefix>>[0]
       : never;
 
 // A `:name+` before the last segment (not a static segment ending in `+`)
@@ -163,12 +170,23 @@ type StripParams<TPath extends string> = TPath extends `${infer Prefix}**:${infe
 export type InferRouteParams<TPath extends string> = {
   [Param in ExtractParams<TPath> as Param[0]]: Param[1] extends true ? string | undefined : string;
 } & {
-  [Key in ExtractWildcards<StripParams<TPath>>]: Key extends ExtractTrailingWildcard<
-    StripParams<TPath>,
-    TPath
-  >
+  [Wildcard in ExtractWildcards<StripParams<TPath>> as Wildcard[0]]: Wildcard[1] extends true
     ? string | undefined
-    : string;
-} extends infer Params
+    : Wildcard[0] extends ExtractTrailingWildcard<StripParams<TPath>, TPath>
+      ? string | undefined
+      : string;
+} & (true extends ExtractWildcards<StripParams<TPath>>[1]
+    ? DoubleStarAlias
+    : unknown) extends infer Params
   ? { [K in keyof Params]: Params[K] }
   : never;
+
+/** The deprecated `_` alias of a bare `**` capture. */
+interface DoubleStarAlias {
+  /**
+   * The bare `**` capture, also under its numbered key (`"0"`, `"1"`, …).
+   *
+   * @deprecated Kept for 0.x compatibility: read the numbered key.
+   */
+  _?: string;
+}

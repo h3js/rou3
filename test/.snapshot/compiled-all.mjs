@@ -16,6 +16,7 @@
   }
   let s = p.split("/");
   let l = s.length;
+  let _w;
   if (l > 1) {
     if (s[1] === "foo") {
       if (l > 3) {
@@ -28,12 +29,16 @@
         }
       }
       if (m === "GET") {
-        r.push({ data: $4, params: { _: p.slice(5) } });
+        r.push(
+          l > 2 ? { data: $4, params: { 0: (_w = p.slice(5)), _: _w } } : { data: $4, params: {} },
+        );
       }
     }
   }
   if (m === "GET") {
-    r.push({ data: $5, params: { _: p.slice(1) } });
+    r.push(
+      l > 1 ? { data: $5, params: { 0: (_w = p.slice(1)), _: _w } } : { data: $5, params: {} },
+    );
   }
   return r.reverse();
 };
