@@ -73,7 +73,17 @@ export function regExpToRoute(regexp: RegExp | string): string {
   if (src.endsWith(TRAILING_SLASH)) src = src.slice(0, -TRAILING_SLASH.length);
   else if (src.endsWith(LEGACY_TRAILING_SLASHES)) {
     src = src.slice(0, -LEGACY_TRAILING_SLASHES.length);
-  } else if (src.endsWith("\\/?")) src = src.slice(0, -3);
+  } else if (src.endsWith("\\/?")) {
+    src = src.slice(0, -3);
+    // A whole last segment `[^/]*` (unnamed, a `*` before 0.12) with a plain
+    // `\/?`: it matches `""` on `/a/`, where lookup strips the slash, so no
+    // route matches the same paths (0.11 emitted it in an optional group)
+    if (/\\\/\((?:\?<_\d+>)?\[\^\/\]\*\)$/.test(src)) {
+      throw new Error(
+        `rou3: a last segment \`[^/]*\` before a plain \`\\/?\` has no route form (it matches "" before a trailing slash)`,
+      );
+    }
+  }
 
   if (src === "" || src === "\\/") {
     return "/";
@@ -423,7 +433,7 @@ function applyOptional(
             `rou3: no route has an optional unnamed capture in a group in "${inner}"`,
           );
         }
-        mergeGroup(segments, `/${paramToken(g.name, g.body, true)}`);
+        mergeGroup(segments, `/${paramToken(g.name, g.body, true)}`, false, last);
         return;
       }
       // 0.11 and older emitted `**` as the group `_`. A greedy
@@ -436,7 +446,7 @@ function applyOptional(
         if (!lazy || g.body.endsWith("?")) {
           segments.push("**");
         } else if (segments.length > 0 && !inGroup) {
-          mergeGroup(segments, "/**");
+          mergeGroup(segments, "/**", false, last);
         } else {
           segments.push(":_*");
         }
@@ -467,11 +477,11 @@ function applyOptional(
     }
     // Literal / mixed optional segments, possibly with optionals of their own
     // (`{/sub/**}?`) -> `{/...}?` merged onto the previous segment.
-    mergeGroup(segments, `/${parseSegments(inner, last, dot, true).join("/")}`);
+    mergeGroup(segments, `/${parseSegments(inner, last, dot, true).join("/")}`, inGroup, last);
     return;
   }
   // In-segment optional -> `{...}?` merged onto the previous segment.
-  mergeGroup(segments, reverseSegment(inner));
+  mergeGroup(segments, reverseSegment(inner), inGroup, last);
 }
 
 /**
@@ -491,9 +501,24 @@ function optionalUnits(src: string): [inner: string, lazy: boolean][] | undefine
   return units.length > 0 ? units : undefined;
 }
 
-function mergeGroup(segments: string[], body: string): void {
-  if (segments.length === 0) {
+function mergeGroup(segments: string[], body: string, inGroup: boolean, last: boolean): void {
+  const prev = segments[segments.length - 1];
+  // Ending a route at the root, `{/X}?` is `/{X}?`: `/X` or `/` (before more
+  // of the route, `/{X}?/b` would be `//b` without it)
+  if (prev === undefined && last && !inGroup && body.charCodeAt(0) === 47 /* '/' */) {
+    segments.push(`{${body.slice(1)}}?`);
+    return;
+  }
+  if (prev === undefined) {
     throw new Error(`rou3: optional group "{${body}}?" has no preceding segment`);
+  }
+  // Ending the route after an empty segment and optional params only (`/a//`
+  // + `{/X}?`, `//:x?` + `{/X}?`): the route without them would end in it,
+  // which is the route without it (`/a`, `/`)
+  let k = segments.length - 1;
+  while (k > 0 && /^:[A-Za-z_]\w*(?:\(.*\))?\?$/.test(segments[k])) k--;
+  if (last && segments[k] === "") {
+    throw new Error(`rou3: optional group "{${body}}?" after an empty segment has no route form`);
   }
   segments[segments.length - 1] += `{${body}}?`;
 }
