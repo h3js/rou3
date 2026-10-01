@@ -57,7 +57,7 @@ export function regExpToRoute(regexp: RegExp | string): string {
   // quantifier inside a constraint included, is parsed as written.
   const rootRepeat = ROOT_REPEAT.exec(src);
   if (rootRepeat) {
-    return UNNAMED.test(rootRepeat[1]) ? "/**" : `/:${paramName(rootRepeat[1])}*`;
+    return `/:${paramName(rootRepeat[1])}*`;
   }
   // Endings with the rule built in back to the plain body and `\/?`.
   const closed = { dot: false };

@@ -195,7 +195,7 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/a/1xjson/*-2", "/a/1.json/x-2"],
   },
   "/**": {
-    regex: /^(?:\/?(?<_0>(?:[\s\S]*[^/])?\/*?))??\/?$/,
+    regex: /^(?:\/(?<_0>(?:[\s\S]*[^/])?\/*?))??\/?$/,
     match: [
       ["/", { "0": undefined }],
       ["//", { "0": "" }],
@@ -1286,6 +1286,24 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
   "/a/**/:y?{/b}?",
   "/a/**/{/b}?",
   "/a/:r*/:y?{/b}?",
+  // An optional group after a catch-all's segment (`/**/{b}?`, inlined), or
+  // after an optional `{/**}?`.
+  "/**/{b}?",
+  "/a/**/{b}?",
+  "/**/{(\\d+)}?",
+  "/a/**/{(\\d+)}?",
+  "/**:r/{b}?",
+  "/**:r/{(\\d+)}?",
+  "/:x+/{b}?",
+  "/a/:x+/{b}?",
+  "/:x+/{(\\d+)}?",
+  "/a/:x+/{(\\d+)}?",
+  "/{/**}?/:y?",
+  "/a/{/**}?/:y?",
+  "/{/**}?/{b}?",
+  "/a/{/**}?/{b}?",
+  "/{/**}?/{(\\d+)}?",
+  "/a/{/**}?/{(\\d+)}?",
 ]);
 
 // Sweep patterns whose regex holds a capture with a look-ahead (see
@@ -1331,6 +1349,34 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   // A group right after a bare `**`.
   "/a/**{/b/:c?}?",
   "/a/**{.png}?",
+  // An optional unnamed group before a trailing optional or another optional
+  // group: the expansions don't line up segment by segment.
+  "/{(\\d+)}?/*",
+  "/a/{(\\d+)}?/*",
+  "/{(\\d+)}?/:y?",
+  "/a/{(\\d+)}?/:y?",
+  "/{(\\d+)}?/**",
+  "/a/{(\\d+)}?/**",
+  "/{(\\d+)}?/{(\\d+)}?",
+  "/a/{(\\d+)}?/{(\\d+)}?",
+  "/{b}?/{(\\d+)}?",
+  "/a/{b}?/{(\\d+)}?",
+  "/a{/(\\d+)}?/**",
+  "/x{(\\d+)}?/*",
+  // An optional group after a trailing optional or `**:r`.
+  "/*/{b}?",
+  "/a/*/{b}?",
+  "/*/{(\\d+)}?",
+  "/a/*/{(\\d+)}?",
+  "/a/**:r/{b}?",
+  "/a/**:r/{(\\d+)}?",
+  // An optional `{/**}?` before a trailing optional.
+  "/{/**}?/*",
+  "/a/{/**}?/*",
+  "/{/**}?/:y?",
+  "/a/{/**}?/:y?",
+  "/{/**}?/{(\\d+)}?",
+  "/a/{/**}?/{(\\d+)}?",
 ]);
 
 /** Whether a regex source uses a look-ahead (RE2-family engines have none). */
@@ -1510,6 +1556,13 @@ function allSweepPatterns(): string[] {
     "/a{/(\\d+)}?/:q",
     "/a/:x{/(\\d+)}?/b",
     "/a/**.:ext?",
+    // A left-out optional group uses up its unnamed numbers.
+    "/a{/**}?/*.png",
+    "/{(\\d+)}?/a/**",
+    "/{/**}?/(\\d+)",
+    "/a{/(\\d+)}?/**",
+    "/x{(\\d+)}?/*",
+    "/a{/**}?/*-:x?",
     ...Object.keys(regexpCases),
     // Removed from `regexpCases` without duplicate named groups.
     ...PCRE2_DUPLICATE_NAME_ROUTES,
@@ -1523,6 +1576,14 @@ function allSweepPatterns(): string[] {
     for (const t of tails) {
       patterns.add(t ? `/${u}/${t}` : `/${u}`);
       patterns.add(t ? `/a/${u}/${t}` : `/a/${u}`);
+    }
+  }
+  // Unnamed captures next to optional groups: numbered over the whole
+  // pattern, so every route a pattern registers keys a capture alike (and
+  // both routes of an inline group line up).
+  for (const u of ["*", "**", "**:r", ":x+", ":x?", "(\\d+)", "{(\\d+)}?", "{/**}?", "{b}?"]) {
+    for (const t of ["*", "**", ":y?", "*.png", "(\\d+)", "{b}?", "{(\\d+)}?"]) {
+      patterns.add(`/${u}/${t}`).add(`/a/${u}/${t}`);
     }
   }
   return [...patterns];

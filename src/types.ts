@@ -58,24 +58,32 @@ export type MatchedRoute<T = unknown> = {
   params?: Record<string, string>;
 };
 
-// `[key, unset over zero segments]` per unnamed `*` / `**` capture, keyed
-// "0", "1", … left to right (segments may follow a `**`, matched from the end
-// of the path)
+// `[key, unset over zero segments]` per unnamed capture (`*`, `**`, an
+// unnamed `(…)` group), keyed "0", "1", … left to right over the whole
+// pattern (segments may follow a `**`, matched from the end of the path).
+// Scanned char by char, tail-recursive (`Acc`) so long routes stay in TS's
+// recursion limit.
 type ExtractWildcards<
   TPath extends string,
   Count extends readonly unknown[] = [],
-> = TPath extends `${string}*${infer Rest}`
-  ? Rest extends `*:${infer Named}` // Named catch-all (**:name), a key of `ExtractParams`
-    ? ExtractWildcards<Named, Count>
-    : Rest extends `*${infer Tail}` // Double wildcard (**), `**<rest>` is `**/*<rest>` (a `}` closes a group)
-      ?
-          | [`${Count["length"]}`, true]
-          | ExtractWildcards<
-              Tail extends "" | `${"/" | "}"}${string}` ? Tail : `*${Tail}`,
-              [...Count, unknown]
-            >
-      : [`${Count["length"]}`, false] | ExtractWildcards<Rest, [...Count, unknown]> // Single wildcard (*)
-  : never; // No more wildcards found
+  Acc = never,
+> = TPath extends `${infer C}${infer Rest}`
+  ? C extends "\\" // An escaped char is a literal
+    ? ExtractWildcards<Rest extends `${string}${infer R}` ? R : Rest, Count, Acc>
+    : C extends "(" // An unnamed group (a constraint is stripped with its param)
+      ? ExtractWildcards<SkipGroup<TPath>, [...Count, unknown], Acc | [`${Count["length"]}`, false]>
+      : C extends "*"
+        ? Rest extends `*:${infer Named}` // Named catch-all (**:name), a key of `ExtractParams`
+          ? ExtractWildcards<Named, Count, Acc>
+          : Rest extends `*${infer Tail}` // `**`, `**<rest>` is `**/*<rest>` (a `{` / `}` is a group's)
+            ? ExtractWildcards<
+                Tail extends "" | `${"/" | "{" | "}"}${string}` ? Tail : `*${Tail}`,
+                [...Count, unknown],
+                Acc | [`${Count["length"]}`, true]
+              >
+            : ExtractWildcards<Rest, [...Count, unknown], Acc | [`${Count["length"]}`, false]>
+        : ExtractWildcards<Rest, Count, Acc>
+  : Acc;
 
 // A trailing bare `*` segment matches zero segments too, so its capture may be
 // undefined; not after a `**` (or a `:name+`, which is one), where it takes one
@@ -162,9 +170,11 @@ type StripParams<TPath extends string> = TPath extends `${infer Prefix}**:${infe
     ? `${StripParams<Prefix>}**:${Name}/${StripParams<Tail>}`
     : `${StripParams<Prefix>}**:${Rest}`
   : TPath extends `${infer Prefix}:${infer Rest}`
-    ? Rest extends `${string}/${infer Tail}`
-      ? `${Prefix}/${StripParams<Tail>}`
-      : Prefix
+    ? Prefix extends `${string}${"\\" | "(?"}` // An escaped `\:` or a `(?:` group is no param
+      ? `${Prefix}:${StripParams<Rest>}`
+      : Rest extends `${string}/${infer Tail}`
+        ? `${Prefix}/${StripParams<Tail>}`
+        : Prefix
     : TPath;
 
 export type InferRouteParams<TPath extends string> = {

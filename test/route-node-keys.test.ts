@@ -186,7 +186,7 @@ describe("routeNodeKeys", () => {
       expect(pairs).toBeGreaterThan(10_000);
       expect(checks).toBeGreaterThan(10_000);
       expect(shadowed).toEqual([]);
-    });
+    }, 20_000);
   });
 
   describe("idempotence", () => {

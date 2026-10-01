@@ -102,11 +102,6 @@ function tails(body: string): readonly [any: string, some: string] {
  *   group is possible there but not implemented.
  */
 export function withTrailingSlash(body: string): string {
-  // Root `/**`: every path matches. It is unset on `/` (zero segments).
-  const root = /^\/\?\(\?<(\w+)>\[\\s\\S\]\*\)$/.exec(body);
-  if (root) {
-    return `(?:/?(?<${root[1]}>${ANY_TAIL}))??/?$`;
-  }
   const open = openEnding(body);
   if (open !== undefined) {
     return `${open}/?$`;

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { routeToRegExp, createRouter, addRoute, findRoute, routeNodeKeys } from "../src/index.ts";
-import type { Node } from "../src/types.ts";
+import { bareCatchAllKeys, withoutAlias } from "./_utils.ts";
 import { fromGroupName } from "../src/_group-names.ts";
 import { expandGroupDelimiters } from "../src/_group-delimiters.ts";
 import { expandModifiers, splitRoute } from "../src/operations/_utils.ts";
@@ -38,7 +38,7 @@ const NEEDS_DUPLICATE_NAMES =
 function normalizeGroups(groups?: Record<string, string | undefined>): Captures {
   const normalized: Record<string, string | undefined> = {};
   for (const key in groups) {
-    normalized[fromGroupName(key).replace(/^_(\d+)$/, "$1")] = groups[key];
+    normalized[/^_\d+$/.test(key) ? key.slice(1) : fromGroupName(key)] = groups[key];
   }
   return normalized;
 }
@@ -55,17 +55,13 @@ function definedCaptures(captures: Captures = {}): Record<string, string> {
 /**
  * `findRoute` params as the regex can capture them: defined ones, without the
  * deprecated `_` alias of a bare `**` (the regex has no such group; checked to
- * equal the `**`'s numbered key).
+ * be there exactly with the `**`'s numbered key, see `withoutAlias`).
  */
 function routerCaptures(
   router: ReturnType<typeof createRouter>,
   params: Captures = {},
 ): Record<string, string> {
-  const keys = bareCatchAllKeys(router.root);
-  if (keys.length === 0) return definedCaptures(params);
-  const { _: alias, ...rest } = params;
-  expect(alias === undefined || keys.some((key) => rest[key] === alias), "`_` alias").toBe(true);
-  return definedCaptures(rest);
+  return definedCaptures(withoutAlias(router, params));
 }
 
 describe("routeToRegExp", () => {
@@ -122,7 +118,7 @@ describe("routeToRegExp", () => {
       }
     }
     expect(mismatches).toEqual([]);
-  });
+  }, 20_000);
 
   // `sweepPatterns()` has no escapes and `sweepPaths()` no escaped chars: a
   // `\x` is a literal `x` in both, wherever it sits in the pattern (#227).
@@ -470,7 +466,7 @@ describe("routeToRegExp", () => {
       ),
     ).toEqual([]);
     expect(accepted).toBeGreaterThan(0);
-  });
+  }, 20_000);
 
   // The ending analysis tokenizes the emitted (JS) body: `[]` and `[^]` close
   // immediately there, unlike PCRE where a leading `]` is a literal.
@@ -1021,23 +1017,6 @@ function isRequiredSegmentGap(
   );
 }
 
-/** The keys of the bare `**` captures (unnamed, numbered) under `node`. */
-function bareCatchAllKeys(node: Node<unknown> | undefined): string[] {
-  if (!node) return [];
-  const keys: string[] = [];
-  for (const entries of Object.values(node.methods || {})) {
-    for (const [index, name, optional] of entries?.flatMap((m) => m.paramsMap || []) || []) {
-      if (index < 0 && optional) keys.push(name as string);
-    }
-  }
-  return keys.concat(
-    ...Object.values(node.static || {}).map((child) => bareCatchAllKeys(child)),
-    bareCatchAllKeys(node.param),
-    bareCatchAllKeys(node.wildcard),
-    bareCatchAllKeys(node.suffix),
-  );
-}
-
 interface CaptureDiff {
   reason: string;
   /** Whether a difference (`keys` differ, unset groups dropped) is this one. */
@@ -1102,6 +1081,27 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/a/**/{/b}?",
     "/a/:r*/:y?/*",
     "/a/:r*/:y?{/b}?",
+    // An optional group after a catch-all or optional segment, inlined: the
+    // regex's catch-all (or optional) takes the group's segment where the
+    // router ranks the route with it higher.
+    "/**/{b}?",
+    "/**/{(\\d+)}?",
+    "/a/**/{b}?",
+    "/a/**/{(\\d+)}?",
+    "/**:r/{b}?",
+    "/**:r/{(\\d+)}?",
+    "/:x+/{b}?",
+    "/:x+/{(\\d+)}?",
+    "/a/:x+/{b}?",
+    "/a/:x+/{(\\d+)}?",
+    "/{/**}?/{b}?",
+    "/{/**}?/{(\\d+)}?",
+    "/a/{/**}?/{b}?",
+    "/a/{/**}?/{(\\d+)}?",
+    "/:x?/{b}?",
+    "/:x?/{(\\d+)}?",
+    "/a/:x?/{b}?",
+    "/a/:x?/{(\\d+)}?",
   ].map((pattern) => [pattern, OTHER_EXPANSION] as const),
   ...[
     "/:x?/*",

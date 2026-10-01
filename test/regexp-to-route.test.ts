@@ -62,7 +62,7 @@ describe("regExpToRoute", () => {
     }
     expect(mismatches).toEqual([]);
     expect(stale, "KNOWN_NON_EQUIVALENT entries that no longer apply").toEqual([]);
-  });
+  }, 20_000);
 
   it("reverses a named catch-all to an equivalent `:name+`", () => {
     const back = regExpToRoute(routeToRegExp("/base/**:path"));

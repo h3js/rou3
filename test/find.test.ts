@@ -1449,7 +1449,7 @@ describe("bare `**` capture (URLPattern)", () => {
       expect(Object.keys(aot("GET", path).params)).toEqual(Object.keys(params));
       // `routeToRegExp` names unnamed captures `_N`, and has no `_` alias
       expect(definedGroups(path.match(routeToRegExp(route))?.groups)).toEqual(
-        withoutAlias(route, params),
+        numberedOnly(route, params),
       );
     });
   }
@@ -1470,17 +1470,17 @@ describe("bare `**` capture (URLPattern)", () => {
         .groups;
       if (differs) {
         expect(definedGroups(groups), `${route} on ${path}`).not.toEqual(
-          withoutAlias(route, params),
+          numberedOnly(route, params),
         );
       } else {
-        expect(definedGroups(groups), `${route} on ${path}`).toEqual(withoutAlias(route, params));
+        expect(definedGroups(groups), `${route} on ${path}`).toEqual(numberedOnly(route, params));
       }
     }
   });
 });
 
 /** `params` without the router-only `_` alias of a bare `**`. */
-function withoutAlias(route: string, params: Record<string, string>): Record<string, string> {
+function numberedOnly(route: string, params: Record<string, string>): Record<string, string> {
   if (!/\*\*(?!:)/.test(route)) return params;
   const { _: _alias, ...rest } = params;
   return rest;
@@ -1493,3 +1493,88 @@ function definedGroups(groups: Record<string, string | undefined> = {}): Record<
   }
   return result;
 }
+
+// Unnamed captures are numbered over the whole pattern, as in URLPattern: a
+// left-out optional group uses up the numbers of the captures in it, so a
+// capture has one key in every route a pattern registers. `urlPattern`:
+// "same" where URLPattern gives the same groups (without the `_` alias),
+// "invalid" where it rejects the pattern (`{/**}`).
+describe("unnamed captures are numbered over the whole pattern", () => {
+  const cases: [
+    route: string,
+    path: string,
+    params: Record<string, string>,
+    urlPattern: "same" | "invalid",
+  ][] = [
+    ["/a{/(\\d+)}?/**", "/a/x/y", { 1: "x/y", _: "x/y" }, "same"],
+    ["/a{/(\\d+)}?/**", "/a/1/y", { 0: "1", 1: "y", _: "y" }, "same"],
+    ["/x{(\\d+)}?/*", "/x/b", { 1: "b" }, "same"],
+    ["/x{(\\d+)}?/*", "/x1/b", { 0: "1", 1: "b" }, "same"],
+    ["/a{-*}?/*", "/a/y", { 1: "y" }, "same"],
+    ["/a{-*}?/*", "/a-x/y", { 0: "x", 1: "y" }, "same"],
+    ["/a{/*}?/(\\d+)", "/a/1", { 1: "1" }, "same"],
+    ["/a{/*}?/(\\d+)", "/a/x/1", { 0: "x", 1: "1" }, "same"],
+    ["/{(\\d+)}?/a/**", "/1/a/b", { 0: "1", 1: "b", _: "b" }, "same"],
+    ["/{(\\d+)}?/a/**", "//a/b", { 1: "b", _: "b" }, "same"],
+    ["/**/{(\\d+)}?", "/a/1", { 0: "a", 1: "1", _: "a" }, "same"],
+    ["/**/{b}?", "/a/b", { 0: "a", _: "a" }, "same"],
+    ["/**/*-:x?", "/a/b-c", { 0: "a", 1: "b", x: "c", _: "a" }, "same"],
+    ["/**/*-:x?", "/a/b-", { 0: "a", 1: "b", _: "a" }, "same"],
+    ["/a{/:x}?/*", "/a/b/c", { x: "b", 0: "c" }, "same"],
+    ["/a{/**}?/*.png", "/a/x.png", { 1: "x" }, "invalid"],
+    ["/a{/**}?/*.png", "/a/b/x.png", { 0: "b", 1: "x", _: "b" }, "invalid"],
+    ["/a{/**}?/*", "/a/x", { 1: "x" }, "invalid"],
+    ["/{/**}?/(\\d+)", "//1", { 1: "1" }, "invalid"],
+    ["/{/**}?/(\\d+)", "//b/1", { 0: "b", 1: "1", _: "b" }, "invalid"],
+    ["/a{/**}?/*-:x?", "/a/b-c", { 1: "b", x: "c" }, "invalid"],
+    ["/a{/**}?/*-:x?", "/a/z/b-c", { 0: "z", 1: "b", x: "c", _: "z" }, "invalid"],
+  ];
+
+  for (const [route, path, params] of cases) {
+    it(`${route} on ${path}`, () => {
+      const router = createEmptyRouter<string>();
+      addRoute(router, "GET", route, route);
+      const expected = { data: route, params };
+      expect(findRoute(router, "GET", path)).toEqual(expected);
+      expect(findAllRoutes(router, "GET", path).at(-1)).toEqual(expected);
+      expect(compileRouter(router)("GET", path)).toEqual(expected);
+      expect(compileRouter(router, { matchAll: true })("GET", path)).toEqual(
+        findAllRoutes(router, "GET", path),
+      );
+      const aot = new Function(`return ${compileRouterToString(router)}`)();
+      expect(aot("GET", path)).toEqual(expected);
+      const groups = definedGroups(path.match(routeToRegExp(route))?.groups);
+      if (route.startsWith("/**/{")) {
+        // Known (`KNOWN_CAPTURE_DIFFS` in regexp.test.ts): the regex's greedy
+        // `**` takes the optional group's segment, the router ranks the two
+        // routes from the end of the path
+        expect(groups).not.toEqual(numberedOnly(route, params));
+      } else {
+        expect(groups).toEqual(numberedOnly(route, params));
+      }
+    });
+  }
+
+  it("gives a capture one key in every route a pattern registers", () => {
+    const router = createEmptyRouter<string>();
+    addRoute(router, "GET", "/a{/**}?/*.png", "png");
+    // Both routes match (the `**` over zero segments), the file is `1` in each
+    expect(findAllRoutes(router, "GET", "/a/x.png").map((m) => ({ ...m.params }))).toEqual([
+      { 1: "x" },
+      { 1: "x" },
+    ]);
+  });
+
+  const URLPatternCtor = (globalThis as { URLPattern?: any }).URLPattern;
+  it.runIf(URLPatternCtor)("agrees with URLPattern", () => {
+    for (const [route, path, params, urlPattern] of cases) {
+      if (urlPattern === "invalid") {
+        expect(() => new URLPatternCtor({ pathname: route }), route).toThrow();
+        continue;
+      }
+      const groups = new URLPatternCtor({ pathname: route }).exec({ pathname: path })?.pathname
+        .groups;
+      expect(definedGroups(groups), `${route} on ${path}`).toEqual(numberedOnly(route, params));
+    }
+  });
+});
