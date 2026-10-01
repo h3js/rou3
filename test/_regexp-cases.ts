@@ -398,6 +398,37 @@ export const regexpCases: Record<string, RegExpCase> = {
     match: [["/xb", { a: "x" }]],
     noMatch: ["/x", "/b"],
   },
+  // A pattern starting with a `{/…}` group is absolute, as in URLPattern: no
+  // `/` in front, so no empty first segment (`//b`). A relative expansion
+  // gets one (`{a}?/b` is `/a/b` or `/b`).
+  "{/:a}?/b": {
+    regex: /^(?:\/(?<a>[^/]+))?\/b\/?$/,
+    match: [
+      ["/b", { a: undefined }],
+      ["/x/b", { a: "x" }],
+      ["/x/b/", { a: "x" }],
+    ],
+    noMatch: ["//b", "//x/b", "/x/y/b", "/"],
+  },
+  "{/:a}/b": {
+    regex: /^\/(?<a>[^/]+)\/b\/?$/,
+    match: [["/x/b", { a: "x" }]],
+    noMatch: ["/b", "//x/b", "//b"],
+  },
+  "{/*}?/b": {
+    regex: /^(?:\/(?<_0>[^/]*))?\/b\/?$/,
+    match: [
+      ["/b", { "0": undefined }],
+      ["//b", { "0": "" }],
+      ["/x/b", { "0": "x" }],
+    ],
+    noMatch: ["///b", "/x/y/b"],
+  },
+  "{a}?/b": {
+    regex: /^(?:\/a)?\/b\/?$/,
+    match: [["/b"], ["/a/b"]],
+    noMatch: ["//b", "/ab", "/a"],
+  },
   "/:foo{}bar": {
     regex: /^\/(?<foo>[^/]+?)bar\/?$/,
     match: [["/xbar", { foo: "x" }]],
@@ -445,6 +476,16 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/x/1", { foo: undefined, "0": "1" }],
     ],
     noMatch: ["/x/a", "/x/"],
+  },
+  // ... also leading a relative pattern: both expansions get their `/`, so
+  // the one without the group lines up (no alternation, no duplicate `_0`)
+  "{:x}?(\\d+)": {
+    regex: /^\/(?:(?<x>[^/]+?))?(?<_0>\d+)\/?$/,
+    match: [
+      ["/a12", { x: "a", "0": "12" }],
+      ["/1", { x: undefined, "0": "1" }],
+    ],
+    noMatch: ["/a", "/1/2"],
   },
   "/:foo{(\\d+)}?": {
     regex: /^\/(?<foo>[^/]+?)(?:(?<_0>\d+))?\/?$/,
@@ -1420,6 +1461,7 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   "/a/:x{(\\d+)}?/**",
   "/a/:x{(\\d+)}?/:y?",
   "/a/:x{(\\d+)}?/b{.json}?",
+  "{/:x}?/:y?",
   // An empty segment followed only by optional ones expands like the router.
   "/{en}?/:page?",
   "/docs/{v2}?/:page?",
@@ -1430,6 +1472,7 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   "/a/{:x}?(\\d+)/b{.json}?",
   "/{a-}?(\\d+)/b{.json}?",
   "/a/{a-}?(\\d+)/b{.json}?",
+  "{/a}?{/:x}?/c",
   // A mid-segment optional group after a greedy capture, also where both can
   // end the same way (`-x` / `-x-x`). (An optional param, `*-:x?`, compiles
   // in place like the tree.)
@@ -1676,6 +1719,25 @@ function allSweepPatterns(): string[] {
     "/a{/(\\d+)}?/**",
     "/x{(\\d+)}?/*",
     "/a{/**}?/*-:x?",
+    // A pattern starting with a group: an expansion starting with `/` is
+    // absolute, any other gets one (`{a}?/b`, `{a}?b`, the empty one of
+    // `{/:x}?`); several leading groups, and the same group after a `/`.
+    "{/:x}?/b",
+    "{/:x}?",
+    "{/:x}?/:y?",
+    "{/:x(\\d+)}?/:y",
+    "{/a}?{/:x}?/c",
+    "{/a}?{/b}?",
+    "{/a/:x}?",
+    "{/a/*}?/b",
+    "{/**}?/b",
+    "{/:x*}?/b",
+    "{/:x}/b",
+    "{a}?/b",
+    "{:x}?/b",
+    "{a}?{/b}?/c",
+    "{a}?b",
+    "/{/:x}?/b",
     ...Object.keys(regexpCases),
     // Removed from `regexpCases` without duplicate named groups.
     ...PCRE2_DUPLICATE_NAME_ROUTES,
@@ -1751,6 +1813,12 @@ export const UNCLOSED_GROUP_ROUTES: readonly string[] = [
  * wrong or silent meaning, or threw a raw `SyntaxError`.
  */
 export const RESERVED_SYNTAX_ROUTES: readonly string[] = [
+  // Text right after a leading `{/…}?` group: without the group the route
+  // would be relative, a form URLPattern gives no meaning (it matched `/b`
+  // for `{/a}?b`).
+  "{/a}?b",
+  "{/:a}?.png",
+  "{/a}?{.json}?",
   // A repeat modifier on a constrained param dropped the constraint in the
   // tree (`/a/b/c` matched with `x: "b/c"`, the regex kept it).
   "/a/:x(\\d+)+",

@@ -3,6 +3,7 @@ import { toGroupName } from "./_group-names.ts";
 import { createRouter } from "./context.ts";
 import { addRoute, getParamRegexp, skipGroup, type Unnamed } from "./operations/add.ts";
 import {
+  absolutePattern,
   encodeEscapes,
   expandModifiers,
   PARAM_MODIFIER,
@@ -75,9 +76,7 @@ const SOME = "[\\s\\S]+";
  * routeToRegExp("/v:version?"); // /^\/v(?:(?<version>[^/]+?))?\/?$/
  */
 export function routeToRegExp(route: string = "/"): RegExp {
-  if (route.charCodeAt(0) !== 47 /* '/' */) {
-    route = `/${route}`;
-  }
+  route = absolutePattern(route);
   // Validate with the router itself: every pattern it rejects (see
   // `addRoute`) throws here with the same error.
   addRoute(createRouter(), "", route);
@@ -160,9 +159,11 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
   if (mod !== "?" || body === "") {
     return;
   }
-  // The two expansions, joined like `expandGroupDelimiters` joins them
-  const base = joinGroup(pre, suf);
-  const full = joinGroup(joinGroup(pre, body), suf);
+  // The two expansions, joined like `expandGroupDelimiters` joins them; a
+  // leading group's relative expansion gets a `/` (`{a}?/b` is `/a/b` or
+  // `/b`, `{:x}?(\d+)` is `/:x…(\d+)` or `/(\d+)`)
+  const base = absolutePattern(joinGroup(pre, suf));
+  const full = absolutePattern(joinGroup(joinGroup(pre, body), suf));
   // A group with more of its segment after it (`/{:x}?(\d+)`)
   const inSegment = suf !== "" && suf.charCodeAt(0) !== 47; /* '/' */
   if (

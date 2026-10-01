@@ -1,4 +1,4 @@
-import { invalidSyntax, MISPLACED_MODIFIER } from "./operations/_utils.ts";
+import { absolutePattern, invalidSyntax, MISPLACED_MODIFIER } from "./operations/_utils.ts";
 
 /** `[pre, body, suf, mod]` split of a `{...}` group, or `undefined`. */
 export type GroupDelimiter = [pre: string, body: string, suf: string, mod: string | undefined];
@@ -56,6 +56,15 @@ const NAME_CHAR = /^[\w$\x80-￼]/;
  * Expand the first `{...}` / `{...}?` group of `path` into the routes it
  * stands for. `{...}+` / `{...}*` repetition is not supported: `input` (quoted
  * in the error) is rejected.
+ *
+ * A pattern starting with a group gets no `/` in front (see `addRoute`): each
+ * expansion is read on its own. One starting with `/` is absolute, as in
+ * URLPattern (`{/:a}?/b` is `/:a/b` or `/b`); any other one, the empty one
+ * too, is relative and gets a `/` like a pattern (`{a}?/b` is `/a/b` or `/b`,
+ * `{/:a}?` is `/:a` or `/`). One starting with `{` is left to the next group.
+ * Text right after a leading `{/…}?` (`{/a}?b`, `{/:a}?.png`, `{/a}?{b}?/c`)
+ * throws: without the group the route would be relative, a form URLPattern
+ * gives no meaning (it matches only `/ab`), so a `/b` would be a guess.
  */
 export function expandGroupDelimiters(path: string, input: string = path): string[] | undefined {
   if (!path.includes("{")) return;
@@ -88,7 +97,13 @@ export function expandGroupDelimiters(path: string, input: string = path): strin
   }
 
   const full = joinGroup(joinGroup(pre, body, input), suf, input);
-  return mod ? [full, joinGroup(pre, suf, input)] : [full];
+  const expanded = mod ? [full, joinGroup(pre, suf, input)] : [full];
+  if (pre) return expanded;
+  // After a leading `{/…}?`: `/`, another `{/…}` group or nothing
+  if (mod && body.charCodeAt(0) === 47 /* '/' */ && suf && !/^\{?\//.test(suf)) {
+    invalidSyntax("text after a leading `{/...}?`", input);
+  }
+  return expanded.map(absolutePattern);
 }
 
 /**

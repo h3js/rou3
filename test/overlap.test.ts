@@ -152,6 +152,11 @@ describe("compareRoutes", () => {
     ["/a{/b}?", "/a", "superset", "optional group matches without"],
     ["/a{/b}?", "/a/*", "subset", "optional group is a subset of trailing *"],
     ["/a{/b}?", "/a/c", "disjoint", "optional group rejects other suffix"],
+    ["{/:a}?/b", "/:a?/b", "equal", "leading group is absolute (URLPattern form)"],
+    ["{/:a}?/b", "//b", "disjoint", "leading group adds no empty segment"],
+    ["{/:a}?", "/", "superset", "leading group's empty expansion is the root"],
+    ["/{/:a}?/b", "//b", "superset", "a group after a `/` keeps it"],
+    ["{a}?/b", "/a{/b}?", "partial", "relative expansion gets a `/`"],
 
     // regex-constrained segments
     ["/user/:id(\\d+)", "/user/42", "superset", "regex accepts literal (precise)"],

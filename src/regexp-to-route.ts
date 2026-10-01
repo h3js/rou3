@@ -6,6 +6,7 @@
 // follow the same conventions convert too; constructs outside the dialect
 // throw.
 
+import { expandGroupDelimiters, scanFirstGroup } from "./_group-delimiters.ts";
 import { fromGroupName } from "./_group-names.ts";
 import { encodeLiteral } from "./operations/_utils.ts";
 
@@ -78,7 +79,17 @@ export function regExpToRoute(regexp: RegExp | string): string {
     return "/";
   }
 
-  return "/" + parseSegments(src, true, !dotConstraint).join("/");
+  // A route starting with a `{/…}?` group (see `mergeGroup`) is absolute as
+  // is; after a `\/` the group follows an empty first segment (`/{/a}?`)
+  const route = parseSegments(src, true, !dotConstraint).join("/");
+  if (route.charCodeAt(0) !== 123 /* { */ || src.startsWith("\\/")) return `/${route}`;
+  // Text after a leading group (`{/a}?{b}?/c`) throws like in `addRoute`,
+  // quoting the whole route
+  const check = (r: string): void => {
+    for (const p of expandGroupDelimiters(r, route) || []) if (p.charCodeAt(0) === 123) check(p);
+  };
+  check(route);
+  return route;
 }
 
 // The look-behind-free endings `withTrailingSlash` emits, as `RegExp#source`
@@ -496,7 +507,7 @@ function applyOptional(
     }
     // Literal / mixed optional segments, possibly with optionals of their own
     // (`{/sub/**}?`) -> `{/...}?` merged onto the previous segment.
-    mergeGroup(segments, `/${parseSegments(inner, last, dot, true).join("/")}`);
+    mergeGroup(segments, `/${parseSegments(inner, last, dot, true).join("/")}`, inGroup);
     return;
   }
   // In-segment optional -> `{...}?` merged onto the previous segment.
@@ -520,9 +531,23 @@ function optionalUnits(src: string): [inner: string, lazy: boolean][] | undefine
   return units.length > 0 ? units : undefined;
 }
 
-function mergeGroup(segments: string[], body: string): void {
+/**
+ * Append the optional group `{body}?` to the previous segment. With none, a
+ * group of whole segments starts the route (`{/a}?/b`, absolute as in
+ * URLPattern); a group inside a group would nest (also where `body` holds one:
+ * `(?:\/a(?:\/b)?)?`), and a leading in-segment one (`{a}?`) is relative:
+ * those throw.
+ */
+function mergeGroup(segments: string[], body: string, inGroup?: boolean): void {
+  if (scanFirstGroup(body)) {
+    throw new Error(`rou3: no route has a group inside a group in "{${body}}?"`);
+  }
   if (segments.length === 0) {
-    throw new Error(`rou3: optional group "{${body}}?" has no preceding segment`);
+    if (inGroup || body.charCodeAt(0) !== 47 /* / */) {
+      throw new Error(`rou3: optional group "{${body}}?" has no preceding segment`);
+    }
+    segments.push(`{${body}}?`);
+    return;
   }
   segments[segments.length - 1] += `{${body}}?`;
 }
