@@ -438,9 +438,21 @@ function planTest(strategy: MatchStrategy, test: PathnameTest, reached: Set<stri
     const stored = DIFF_SETS[set].get(test.label)!;
     const result =
       stored && SPLIT in stored ? stored[strategy.router ? "router" : "regexp"] : stored;
-    return { kind: "known diff", set, result };
+    return noDuplicateNames(strategy, test.pattern) ?? { kind: "known diff", set, result };
   }
-  return { kind: "run" };
+  return noDuplicateNames(strategy, test.pattern) ?? { kind: "run" };
+}
+
+/**
+ * Without duplicate named groups (Node 22), `routeToRegExp` throws for a
+ * pattern whose regex is an alternation repeating a group (`{:foo}?(.*)`: a
+ * `(.*)` is a `*`, so its route and the one without the group each have
+ * one): skipped, after its diff-set entry is reached.
+ */
+function noDuplicateNames(strategy: MatchStrategy, pattern: string): Plan | undefined {
+  if (!strategy.router && !DUPLICATE_NAMED_GROUPS && needsDuplicateNames(pattern)) {
+    return { kind: "skipped", reason: "needs duplicate named groups (Node 22)" };
+  }
 }
 
 const URLPatternCtor = (globalThis as { URLPattern?: any }).URLPattern;
@@ -793,10 +805,15 @@ const GROUP_PARAM_RESERVED = [
 describe("wpt urlpattern compatibility: a regex group after a param's group", () => {
   for (const strategy of strategies) {
     for (const [pattern, input, groups] of GROUP_PARAM_CASES) {
-      it(`${strategy.name}: ${pattern} → ${input}`, () => {
-        const { matched, params } = strategy.match(pattern, input);
-        expect(matched ? params : null).toStrictEqual(expectedGroups(strategy, groups));
-      });
+      // Without duplicate named groups (Node 22) an alternation regex throws
+      // (`/{:foo}?(.*)`)
+      it.skipIf(!strategy.router && !DUPLICATE_NAMED_GROUPS && needsDuplicateNames(pattern))(
+        `${strategy.name}: ${pattern} → ${input}`,
+        () => {
+          const { matched, params } = strategy.match(pattern, input);
+          expect(matched ? params : null).toStrictEqual(expectedGroups(strategy, groups));
+        },
+      );
     }
     it.each(GROUP_PARAM_RESERVED)(`${strategy.name}: %s throws`, (pattern) => {
       expect(() => strategy.match(pattern, "/")).toThrow(/^rou3: /);
