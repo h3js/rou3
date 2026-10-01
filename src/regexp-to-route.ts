@@ -22,9 +22,8 @@ const ROUTE_SPECIAL = new Set([":", "(", ")", "*", "\\", "+", "|", "$", "[", "]"
  *
  * Throws a `rou3:` error for input it can't represent exactly: a regex not
  * anchored with `^` and `$`, the flags `i`/`m`/`s`/`u`/`v` (`g`/`y`/`d` are
- * ignored), constructs outside the dialect `routeToRegExp` emits, and an
- * unnamed single-segment `[^/]*` capture (a `*` before 0.12: a `*` takes
- * `/` too now, so no route matches the same paths).
+ * ignored) and constructs outside the dialect `routeToRegExp` emits. An
+ * unnamed `[^/]*` (a single-segment `*` before 0.12) reads as `([^\x2f]*)`.
  *
  * @example
  * regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
@@ -509,11 +508,10 @@ function paramToken(name: string, body: string, unnamed: boolean): string {
   if (unnamed && (body === "[\\s\\S]*" || body === "[\\s\\S]*?")) {
     return "*";
   }
-  // A single-segment `*` before 0.12: a `*` takes `/` too now
+  // A single-segment `*` before 0.12 (a `*` takes `/` too now): the same
+  // class, spelled without the `/` a constraint can't hold
   if (unnamed && body === "[^/]*") {
-    throw new Error(
-      `rou3: a single-segment unnamed capture \`[^/]*\` has no route form (a \`*\` matches across \`/\`): use \`:name\` or a constraint`,
-    );
+    return "([^\\x2f]*)";
   }
   if (!unnamed && /^\[\^\/\](?:\*|\+\??)$/.test(body)) {
     return `:${name}`;

@@ -82,15 +82,30 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(/^\/path\/(?<_0>[\s\S]*)\.png\/?$/)).toBe("/path/*.png");
     expect(regExpToRoute(/^\/path\/(?<_0>(?:[\s\S]*[^/])?\/*?)\/?$/)).toBe("/path/*");
     expect(regExpToRoute(/^\/path\/(?<_0>[\s\S]*?)(?:\/(?<y>[^/]+))??\/?$/)).toBe("/path/*/:y?");
-    // A single-segment `*` before 0.12 (`[^/]*`) has no route form: a `*`
-    // takes `/` too now
-    for (const re of [
-      /^\/path\/(?<_0>[^/]*)\/foo\/?$/,
-      /^\/path\/(?<_0>[^/]*)\.png\/?$/,
-      /^\/path(?:\/(?<_0>[^/]*))??\/?$/,
-    ]) {
-      expect(() => regExpToRoute(re), re.source).toThrow(/^rou3: a single-segment unnamed capture/);
+    // A single-segment `*` before 0.12 (`[^/]*`, as 0.11 emitted it) is the
+    // constraint `([^\x2f]*)` now (a `*` takes `/` too): the same paths and
+    // captures
+    for (const [re, route] of [
+      [/^\/path\/(?<_0>[^/]*)\/foo\/?$/, "/path/([^\\x2f]*)/foo"],
+      [/^\/path\/(?<_0>[^/]*)\.png\/?$/, "/path/([^\\x2f]*).png"],
+      [/^\/path(?:\/(?<_0>[^/]*))??\/?$/, "/path{/([^\\x2f]*)}?"],
+    ] as const) {
+      expect(regExpToRoute(re), re.source).toBe(route);
+      const router = createRouter<string>();
+      addRoute(router, "GET", route, route);
+      for (const path of LEGACY_STAR_PATHS) {
+        const groups = re.exec(path)?.groups;
+        const found = findRoute(router, "GET", path);
+        expect(!!found, `${route} on ${path}`).toBe(re.test(path));
+        if (groups?._0 !== undefined) expect(found?.params?.["0"], path).toBe(groups._0);
+      }
     }
+    // A hand-written trailing one reads the same way. Its `""` before a
+    // trailing slash (`/path/`) has no route form: lookup drops that slash
+    const route = regExpToRoute(/^\/path\/(?<_0>[^/]*)\/?$/);
+    expect(route).toBe("/path/([^\\x2f]*)");
+    expect(routeToRegExp(route).test("/path/")).toBe(false);
+    expect(routeToRegExp(route).exec("/path//")?.groups?._0).toBe("");
     expect(regExpToRoute(/^\/path(?:\/(?<_>.*))?\/?$/)).toBe("/path/**");
     expect(regExpToRoute(/^\/?(?<_>.*)\/?$/)).toBe("/**");
     expect(regExpToRoute(/^\/path\/(?<id>\d+)\/?$/)).toBe("/path/:id(\\d+)");
@@ -481,7 +496,7 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(/^\/path\/(\d+)\/?$/)).toBe("/path/(\\d+)");
     expect(regExpToRoute(/^\/path\/(png|jpg)\/?$/)).toBe("/path/(png|jpg)");
     expect(regExpToRoute(/^\/path\/([\s\S]*)\/foo\/?$/)).toBe("/path/*/foo");
-    expect(() => regExpToRoute(/^\/path\/([^/]*)\/?$/)).toThrow(/single-segment/);
+    expect(regExpToRoute(/^\/path\/([^/]*)\/?$/)).toBe("/path/([^\\x2f]*)");
     expect(regExpToRoute(/^\/path\/(\d+)-x\/?$/)).toBe("/path/(\\d+)-x");
     // A bare group that can't survive path splitting still throws.
     expect(() => regExpToRoute(/^\/path\/([^/]+)\/?$/)).toThrow(/cannot contain/);
@@ -609,3 +624,20 @@ function describeMatch(match?: { params?: Record<string, string | undefined> }):
   }
   return JSON.stringify(params);
 }
+
+// Paths for the 0.11 single-segment `*` regexes (`[^/]*`)
+const LEGACY_STAR_PATHS = [
+  "/path",
+  "/path/",
+  "/path//",
+  "/path/a",
+  "/path/a/",
+  "/path/a/b",
+  "/path/foo",
+  "/path//foo",
+  "/path/a/foo",
+  "/path/a/b/foo",
+  "/path/.png",
+  "/path/a.png",
+  "/path/a/b.png",
+];

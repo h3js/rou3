@@ -173,8 +173,8 @@ function normalizeGroups(groups: Record<string, string> | undefined): Record<str
  * Known semantic differences between rou3 and URLPattern:
  *
  * 1. Trailing slash: rou3 ignores at most one trailing `/`
- * 2. `*` semantics: URLPattern `*` = greedy catch-all `(.*)`;
- *    rou3 `*` = single-segment unnamed param `([^/]*)`
+ * 2. `*` semantics: a greedy catch-all `(.*)` in both; rou3 allows one
+ *    catch-all per route (two `*` are reserved)
  * 3. `(.*)` semantics: URLPattern `(.*)` matches across `/`; so does
  *    `routeToRegExp`, while the tree's `(.*)` is segment-scoped
  * 4. `**` semantics: URLPattern parses `**` as `*` with a `*` modifier (a
