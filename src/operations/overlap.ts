@@ -21,9 +21,9 @@ export type RouteComparison = "disjoint" | "equal" | "superset" | "subset" | "pa
  * so groups (`{s}?`), optional/repeat modifiers (`:x?`/`:x+`/`:x*`), escaping,
  * and wildcard segment-count rules match `findRoute`/`findAllRoutes` exactly.
  *
- * Segment-count rules: bare `**` matches zero-or-more segments, `**:name` one-
- * or-more, a trailing bare `*` zero-or-one, and mid-pattern `*` / `:name`
- * exactly one.
+ * Segment-count rules: bare `**` matches zero-or-more segments, `*` and
+ * `**:name` one-or-more (a trailing `*` none after a trailing slash: `/a/*`
+ * and `/a` overlap on `/a/`), and `:name` exactly one.
  *
  * Regex-constrained segments are handled precisely against static literals
  * (`/user/:id(\d+)` vs `/user/42`), but two dynamic segments where at least one
@@ -76,8 +76,8 @@ export function routesOverlap(patternA: string, patternB: string): boolean {
  * Patterns are expanded through rou3's own `addRoute` pipeline (groups,
  * modifiers, escaping), so the verdict is consistent with
  * `findRoute`/`findAllRoutes` by construction — e.g. `/a/:x*` is `"equal"` to
- * `/a{/**:y}?` but a `"subset"` of `/a/**`, and `/a/:x?` a `"subset"` of
- * `/a/*` (only `**` / `*` take the empty segment of `/a//`).
+ * `/a{/**:y}?` but a `"subset"` of `/a/**` (only `**` takes the empty segment
+ * of `/a//`), and `/a/*` a `"subset"` of `/a/**` (only `**` matches `/a`).
  *
  * @example
  * compareRoutes("/api/**", "/api/admin/**"); // "superset"

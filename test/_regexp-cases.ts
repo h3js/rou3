@@ -61,20 +61,23 @@ export const regexpCases: Record<string, RegExpCase> = {
     // `:param` needs a value (#229): an empty last segment is no match.
     noMatch: ["/path", "/path/", "/path//", "/path///", "/path/value//"],
   },
-  // A trailing `*` is optional in the tree, so `/path` matches too (#200).
+  // A `*` is a catch-all, URLPattern's `(.*)` after its `/`: one segment or
+  // more, or none after the trailing slash lookup strips (`/path/`), but not
+  // `/path`.
   "/path/*": {
-    regex: /^\/path(?:\/(?<_0>[^/]*))??\/?$/,
+    regex: /^\/path\/(?<_0>(?:[\s\S]*[^/])?\/*?)\/?$/,
     match: [
-      ["/path", { "0": undefined }],
-      ["/path/", { "0": undefined }],
-      // The lazy `(?:…)??` skips the group on `/path/` (like the router) and
-      // takes it, empty, on `/path//`.
+      // Nothing after the stripped trailing slash, as in URLPattern
+      ["/path/", { "0": "" }],
       ["/path//", { "0": "" }],
       ["/path/x", { "0": "x" }],
       ["/path/x/", { "0": "x" }],
+      ["/path/x/y", { "0": "x/y" }],
+      ["/path/x//", { "0": "x/" }],
       ["/path/\r", { "0": "\r" }],
+      ["/path/x/\n", { "0": "x/\n" }],
     ],
-    noMatch: ["/pathx", "/path/x/y", "/path/x//"],
+    noMatch: ["/path", "/pathx", "/pathx/"],
   },
   "/path/get-:file.:ext": {
     regex: /^\/path\/get-(?<file>[^/]+?)\.(?<ext>[^/]+?)\/?$/,
@@ -87,12 +90,15 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/path//value2", "/path/value1//"],
   },
   "/path/*/foo": {
-    regex: /^\/path\/(?<_0>[^/]*)\/foo\/?$/,
+    regex: /^\/path\/(?<_0>[\s\S]*)\/foo\/?$/,
     match: [
       ["/path/anything/foo", { "0": "anything" }],
+      ["/path/a/b/foo", { "0": "a/b" }],
+      ["/path/foo/foo", { "0": "foo" }],
       ["/path//foo", { "0": "" }],
       ["/path//foo/", { "0": "" }],
     ],
+    noMatch: ["/path/foo", "/path/a/foo/b"],
   },
   // An empty *middle* segment is a real segment: the tree gives it a
   // static node, so `/path//sub` matches only the doubled-slash path and never
@@ -108,12 +114,23 @@ export const regexpCases: Record<string, RegExpCase> = {
     match: [["/path//value", { id: "value" }]],
   },
   "/path/*.png": {
-    regex: /^\/path\/(?<_0>[^/]*)\.png\/?$/,
-    match: [["/path/icon.png", { "0": "icon" }]],
+    regex: /^\/path\/(?<_0>[\s\S]*)\.png\/?$/,
+    match: [
+      ["/path/icon.png", { "0": "icon" }],
+      // A `*` inside a segment takes `/` too, as in URLPattern
+      ["/path/a/icon.png", { "0": "a/icon" }],
+      ["/path/.png", { "0": "" }],
+    ],
+    noMatch: ["/path/icon", "/path/icon.png/x", "/icon.png"],
   },
-  "/path/file-*-*.png": {
-    regex: /^\/path\/file-(?<_0>[^/]*)-(?<_1>[^/]*)\.png\/?$/,
-    match: [["/path/file-a-b.png", { "0": "a", "1": "b" }]],
+  "/path/file-*.png": {
+    regex: /^\/path\/file-(?<_0>[\s\S]*)\.png\/?$/,
+    match: [
+      ["/path/file-a.png", { "0": "a" }],
+      ["/path/file-a/b.png", { "0": "a/b" }],
+      ["/path/file-.png", { "0": "" }],
+    ],
+    noMatch: ["/path/file-a", "/path/a/file-b.png"],
   },
   "/path/**": {
     regex: /^\/path(?:\/(?<_0>(?:[\s\S]*[^/])?\/*?))??\/?$/,
@@ -467,16 +484,18 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/files/raw", "/files/a.b", "/files//raw"],
   },
-  // A greedy `*` shares its segment: the look-ahead form stays (the `*`
-  // takes as much as the rest of the router's longer route lets it).
+  // A group right after a `*` (a catch-all) adds an optional part the router
+  // ranks against the route without it: an alternation, as for a `**`.
   "/files/*{.:ext}?/raw": {
-    regex:
-      /^\/files\/(?<_0>[^/]*(?=\.(?:[^/]+?)(?:\/|$))|[^/]*(?![^/]))(?:\.(?<ext>[^/]+?))?\/raw\/?$/,
+    regex: duplicateNames(
+      String.raw`^(?:\/files\/(?<_0>[\s\S]*)\.(?<ext>[^/]+?)\/raw\/?|\/files\/(?<_0>[\s\S]*)\/raw\/?)$`,
+    ),
     match: [
       ["/files/a/raw", { "0": "a", ext: undefined }],
       ["/files/archive.tar.gz/raw", { "0": "archive.tar", ext: "gz" }],
       ["/files/.b/raw", { "0": "", ext: "b" }],
       ["/files//raw", { "0": "", ext: undefined }],
+      ["/files/a/b.c/raw", { "0": "a/b", ext: "c" }],
     ],
     noMatch: ["/files/raw"],
   },
@@ -504,12 +523,21 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/x"],
   },
   "/:a-*": {
-    regex: /^\/(?<a>[^/]+?)-(?<_0>[^/]*)\/?$/,
-    match: [["/x-y-z", { a: "x", "0": "y-z" }]],
+    regex: /^\/(?<a>[^/]+?)-(?<_0>(?:[\s\S]*[^/])?\/*?)\/?$/,
+    match: [
+      ["/x-y-z", { a: "x", "0": "y-z" }],
+      ["/x-y/z", { a: "x", "0": "y/z" }],
+      ["/x-/", { a: "x", "0": "" }],
+    ],
+    noMatch: ["/x/y-z"],
   },
   "/*-:a": {
-    regex: /^\/(?<_0>[^/]*)-(?<a>[^/]+?)\/?$/,
-    match: [["/x-y-z", { "0": "x-y", a: "z" }]],
+    regex: /^\/(?<_0>[\s\S]*)-(?<a>[^/]+?)\/?$/,
+    match: [
+      ["/x-y-z", { "0": "x-y", a: "z" }],
+      ["/x-y/z-w", { "0": "x-y/z", a: "w" }],
+    ],
+    noMatch: ["/x-y/z", "/x-"],
   },
   // A `?` on a param that does not start its segment makes only the param
   // optional (`pre-{:x}?`, as in URLPattern); `/{pre-:x}?` drops the segment.
@@ -550,14 +578,15 @@ export const regexpCases: Record<string, RegExpCase> = {
   // After a greedy `*` (or a constraint) too: the capture before it takes
   // what it can, as in URLPattern (`a-b-` is `0: "a-b"`, no `x`).
   "/f/*-:x?": {
-    regex: /^\/f\/(?<_0>[^/]*)-(?:(?<x>[^/]+?))?\/?$/,
+    regex: /^\/f\/(?<_0>[\s\S]*)-(?:(?<x>[^/]+?))?\/?$/,
     match: [
       ["/f/a-b-", { "0": "a-b", x: undefined }],
       ["/f/a-b-c", { "0": "a-b", x: "c" }],
       ["/f/a-", { "0": "a", x: undefined }],
       ["/f/--", { "0": "-", x: undefined }],
+      ["/f/a/b-c", { "0": "a/b", x: "c" }],
     ],
-    noMatch: ["/f/a", "/f"],
+    noMatch: ["/f/a", "/f", "/f/a-b/c"],
   },
   "/x/:a(\\d+):b?": {
     regex: /^\/x\/(?<a>\d+)(?:(?<b>[^/]+?))?\/?$/,
@@ -617,11 +646,12 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
   },
   "/*-x{.png}?": {
-    regex: /^\/(?<_0>[^/]*)-x(?:\.png)?\/?$/,
+    regex: /^\/(?<_0>[\s\S]*)-x(?:\.png)?\/?$/,
     match: [
       ["/a-x-x", { "0": "a-x" }],
       ["/a-x.png", { "0": "a" }],
       ["/a-x.png-x", { "0": "a-x.png" }],
+      ["/a/b-x.png", { "0": "a/b" }],
     ],
   },
   "/blog/:id(\\d+)-:slug?": {
@@ -634,7 +664,7 @@ export const regexpCases: Record<string, RegExpCase> = {
   // ... but not where both can end the same way: the greedy `*` would take
   // the group's text (the router's `*-x-x` gives `x`).
   "/*-x{-x}?": {
-    regex: duplicateNames(String.raw`^(?:\/(?<_0>[^/]*)-x-x\/?|\/(?<_0>[^/]*)-x\/?)$`),
+    regex: duplicateNames(String.raw`^(?:\/(?<_0>[\s\S]*)-x-x\/?|\/(?<_0>[\s\S]*)-x\/?)$`),
     match: [
       ["/x-x-x", { "0": "x" }],
       ["/x-x", { "0": "x" }],
@@ -704,7 +734,7 @@ export const regexpCases: Record<string, RegExpCase> = {
   // The reserved prefixes must not collapse with the unnamed `*` (`_0`).
   "/run/:__rou3_esc_a.:__rou3_unnamed_1.*": {
     regex:
-      /^\/run\/(?<__rou3_esc_____rou3__esc__a>[^/]+?)\.(?<__rou3_esc_____rou3__unnamed__1>[^/]+?)\.(?<_0>[^/]*)\/?$/,
+      /^\/run\/(?<__rou3_esc_____rou3__esc__a>[^/]+?)\.(?<__rou3_esc_____rou3__unnamed__1>[^/]+?)\.(?<_0>(?:[\s\S]*[^/])?\/*?)\/?$/,
     match: [["/run/x.y.z", { __rou3_esc_a: "x", __rou3_unnamed_1: "y", "0": "z" }]],
   },
   // A `-` no word char follows ended a name before too (`[\w-]+` captured
@@ -723,20 +753,23 @@ export const regexpCases: Record<string, RegExpCase> = {
     regex: /^\/a\/pre-(?<x>[^/]+?)-suf\/?$/,
     match: [["/a/pre-b-suf", { x: "b" }]],
   },
-  // Mid-segment optional after a greedy open-ended capture (`*` -> `[^/]*`).
-  // Inlining as `(?<_0>[^/]*)(?:\.webp)?` would let the greedy capture swallow
-  // `.webp` (capturing `photo.webp` instead of `photo`), so this must fall back
-  // to alternation — which anchors the literal outside the capture and keeps
-  // `_0` = `photo`. The fallback reuses the `_0` named group across branches
-  // (see PCRE2_DUPLICATE_NAME_ROUTES).
+  // An optional part right after a greedy `*`: inlining it as
+  // `(?<_0>[\s\S]*)(?:\.webp)?` would let the capture swallow `.webp`
+  // (`photo.webp` instead of `photo`), so this falls back to alternation,
+  // which anchors the literal outside the capture and keeps `_0` = `photo`.
+  // The fallback reuses the `_0` named group across branches (see
+  // PCRE2_DUPLICATE_NAME_ROUTES).
   "/media/*{.webp}?": {
     regex: duplicateNames(
-      String.raw`^(?:\/media\/(?<_0>[^/]*)\.webp\/?|\/media(?:\/(?<_0>[^/]*))??\/?)$`,
+      String.raw`^(?:\/media\/(?<_0>[\s\S]*)\.webp\/?|\/media\/(?<_0>(?:[\s\S]*[^/])?\/*?)\/?)$`,
     ),
     match: [
       ["/media/photo.webp", { "0": "photo" }],
       ["/media/photo", { "0": "photo" }],
+      ["/media/a/photo.webp", { "0": "a/photo" }],
+      ["/media/", { "0": "" }],
     ],
+    noMatch: ["/media"],
   },
   // A required param followed by an optional one: both need a value, so
   // neither is ever empty and a plain `/?$` ends the regex exactly.
@@ -769,15 +802,16 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/users/o", "/users/o/", "/users/o//", "/users//1/t/", "/users/o/1/t//"],
   },
   "/users/:id/*": {
-    regex: /^\/users\/(?<id>[^/]+)(?:\/(?<_0>[^/]*))??\/?$/,
+    regex: /^\/users\/(?<id>[^/]+)\/(?<_0>(?:[\s\S]*[^/])?\/*?)\/?$/,
     match: [
-      ["/users/1", { id: "1", "0": undefined }],
-      ["/users/1/", { id: "1", "0": undefined }],
+      ["/users/1/", { id: "1", "0": "" }],
       ["/users/1//", { id: "1", "0": "" }],
       ["/users/1/x", { id: "1", "0": "x" }],
       ["/users/1/x/", { id: "1", "0": "x" }],
+      ["/users/1/x/y", { id: "1", "0": "x/y" }],
+      ["/users/1/x//", { id: "1", "0": "x/" }],
     ],
-    noMatch: ["/users", "/users/", "/users//", "/users//x", "/users/1/x/y", "/users/1/x//"],
+    noMatch: ["/users", "/users/", "/users//", "/users//x", "/users/1"],
   },
   // A `**` after a required segment, unset over zero segments (like the
   // `**` of `/path/**` on `/path`).
@@ -837,30 +871,33 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/ab", "/a//", "/a/b//", "/a///", "/a/b/c//", "/a/b/c/d"],
   },
-  // A `*` can be empty, so it doesn't nest in a `:x?` (which needs a value):
-  // `/a//` is the route without `x`.
+  // `/a/:x/*` where `x` has a segment and the `*` takes the rest (`/a/b/` gives
+  // it nothing), else `/a/*`.
   "/a/:x?/*": {
-    regex: /^\/a(?:\/(?<x>[^/]+))?(?:\/(?<_0>[^/]*))??\/?$/,
+    regex: /^\/a(?:\/(?<x>[^/]+))?\/(?<_0>(?:[\s\S]*[^/])?\/*?)\/?$/,
     match: [
-      ["/a", { x: undefined, "0": undefined }],
+      ["/a/", { x: undefined, "0": "" }],
       ["/a//", { x: undefined, "0": "" }],
       ["/a/b/c", { x: "b", "0": "c" }],
       ["/a/b//", { x: "b", "0": "" }],
-      // The router picks `/a/*` (see OPTIONAL_BEFORE_WILDCARD in regexp.test.ts).
-      ["/a/b", { x: "b", "0": undefined }, { "0": "b" }],
+      ["/a/b", { x: undefined, "0": "b" }],
+      ["/a//c", { x: undefined, "0": "/c" }],
+      ["/a///", { x: undefined, "0": "/" }],
     ],
-    noMatch: ["/a//c", "/a///"],
+    noMatch: ["/a", "/ab"],
   },
-  // An empty segment is required too, and has no non-empty branch.
+  // An empty segment before a `*` is required too.
   "/a//*": {
-    regex: /^\/a\/\/(?:(?<_0>[^/]*)\/?)??$/,
+    regex: /^\/a\/\/(?<_0>(?:[\s\S]*[^/])?\/*?)\/?$/,
     match: [
-      ["/a//", { "0": undefined }],
+      ["/a//", { "0": "" }],
       ["/a///", { "0": "" }],
       ["/a//x", { "0": "x" }],
       ["/a//x/", { "0": "x" }],
+      ["/a//x//", { "0": "x/" }],
+      ["/a//x/y", { "0": "x/y" }],
     ],
-    noMatch: ["/a", "/a/", "/a/x", "/a//x//", "/a//x/y"],
+    noMatch: ["/a", "/a/", "/a/x"],
   },
   // An optional group spanning segments: `/path/sub/` must not match (it
   // strips to `/path/sub`, which is neither branch).
@@ -874,25 +911,18 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/path/sub", "/path/sub/", "/path/sub//", "/path//", "/path/sub/1//"],
   },
-  // A group whose required segment is followed by an optional one.
+  // A group ending in a `*` (lazy: the route without it wins where both match).
   "/path{/sub/:id/*}?": {
-    regex: /^\/path(?:\/sub\/(?<id>[^/]+)(?:\/(?<_0>[^/]*))??)?\/?$/,
+    regex: /^\/path(?:\/sub\/(?<id>[^/]+)\/(?<_0>(?:[\s\S]*[^/])?\/*?))??\/?$/,
     match: [
       ["/path", { id: undefined, "0": undefined }],
       ["/path/", { id: undefined, "0": undefined }],
-      ["/path/sub/1", { id: "1", "0": undefined }],
-      ["/path/sub/1/", { id: "1", "0": undefined }],
+      ["/path/sub/1/", { id: "1", "0": "" }],
       ["/path/sub/1//", { id: "1", "0": "" }],
       ["/path/sub/1/x/", { id: "1", "0": "x" }],
+      ["/path/sub/1/x//", { id: "1", "0": "x/" }],
     ],
-    noMatch: [
-      "/path/sub",
-      "/path/sub/",
-      "/path/sub//",
-      "/path/sub//x",
-      "/path//",
-      "/path/sub/1/x//",
-    ],
+    noMatch: ["/path/sub", "/path/sub/", "/path/sub//", "/path/sub//x", "/path//", "/path/sub/1"],
   },
   // A constraint that can match empty has no non-empty form to branch on.
   "/path/:id(\\d*)": {
@@ -982,16 +1012,17 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/path//", "/path/subx", "/path/sub//"],
   },
   "/path{/sub/*}?": {
-    regex: /^\/path(?:\/sub(?:\/(?<_0>[^/]*))??)?\/?$/,
+    regex: /^\/path(?:\/sub\/(?<_0>(?:[\s\S]*[^/])?\/*?))??\/?$/,
     match: [
       ["/path", { "0": undefined }],
-      ["/path/sub", { "0": undefined }],
-      ["/path/sub/", { "0": undefined }],
+      ["/path/sub/", { "0": "" }],
       ["/path/sub//", { "0": "" }],
       ["/path/sub/a", { "0": "a" }],
       ["/path/sub/a/", { "0": "a" }],
+      ["/path/sub/a//", { "0": "a/" }],
+      ["/path/sub/a/b", { "0": "a/b" }],
     ],
-    noMatch: ["/path//", "/path/sub/a//", "/path/sub/a/b"],
+    noMatch: ["/path//", "/path/sub"],
   },
   "/path{/sub/:id?}?": {
     regex: /^\/path(?:\/sub(?:\/(?<id>[^/]+))?)?\/?$/,
@@ -1088,16 +1119,16 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/path/meta", "/path//meta", "/path/a/metax", "/path/secret"],
   },
-  // `**<rest>` is `**/*<rest>`; a `*` after `**` takes one segment.
-  "/**/*.png": {
-    regex: /^(?:\/(?<_0>[\s\S]*))?\/(?<_1>[^/]*)\.png\/?$/,
+  // A param after a `**` takes one segment (a `*` there is a second
+  // catch-all, see TWO_CATCH_ALL_ROUTES).
+  "/**/:name.png": {
+    regex: /^(?:\/(?<_0>[\s\S]*))?\/(?<name>[^/]+?)\.png\/?$/,
     match: [
-      ["/x.png", { "0": undefined, "1": "x" }],
-      ["/.png", { "0": undefined, "1": "" }],
-      ["/a/b/x.png", { "0": "a/b", "1": "x" }],
-      ["/a/x.png/", { "0": "a", "1": "x" }],
+      ["/x.png", { "0": undefined, name: "x" }],
+      ["/a/b/x.png", { "0": "a/b", name: "x" }],
+      ["/a/x.png/", { "0": "a", name: "x" }],
     ],
-    noMatch: ["/", "/x.jpg", "/x.png/y"],
+    noMatch: ["/", "/.png", "/x.jpg", "/x.png/y"],
   },
   "/:id/**/:file(\\w+).json": {
     regex: /^\/(?<id>[^/]+)(?:\/(?<_0>[\s\S]*))?\/(?<file>\w+)\.json\/?$/,
@@ -1107,19 +1138,21 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/c.json", "//c.json", "/1/c-d.json", "/1/a/.json"],
   },
+  // `**<rest>` reads like `*<rest>`, as in URLPattern: one capture.
   "/**.md": {
-    regex: /^(?:\/(?<_0>[\s\S]*))?\/(?<_1>[^/]*)\.md\/?$/,
+    regex: /^\/(?<_0>[\s\S]*)\.md\/?$/,
     match: [
-      ["/readme.md", { "0": undefined, "1": "readme" }],
-      ["/docs/guide/intro.md/", { "0": "docs/guide", "1": "intro" }],
+      ["/readme.md", { "0": "readme" }],
+      ["/docs/guide/intro.md/", { "0": "docs/guide/intro" }],
+      ["/.md", { "0": "" }],
     ],
     noMatch: ["/", "/a.mdx", "/a.md/b"],
   },
   "/blog/**.json": {
-    regex: /^\/blog(?:\/(?<_0>[\s\S]*))?\/(?<_1>[^/]*)\.json\/?$/,
+    regex: /^\/blog\/(?<_0>[\s\S]*)\.json\/?$/,
     match: [
-      ["/blog/post.json", { "0": undefined, "1": "post" }],
-      ["/blog/a/post.json", { "0": "a", "1": "post" }],
+      ["/blog/post.json", { "0": "post" }],
+      ["/blog/a/post.json", { "0": "a/post" }],
     ],
     noMatch: ["/blog", "/post.json", "/blogpost.json"],
   },
@@ -1149,16 +1182,6 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/a/x//", { "0": "x/", page: undefined }],
     ],
     noMatch: ["/ab", "/b"],
-  },
-  "/a/:x*/*": {
-    regex: /^\/a(?:\/(?:(?:(?<x>[\s\S]+)\/)?(?:(?<_0>[^/]+)\/?|\/))?)?$/,
-    match: [
-      ["/a", { "0": undefined, x: undefined }],
-      ["/a/b", { "0": "b", x: undefined }],
-      ["/a/b/c", { "0": "c", x: "b" }],
-      ["/a/b/c/d/", { "0": "d", x: "b/c" }],
-    ],
-    noMatch: ["/ab", "/b", "/a//c"],
   },
   // Other optionals right after a `**`: it is lazy, so they take the end
   // of the path where they match, and `/?$` is exact (the `**` absorbs a
@@ -1224,11 +1247,12 @@ export const LOOKBEHIND_ROUTES: ReadonlySet<string> = new Set([
   "/a/**:r/:y?",
 ]);
 
-// Fixtures whose regex holds a capture with a look-ahead (a greedy `*` or a
-// constraint extended by an optional group in its own segment, see
-// `mergeCapture` in src/regexp.ts; a `:name` there is lazy and needs none).
-// RE2-family engines reject them and `regExpToRoute` can't read them back.
-export const LOOKAHEAD_ROUTES: ReadonlySet<string> = new Set(["/files/*{.:ext}?/raw"]);
+// Fixtures whose regex holds a capture with a look-ahead (a constraint
+// extended by an optional group in its own segment, see `mergeCapture` in
+// src/regexp.ts; a `:name` there is lazy and needs none, and a group right
+// after a `*` falls back to alternation). RE2-family engines reject them and
+// `regExpToRoute` can't read them back.
+export const LOOKAHEAD_ROUTES: ReadonlySet<string> = new Set([]);
 
 // Routes whose generated regex reuses the same named capture group across
 // alternation branches (e.g. `(?<id>…)|(?<id>…)`). Such output is legal in JS
@@ -1237,13 +1261,13 @@ export const LOOKAHEAD_ROUTES: ReadonlySet<string> = new Set(["/files/*{.:ext}?/
 //
 // A trailing single optional group is normally compiled inline as `(?:...)?`
 // (see inlineOptionalGroup in src/regexp.ts), which avoids duplicate names. But
-// a mid-segment optional group after a greedy open-ended capture cannot be
-// inlined safely (the capture would swallow the optional literal the router's
-// longer route keeps), so it falls back to alternation and reuses the capture
-// name across branches. These routes exercise
+// an optional part after a greedy capture (a `*`) cannot be inlined safely
+// (the capture would swallow the optional literal), so it falls back to
+// alternation and reuses the capture name across branches. These routes exercise
 // that fallback and are asserted to be rejected by strict PCRE2 engines.
 export const PCRE2_DUPLICATE_NAME_ROUTES: ReadonlySet<string> = new Set([
   "/media/*{.webp}?",
+  "/files/*{.:ext}?/raw",
   "/*-x{-x}?",
   "/docs/{v2}?/:page?",
 ]);
@@ -1277,9 +1301,11 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
   "/:x*/:y?",
   "/a/:x*/:y?",
   "/:p/:r*/:y(\\d+)?",
+  // Likewise a `*` ending its segment (its `**` in the tree takes none to
+  // more segments, the segment's text before it is required).
+  "/a/x-*/:y?",
   // A segment that can be empty right before a lazy catch-all: a plain `/?$`
   // would let the stripped slash end it.
-  "/*/**/:n(\\d+)?",
   "/a//**/:n(\\d+)?",
   // An inline group after a catch-all and an optional segment (or an empty
   // one) that can be empty.
@@ -1308,26 +1334,21 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
 
 // Sweep patterns whose regex holds a capture with a look-ahead (see
 // LOOKAHEAD_ROUTES). Pinned like the set above.
-export const SWEEP_LOOKAHEAD_PATTERNS: ReadonlySet<string> = new Set([
-  // A `:name` extended by a group in its segment is lazy and needs none.
-  "/files/*{.:ext}?/raw",
-]);
+// (A `:name` extended by a group in its segment is lazy and needs none, and a
+// group right after a `*` falls back to alternation.)
+export const SWEEP_LOOKAHEAD_PATTERNS: ReadonlySet<string> = new Set([]);
 
 // Sweep patterns whose regex reuses a capture group name across alternation
 // branches (see PCRE2_DUPLICATE_NAME_ROUTES). Pinned like the set above.
 export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
-  // A group whose segment then folds in a trailing optional (`*`, `:y?`,
-  // `**`): the two expansions don't line up segment by segment.
-  "/{b}?/*",
+  // A group whose segment then folds in a trailing optional (`:y?`, `**`):
+  // the two expansions don't line up segment by segment.
   "/{b}?/**",
   "/{b}?/:y?",
-  "/a/{b}?/*",
   "/a/{b}?/**",
   "/a/{b}?/:y?",
-  "/:x{.:e}?/*",
   "/:x{.:e}?/**",
   "/:x{.:e}?/:y?",
-  "/a/:x{.:e}?/*",
   "/a/:x{.:e}?/**",
   "/a/:x{.:e}?/:y?",
   // An empty segment followed only by optional ones expands like the router.
@@ -1340,19 +1361,19 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   // end the same way (`-x` / `-x-x`). (An optional param, `*-:x?`, compiles
   // in place like the tree.)
   "/media/*{.webp}?",
+  "/files/*{.:ext}?/raw",
   "/*-x{-x}?",
-  // A `:x*` before a `*` that is optional in the route without it.
-  "/a/:r*/b/*",
-  "/:r*/*.png/*",
-  "/a/:r*/:y?/*",
-  "/a/:r*/b/*/:y?",
-  // A group right after a bare `**`.
+  // A `*` before optional segments only, where the segment before it can be
+  // empty: each route ends in its own way.
+  "/:x?/*/:y?",
+  "/a//*/:y?",
+  "/a/:x(\\d*)/*/:y?",
+  // A group right after a catch-all.
   "/a/**{/b/:c?}?",
   "/a/**{.png}?",
+  "/a/x-*{/b}?",
   // An optional unnamed group before a trailing optional or another optional
   // group: the expansions don't line up segment by segment.
-  "/{(\\d+)}?/*",
-  "/a/{(\\d+)}?/*",
   "/{(\\d+)}?/:y?",
   "/a/{(\\d+)}?/:y?",
   "/{(\\d+)}?/**",
@@ -1362,7 +1383,6 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   "/{b}?/{(\\d+)}?",
   "/a/{b}?/{(\\d+)}?",
   "/a{/(\\d+)}?/**",
-  "/x{(\\d+)}?/*",
   // An optional group after a trailing optional or `**:r`.
   "/*/{b}?",
   "/a/*/{b}?",
@@ -1371,8 +1391,6 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   "/a/**:r/{b}?",
   "/a/**:r/{(\\d+)}?",
   // An optional `{/**}?` before a trailing optional.
-  "/{/**}?/*",
-  "/a/{/**}?/*",
   "/{/**}?/:y?",
   "/a/{/**}?/:y?",
   "/{/**}?/{(\\d+)}?",
@@ -1522,16 +1540,26 @@ function allSweepPatterns(): string[] {
     "/**/:y{/c}?",
     "/a/**/:y{/c}?",
     "/**/b{/c}?",
-    // A trailing `*` after a `:x*` is optional where the route has no `:x*`
-    // (`/a/:r*/b/*` also registers `/a/b/*`, which matches `/a/b`).
-    "/a/:r*/b/*",
-    "/:r*/*.png/*",
-    "/a/:r*/:y?/*",
-    "/a/:r*/b/*/:y?",
+    // A `*` before optional segments only takes none after a trailing slash
+    // where they are absent (`/a/*/:y?` on `/a/`), also inside a group, and
+    // where the segment before it can be empty.
+    "/a/*/:y?",
+    "/a{/*/:y?}?",
+    "/a{/b/*/:y?}?",
+    "/:x?/*/:y?",
+    "/a//*/:y?",
+    "/a/:x(\\d*)/*/:y?",
+    // A `*` inside a segment, with optional segments after it: lazy or
+    // greedy like a `**` (with text after it, its segment ranks as a regex
+    // param: `*.png`)
+    "/a/x-*/:y?",
+    "/*.png/:y?",
+    "/a-*.png/b",
+    "/a/*-:x/:y?",
+    "/a/x-*{/b}?",
     // A segment that can be empty right before a lazy catch-all: the stripped
     // trailing slash must not end it (`/a/` is not `/a//` for `/a/:p/**/…`).
     "/a/:p/**/:n(\\d+)?",
-    "/*/**/:n(\\d+)?",
     "/a//**/:n(\\d+)?",
     "/:p/:r*/:y(\\d+)?",
     // Several optionals after a catch-all: the router ranks the routes it
@@ -1595,6 +1623,16 @@ function allSweepPatterns(): string[] {
  */
 export const TWO_CATCH_ALL_ROUTES: readonly string[] = [
   "/**/**",
+  // A `*` is one too, inside a segment as well
+  "/*/x/*",
+  "/*/**",
+  "/**/*",
+  "/***",
+  "/*/:p+",
+  "/a/:x*/*",
+  "/file-*-*.png",
+  "/**/*.png",
+  "/*.png/*",
   "/a/**/b/**:x",
   "/a/:x+/b/:y+",
   "/**/a/:x*",

@@ -1,10 +1,9 @@
 // Inverse of `routeToRegExp()`: parse an anchored, PCRE-compatible RegExp back
 // into a rou3 route pattern. Targets the dialect emitted by `routeToRegExp()`
-// (named groups `(?<name>...)`, `[^/]+`/`[^/]+?`/`[^/]*` segment matchers,
-// `[\s\S]*` / `[\s\S]+` catch-alls (`.*`/`.+` in older versions), `(?:/...)?`
-// optional groups, the trailing-slash suffix). Hand-written regexes that
-// follow the same conventions convert too; constructs outside the dialect
-// throw.
+// (named groups `(?<name>...)`, `[^/]+`/`[^/]+?` segment matchers, `[\s\S]*`
+// / `[\s\S]+` catch-alls (`.*`/`.+` in older versions), `(?:/...)?` optional
+// groups, the trailing-slash suffix). Hand-written regexes that follow the
+// same conventions convert too; constructs outside the dialect throw.
 
 import { fromGroupName } from "./_group-names.ts";
 import { encodeLiteral } from "./operations/_utils.ts";
@@ -23,12 +22,15 @@ const ROUTE_SPECIAL = new Set([":", "(", ")", "*", "\\", "+", "|", "$", "[", "]"
  *
  * Throws a `rou3:` error for input it can't represent exactly: a regex not
  * anchored with `^` and `$`, the flags `i`/`m`/`s`/`u`/`v` (`g`/`y`/`d` are
- * ignored), and constructs outside the dialect `routeToRegExp` emits.
+ * ignored), constructs outside the dialect `routeToRegExp` emits, and an
+ * unnamed single-segment `[^/]*` capture (a `*` before 0.12: a `*` takes
+ * `/` too now, so no route matches the same paths).
  *
  * @example
  * regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
  * regExpToRoute(/^\/path\/(?<param>[^/]+)\/?$/); // "/path/:param"
  * regExpToRoute(/^\/path(?:\/(?<_0>(?:[\s\S]*[^/])?\/*?))??\/?$/); // "/path/**"
+ * regExpToRoute(/^\/path\/(?<_0>(?:[\s\S]*[^/])?\/*?)\/?$/); // "/path/*"
  */
 export function regExpToRoute(regexp: RegExp | string): string {
   // Routes carry no flags, so a match-affecting flag would be silently dropped
@@ -397,12 +399,12 @@ function applyOptional(
     // `pushCatchAll` in regexp.ts): `(?:/(?:(?<x>[\s\S]+)/)?(?<y>[^/]*))?`
     // (`[\s\S]*` in older versions, also for a `**`).
     const nested = NESTED_CATCH_ALL.exec(rest);
-    // An unnamed catch-all is no `:_N*` (see the unnamed capture below).
-    if (nested && !UNNAMED.test(nested[1])) {
+    // An unnamed catch-all is no `:_N*` (see the unnamed capture below), and
+    // the `*` a later one was is a second catch-all now (`:x*` then `*`).
+    if (nested && !UNNAMED.test(nested[1]) && !UNNAMED.test(nested[3])) {
       const [catchAll, last] = [nested[1], nested[3]].map(paramName);
-      const unnamed = UNNAMED.test(nested[3]);
-      segments.push(catchAll === "_" && !unnamed && nested[2] === "*" ? "**" : `:${catchAll}*`);
-      segments.push(unnamed ? "*" : `:${last}?`);
+      segments.push(catchAll === "_" && nested[2] === "*" ? "**" : `:${catchAll}*`);
+      segments.push(`:${last}?`);
       return;
     }
     const g = matchNamedGroup(rest, 0);
@@ -414,10 +416,9 @@ function applyOptional(
         return;
       }
       // An unnamed capture has no `:name?` form (`:_0(…)?` is a param named
-      // `_0`): `{/(pat)}?` on the previous segment. A `*` is optional alone
-      // only at the end of the route, `{/*}?` elsewhere. Inside a group that
-      // would nest `{…}`, which `addRoute` rejects.
-      if (g.unnamed && (g.body !== "[^/]*" || !last)) {
+      // `_0`): `{/(pat)}?` on the previous segment. Inside a group that would
+      // nest `{…}`, which `addRoute` rejects.
+      if (g.unnamed) {
         if (inGroup) {
           throw new Error(
             `rou3: no route has an optional unnamed capture in a group in "${inner}"`,
@@ -448,16 +449,14 @@ function applyOptional(
       segments.push(optionalParam(g, dot));
       return;
     }
-    // A whole-segment `:name?` / `*` with the next optionals nested inside,
+    // A whole-segment `:name?` with the next optionals nested inside,
     // as `routeToRegExp` emits `/:x?/:y?`, where a group can't be merged: at
     // the root, or inside a group (no nested `{…}?`). The router matches the
     // same paths with the optionals side by side. After a segment, `{/:x/*}?`
     // is the route that captures like the regex (`/a/:x?/*` compiles to the
     // same one, but gives `0`, not `x`, on `/a/b`).
     const units =
-      (segments.length === 0 || inGroup) &&
-      g &&
-      (g.unnamed ? g.body === "[^/]*" : /^\[\^\/\][*+]$/.test(g.body))
+      (segments.length === 0 || inGroup) && g && !g.unnamed && /^\[\^\/\][*+]$/.test(g.body)
         ? optionalUnits(rest.slice(g.end))
         : undefined;
     if (g && units) {
@@ -502,13 +501,19 @@ function mergeGroup(segments: string[], body: string): void {
 
 /** Classify a param group inside a segment (`:name`, `*`, `(pat)`, ...). */
 function paramToken(name: string, body: string, unnamed: boolean): string {
-  // `*` (unnamed `[^/]*`) and `:name` (named `[^/]+`, `[^/]+?` sharing its
-  // segment, or `[^/]*` as older versions emitted) are the only
-  // single-segment matchers with dedicated syntax. Every other body becomes
-  // an inline `(pat)` constraint, which `constraint()` rejects if it can't
-  // survive path splitting.
-  if (unnamed && body === "[^/]*") {
+  // `*` (unnamed `[\s\S]*`, lazy where optional segments follow it: a
+  // catch-all, also inside a segment) and `:name` (named `[^/]+`, `[^/]+?`
+  // sharing its segment, or `[^/]*` as older versions emitted) have
+  // dedicated syntax. Every other body becomes an inline `(pat)` constraint,
+  // which `constraint()` rejects if it can't survive path splitting.
+  if (unnamed && (body === "[\\s\\S]*" || body === "[\\s\\S]*?")) {
     return "*";
+  }
+  // A single-segment `*` before 0.12: a `*` takes `/` too now
+  if (unnamed && body === "[^/]*") {
+    throw new Error(
+      `rou3: a single-segment unnamed capture \`[^/]*\` has no route form (a \`*\` matches across \`/\`): use \`:name\` or a constraint`,
+    );
   }
   if (!unnamed && /^\[\^\/\](?:\*|\+\??)$/.test(body)) {
     return `:${name}`;
@@ -517,16 +522,10 @@ function paramToken(name: string, body: string, unnamed: boolean): string {
 }
 
 /**
- * Classify a param inside an optional group (`:name?`, `:name*`, ...). An
- * unnamed one is a `*` where that is optional (ending the route, or with the
- * next optionals nested in its group): the callers write other unnamed
- * captures, and a `*` elsewhere, as `{/…}?`.
+ * Classify a param inside an optional group (`:name?`, `:name*`, ...). The
+ * callers write unnamed captures as `{/…}?`.
  */
-function optionalParam({ name, body, unnamed }: NamedGroup, dot: boolean): string {
-  // `(?:/(?<_N>[^/]*))?` is a trailing `*` (optional in the tree).
-  if (unnamed) {
-    return "*";
-  }
+function optionalParam({ name, body }: NamedGroup, dot: boolean): string {
   if (body === "[^/]*" || body === "[^/]+") {
     return `:${name}?`;
   }

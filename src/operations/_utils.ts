@@ -1,5 +1,5 @@
 import { fromGroupName } from "../_group-names.ts";
-import { hasSegmentWildcard } from "../_segment-wildcards.ts";
+import { segmentWildcards } from "../_segment-wildcards.ts";
 import { NullProtoObj } from "../object.ts";
 import type { MatchedRoute, MethodData, ParamsIndexMap } from "../types.ts";
 
@@ -25,7 +25,8 @@ const ESCAPABLE = ":(){}\\";
 
 /**
  * Where a route-pattern segment goes in the tree, exactly as `addRoute` inserts
- * it: `2` = `node.wildcard`, `1` = `node.param`, otherwise the returned string
+ * it: `2` = `node.wildcard` (a catch-all: `**`, `**:name` or a whole-segment
+ * `*`), `1` = `node.param`, otherwise the returned string
  * is the `node.static` key, where any `\x` is a literal `x` (an escaped `\*` /
  * `\*\*` is the literal `*` / `**`: the escape is what keeps it out of the
  * wildcard/param branches) and `\uFFFD` placeholders decode back to `:(){}\`.
@@ -38,13 +39,8 @@ const ESCAPABLE = ":(){}\\";
  * its children (see `_add`).
  */
 export function segmentKey(segment: string): string | 1 | 2 {
-  if (segment.startsWith("**")) return 2;
-  if (
-    segment === "*" ||
-    segment.includes(":") ||
-    segment.includes("(") ||
-    hasSegmentWildcard(segment)
-  ) {
+  if (segment === "*" || segment.startsWith("**")) return 2;
+  if (segment.includes(":") || segment.includes("(") || segmentWildcards(segment).length > 0) {
     return 1;
   }
   if (segment.includes("\\")) segment = segment.replace(/\\([\s\S])/g, "$1");
@@ -191,6 +187,53 @@ export function expandModifiers(segments: string[], input?: string): string[] | 
 }
 
 /**
+ * A `*` inside a segment is a catch-all too, as in URLPattern (`/*.png` on
+ * `/a/b.png` is `a/b`): the rest of its segment, any segments after it and
+ * the start of a later one. The tree reads it as the segment-local `*`
+ * (`[^/]*`, see `getParamRegexp`) before or after a `**` that `join`s their
+ * captures (see `getMatchParams`): `pre*post` is `pre*`, `**`, `*post` (the
+ * capture spans segments) and the segment as is (it doesn't), `*post` is
+ * `**`, `*post`, and `pre*` is `pre*`, `**`. Returns those routes' segments,
+ * the index of the `**` and whether a `pre*` segment is before it (its `*`
+ * starts the capture), or `undefined` without such a `*`. Throws for a second
+ * one (one catch-all per route).
+ */
+export function splitStar(
+  segments: string[],
+  input: string,
+): [routes: string[][], join: number, head: boolean] | undefined {
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
+    const at = segment.startsWith("**") || segment === "*" ? [] : segmentWildcards(segment);
+    if (at.length === 0) continue;
+    for (let j = i + 1; j < segments.length && at.length === 1; j++) {
+      if (!segments[j].startsWith("**") && segments[j] !== "*") {
+        at.push(...segmentWildcards(segments[j]));
+      }
+    }
+    if (at.length > 1) {
+      // A `**` inside a segment (`a**b`) has no meaning yet
+      if (at.some((x, k) => at[k + 1] === x + 1)) invalidSyntax(MISPLACED_MODIFIER, input);
+      oneCatchAll(input);
+    }
+    const pre = segments.slice(0, i);
+    const post = segments.slice(i + 1);
+    const head = segment.slice(0, at[0]);
+    const tail = segment.slice(at[0] + 1);
+    if (!head) return [[pre.concat("**", segment, post)], i, false];
+    if (!tail) return [[pre.concat(segment, "**", post)], i + 1, true];
+    return [[pre.concat(head + "*", "**", "*" + tail, post), segments], i + 1, true];
+  }
+}
+
+/** Throws for a route with more than one catch-all, quoting it as written. */
+export function oneCatchAll(input: string): never {
+  throw new Error(
+    `rou3: a route can have only one \`*\`, \`**\`, \`:name+\` or \`:name*\` (${input})`,
+  );
+}
+
+/**
  * Whether matching `m` on `segments` gives a `:name` an empty segment, or a
  * `**:name` (`:name+`, `:name*`) an empty value: those need one, as in
  * URLPattern. A `*`, a `**` and a constraint (it decides: `:id(\d*)`) may be
@@ -204,6 +247,17 @@ export function emptyParam(m: MethodData<unknown>, segments: string[]): boolean 
   return !!pMap?.some(
     ([, name, optional]) => !optional && (name as string) > ":" && params![name as string] === "",
   );
+}
+
+/**
+ * Whether entry `m` of a wildcard node matches zero segments there: a bare
+ * `**` always, a `*` (named by a digit, a `**:name` by a letter or `_`) only
+ * after the lookup path's trailing slash (`slash`): `/foo/*` matches `/foo/`
+ * with `""`, but not `/foo`, as in URLPattern.
+ */
+export function matchesZero(m: MethodData<unknown>, slash?: boolean): boolean {
+  const last = m.paramsMap![m.paramsMap!.length - 1];
+  return last[2] || (!!slash && (last[1] as string) < ":");
 }
 
 export function normalizePath(path: string): string {
@@ -231,10 +285,11 @@ export function splitPath(path: string): string[] {
 
 /**
  * Like `splitPath`, for route patterns: `/a//` and `/a/` canonicalize to `/a`,
- * and a `**` followed by more of its segment is `**` plus a `*` segment
- * (`/**.md` is `/**\/*.md`: any path ending in a `.md` segment). A `{` or `}`
- * right after the `**` is group syntax, not part of the segment (before group
- * expansion: `/a/**{.md}?` is `/a/**` or `/a/**.md`, never `/a/**\/*`).
+ * and a `**` followed by more of its segment reads like a `*` there, as in
+ * URLPattern (`/**.md` is `/*.md`: any path ending in `.md`, one capture; a
+ * third `*` is a second catch-all, `/***` is `/**\/*`). A `{` or `}` right
+ * after the `**` is group syntax, not part of the segment (before group
+ * expansion: `/a/**{.md}?` is `/a/**` or `/a/**.md`).
  */
 export function splitRoute(path: string): string[] {
   const s = splitPath(path);
@@ -242,7 +297,7 @@ export function splitRoute(path: string): string[] {
   if (path.includes("**")) {
     for (let i = 0; i < s.length; i++) {
       if (/^\*\*[^:{}]/.test(s[i])) {
-        s.splice(i, 1, "**", s[i].slice(1));
+        s.splice(i, 1, ...(s[i][2] === "*" ? ["**", s[i].slice(2)] : [s[i].slice(1)]));
       }
     }
   }
@@ -289,6 +344,19 @@ export function methodEntries<T>(
   return own && any ? any.concat(own) : own || any;
 }
 
+/**
+ * A `*` inside a segment is split around a `**` (see `splitStar`): the pieces
+ * after its first one (`join`) add theirs after a `/`.
+ */
+function setParam(
+  params: Record<string, string>,
+  key: string,
+  value: string,
+  join?: boolean,
+): void {
+  params[key] = join && params[key] !== undefined ? params[key] + "/" + value : value;
+}
+
 export function getMatchParams(
   segments: string[],
   paramsMap: ParamsIndexMap,
@@ -297,25 +365,26 @@ export function getMatchParams(
   const params = new NullProtoObj();
   // Segments after a `**` are counted from the end of the path
   const end = suffix ? segments.length - suffix[1] : segments.length;
-  for (const [index, name, optional] of paramsMap) {
-    // A `**` (`~index` is where it starts; negative for the other params)
-    // over zero segments is unset: only a bare one matches there
-    if (~index >= end) continue;
+  for (const [index, name, optional, , join] of paramsMap) {
+    // A bare `**` (`~index` is where it starts; negative for the other
+    // params) over zero segments is unset; a `*` there (after a trailing
+    // slash) is `""`
+    if (optional && ~index >= end) continue;
     const segment =
       index < 0
         ? segments.slice(~index, end).join("/")
         : segments[suffix && index > suffix[0] ? index - suffix[0] - 1 + end : index];
     if (typeof name === "string") {
-      params[name] = segment;
+      setParam(params, name, segment, join);
       // A bare `**` is also `_` (deprecated alias, 0.x compatibility)
-      if (index < 0 && optional) params._ = segment;
+      if (index < 0 && optional && !join) params._ = segment;
     } else {
       const match = segment.match(name);
       if (match) {
         for (const key in match.groups) {
           // An absent optional (`*-:x?`) has no key
           if (match.groups[key] !== undefined) {
-            params[fromGroupName(key)] = match.groups[key];
+            setParam(params, fromGroupName(key), match.groups[key], join);
           }
         }
       }

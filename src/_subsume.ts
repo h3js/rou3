@@ -12,6 +12,20 @@ import type { RouteShape } from "./_overlap.ts";
  * undecidable in general).
  */
 export function shapeSubsumes(a: RouteShape, b: RouteShape): boolean {
+  // `b`'s paths after a trailing slash with no tail segment (a trailing `*`'s
+  // `""`), which `a` matches with no tail segment too, or as a `*` does there
+  if (
+    b.slash &&
+    !shapeSubsumes(a.slash ? withZeroTail(a) : a, {
+      ...b,
+      tailMin: 0,
+      tailMax: 0,
+      slash: undefined,
+    })
+  ) {
+    return false;
+  }
+  // The other paths: a `*`'s tail takes a segment or more there
   if (a.suffix || b.suffix || a.some || b.some) {
     // Every length of `b` must be one of `a`'s, and at each (up to the one
     // that stands for all longer ones) `a` must cover `b` position by position.
@@ -69,12 +83,19 @@ export function mergeShapes(shapes: RouteShape[]): RouteShape[] {
         a.some = _someTail(a) && _someTail(b) ? true : undefined;
         a.tailMin = Math.min(a.tailMin, b.tailMin);
         a.tailMax = Math.max(a.tailMax, b.tailMax);
+        // An empty tail after a trailing slash only, unless the other has one
+        a.slash = (a.slash || b.slash) && a.tailMin > 0 ? true : undefined;
         shapes.splice(j, 1);
         j = i; // Restart: the widened range may absorb earlier-skipped shapes.
       }
     }
   }
   return shapes;
+}
+
+/** `shape` matching no tail segment too (its paths after a trailing slash). */
+export function withZeroTail(shape: RouteShape): RouteShape {
+  return { ...shape, tailMin: 0, slash: undefined };
 }
 
 /** Shortest path (in segments) a shape matches. */

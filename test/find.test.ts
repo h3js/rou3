@@ -42,8 +42,7 @@ describe("route matching", () => {
           │       │       ├── /bar
           │       │       │       ├── /qux ┈> [GET] /test/foo/bar/qux
           │       │       ├── /baz ┈> [GET] /test/foo/baz
-          │       │       ├── /* ┈> [GET] /test/foo/*
-          │       │       ├── /** ┈> [GET] /test/foo/**
+          │       │       ├── /** ┈> [GET] /test/foo/* + /test/foo/**
           │       ├── /fooo ┈> [GET] /test/fooo
           │       ├── /* ┈> [GET] /test/:id
           │       │       ├── /y ┈> [GET] /test/:idY/y
@@ -118,11 +117,13 @@ describe("route matching", () => {
         data: { path: "/test/foo/*" },
         params: { "0": "123" },
       });
-      // Wildcard
+      // Wildcard (a `*` takes several segments too, and outweighs `**`)
       expect(match("GET", "/test/foo/123/456")).toMatchObject({
-        data: { path: "/test/foo/**" },
+        data: { path: "/test/foo/*" },
         params: { "0": "123/456" },
       });
+      // (`/test/foo/` is `/test/foo`'s: the static route comes first)
+      expect(match("GET", "/test/foo/")).toEqual({ data: { path: "/test/foo" } });
       expect(match("GET", "/wildcard/foo")).toMatchObject({
         data: { path: "/wildcard/**" },
         params: { "0": "foo" },
@@ -398,7 +399,8 @@ describe("params sharing a segment (URLPattern)", () => {
 
 // A `?` param sharing its segment splits it like URLPattern's single regex
 // (a greedy capture before it takes what it can), in every matcher and in
-// `routeToRegExp`. One segment only: URLPattern's `*` spans `/`.
+// `routeToRegExp`, and a `*` spans `/` as there (rou3 ignores one trailing
+// slash, so no path ends in one here).
 describe.skipIf(typeof (globalThis as any).URLPattern !== "function")(
   "params sharing a segment with an optional one (URLPattern parity)",
   () => {
@@ -415,14 +417,14 @@ describe.skipIf(typeof (globalThis as any).URLPattern !== "function")(
       "/:a([a-z]+)-:b([a-z1]+)?",
       "/pre-:x?",
       "/pre-:x(\\d+)?",
-      "/*-*-:x?",
+      "/(\\d+)-*-:x?",
       "/*:x?",
     ];
-    const chars = ["a", "1", "-", "."];
+    const chars = ["a", "1", "-", ".", "/"];
     const paths: string[] = [];
     // URLPattern resolves `.` / `..` segments
     const grow = (s: string) => {
-      if (s && s !== "." && s !== "..") paths.push(`/${s}`);
+      if (s && !/(^|\/)\.\.?(\/|$)/.test(s) && !s.endsWith("/")) paths.push(`/${s}`);
       if (s.length < 4) for (const c of chars) grow(s + c);
     };
     grow("");
@@ -880,10 +882,19 @@ describe("wildcard tail extraction (compiled parity)", () => {
         data: { path: "PRE" },
         params: { x: "v", rest: "a/b" },
       });
-      // trailing bare `*` matches zero segments: the key is present, the value undefined
-      const segment = match("GET", "/segment");
-      expect(segment).toMatchObject({ data: { path: "SEGMENT" } });
-      expect(segment?.params).toHaveProperty("0", undefined);
+      // a trailing `*` takes one segment or more, or none after the trailing
+      // slash (`""`)
+      expect(match("GET", "/segment")).toBeUndefined();
+      expect(match("GET", "/segment/")).toEqual({ data: { path: "SEGMENT" }, params: { 0: "" } });
+      expect(match("GET", "/segment//")).toEqual({ data: { path: "SEGMENT" }, params: { 0: "" } });
+      expect(match("GET", "/segment/a/b")).toEqual({
+        data: { path: "SEGMENT" },
+        params: { 0: "a/b" },
+      });
+      expect(match("GET", "/segment/a//")).toEqual({
+        data: { path: "SEGMENT" },
+        params: { 0: "a/" },
+      });
     });
   }
 });
@@ -1054,7 +1065,7 @@ describe("same-node sibling selection (findRoute/compiled parity)", () => {
   addRoute(router, "GET", "/w/**:rest", { path: "/w/**:rest" });
   // regex fail must fall through to the optional/wildcard sibling, not abort
   addRoute(router, "GET", "/:y(\\d+)", { path: "/:y(\\d+)" });
-  addRoute(router, "GET", "/*/*", { path: "/*/*" });
+  addRoute(router, "GET", "/*", { path: "/*" });
   addRoute(router, "GET", "/x/:id(\\d+)", { path: "/x/:id(\\d+)" });
   addRoute(router, "GET", "/x/**", { path: "/x/**" });
   // equal-weight regex siblings at different depths: first-registered wins
@@ -1077,7 +1088,8 @@ describe("same-node sibling selection (findRoute/compiled parity)", () => {
         data: { path: "/t/:id" },
         params: { id: "v" },
       });
-      expect(match("GET", "/t")).toMatchObject({ data: { path: "/t/*" } });
+      // (a `*` is a catch-all: on `/t/` it takes nothing after the slash)
+      expect(match("GET", "/t/")).toMatchObject({ data: { path: "/t/*" } });
       expect(match("GET", "/w/v")).toMatchObject({
         data: { path: "/w/**:rest" },
         params: { rest: "v" },
@@ -1087,7 +1099,7 @@ describe("same-node sibling selection (findRoute/compiled parity)", () => {
 
     it(`regex miss falls through to the less specific sibling (${name})`, () => {
       expect(match("GET", "/a")).toMatchObject({
-        data: { path: "/*/*" },
+        data: { path: "/*" },
         params: { "0": "a" },
       });
       expect(match("GET", "/7")).toMatchObject({
@@ -1120,14 +1132,17 @@ describe("same-node sibling selection (findRoute/compiled parity)", () => {
 });
 
 describe("end-of-path optional fallback with mixed same-node siblings", () => {
-  // One param/wildcard node can hold both required (`:id`, `**:name`) and
-  // optional (`*`, `**`) routes for the same method. The end-of-path fallback
-  // must scan all entries, not just the first-inserted one.
+  // One wildcard node can hold routes that need a segment (`**:name`, `*`)
+  // and ones that don't (`**`; a `*` after a trailing slash) for the same
+  // method. The end-of-path fallback must scan all entries, not just the
+  // first-inserted one.
   const router = createEmptyRouter<{ path: string }>();
   addRoute(router, "GET", "/p/:id", { path: "P-REQUIRED" });
   addRoute(router, "GET", "/p/*", { path: "P-OPTIONAL" });
   addRoute(router, "GET", "/w/**:name", { path: "W-REQUIRED" });
   addRoute(router, "GET", "/w/**", { path: "W-OPTIONAL" });
+  addRoute(router, "GET", "/v/**:name", { path: "V-REQUIRED" });
+  addRoute(router, "GET", "/v/*", { path: "V-OPTIONAL" });
   const compiledLookup = compileRouter(router);
 
   const lookups = [
@@ -1137,10 +1152,16 @@ describe("end-of-path optional fallback with mixed same-node siblings", () => {
 
   for (const { name, match } of lookups) {
     it(`optional sibling matches even when a required one was inserted first (${name})`, () => {
-      expect(match("GET", "/p")).toMatchObject({ data: { path: "P-OPTIONAL" } });
+      expect(match("GET", "/p")).toBeUndefined();
+      expect(match("GET", "/p/")).toMatchObject({ data: { path: "P-OPTIONAL" } });
       expect(match("GET", "/w")).toMatchObject({ data: { path: "W-OPTIONAL" } });
       expect(match("GET", "/p/1")).toMatchObject({ data: { path: "P-REQUIRED" } });
+      expect(match("GET", "/p/1/2")).toMatchObject({ data: { path: "P-OPTIONAL" } });
       expect(match("GET", "/w/1")).toMatchObject({ data: { path: "W-REQUIRED" } });
+      expect(match("GET", "/v")).toBeUndefined();
+      expect(match("GET", "/v/")).toMatchObject({ data: { path: "V-OPTIONAL" } });
+      expect(match("GET", "/v//")).toMatchObject({ data: { path: "V-OPTIONAL" } });
+      expect(match("GET", "/v/1")).toMatchObject({ data: { path: "V-REQUIRED" } });
     });
   }
 });
@@ -1410,14 +1431,15 @@ describe("bare `**` capture (URLPattern)", () => {
     ["/a/**/b", "/a/x/y/b", { 0: "x/y", _: "x/y" }],
     ["/**/_payload.json", "/_payload.json", {}],
     ["/**/_payload.json", "/a/b/_payload.json", { 0: "a/b", _: "a/b" }],
-    ["/*/x/**", "/a/x/b/c", { 0: "a", 1: "b/c", _: "b/c" }],
-    ["/*/x/**", "/a/x", { 0: "a" }],
+    ["/:p/x/**", "/a/x/b/c", { p: "a", 0: "b/c", _: "b/c" }],
+    ["/:p/x/**", "/a/x", { p: "a" }],
     ["/(\\d+)/**", "/1/b/c", { 0: "1", 1: "b/c", _: "b/c" }],
-    ["/file-*/**", "/file-a/b", { 0: "a", 1: "b", _: "b" }, true],
-    ["/**/*", "/a/b", { 0: "a", 1: "b", _: "a" }],
-    ["/**/*", "/a", { 1: "a" }],
-    ["/**/*.png", "/a/b/x.png", { 0: "a/b", 1: "x", _: "a/b" }],
-    ["/**.md", "/docs/intro.md", { 0: "docs", 1: "intro", _: "docs" }, true],
+    ["/file-:f/**", "/file-a/b", { f: "a", 0: "b", _: "b" }],
+    ["/**/:f", "/a/b", { 0: "a", _: "a", f: "b" }],
+    ["/**/:f", "/a", { f: "a" }],
+    ["/**/:f.png", "/a/b/x.png", { 0: "a/b", _: "a/b", f: "x" }],
+    // `**<rest>` reads like `*<rest>`: one capture, no `_` alias
+    ["/**.md", "/docs/intro.md", { 0: "docs/intro" }],
     ["/:id/**", "/a/b", { id: "a", 0: "b", _: "b" }],
     ["/:id/**", "/a", { id: "a" }],
     // A param named `_` without a bare `**` is an ordinary name
@@ -1511,24 +1533,25 @@ describe("unnamed captures are numbered over the whole pattern", () => {
     ["/a{/(\\d+)}?/**", "/a/1/y", { 0: "1", 1: "y", _: "y" }, "same"],
     ["/x{(\\d+)}?/*", "/x/b", { 1: "b" }, "same"],
     ["/x{(\\d+)}?/*", "/x1/b", { 0: "1", 1: "b" }, "same"],
-    ["/a{-*}?/*", "/a/y", { 1: "y" }, "same"],
-    ["/a{-*}?/*", "/a-x/y", { 0: "x", 1: "y" }, "same"],
+    ["/a{-(\\d+)}?/*", "/a/y", { 1: "y" }, "same"],
+    ["/a{-(\\d+)}?/*", "/a-1/y/z", { 0: "1", 1: "y/z" }, "same"],
+    ["/a{/(\\d+)}?/*", "/a/x/y", { 1: "x/y" }, "same"],
+    ["/a{/(\\d+)}?/*", "/a/1/y", { 0: "1", 1: "y" }, "same"],
     ["/a{/*}?/(\\d+)", "/a/1", { 1: "1" }, "same"],
     ["/a{/*}?/(\\d+)", "/a/x/1", { 0: "x", 1: "1" }, "same"],
     ["/{(\\d+)}?/a/**", "/1/a/b", { 0: "1", 1: "b", _: "b" }, "same"],
     ["/{(\\d+)}?/a/**", "//a/b", { 1: "b", _: "b" }, "same"],
     ["/**/{(\\d+)}?", "/a/1", { 0: "a", 1: "1", _: "a" }, "same"],
     ["/**/{b}?", "/a/b", { 0: "a", _: "a" }, "same"],
-    ["/**/*-:x?", "/a/b-c", { 0: "a", 1: "b", x: "c", _: "a" }, "same"],
-    ["/**/*-:x?", "/a/b-", { 0: "a", 1: "b", _: "a" }, "same"],
+    ["/**/(\\d+)-:x?", "/a/1-c", { 0: "a", 1: "1", x: "c", _: "a" }, "same"],
+    ["/**/(\\d+)-:x?", "/a/1-", { 0: "a", 1: "1", _: "a" }, "same"],
     ["/a{/:x}?/*", "/a/b/c", { x: "b", 0: "c" }, "same"],
-    ["/a{/**}?/*.png", "/a/x.png", { 1: "x" }, "invalid"],
-    ["/a{/**}?/*.png", "/a/b/x.png", { 0: "b", 1: "x", _: "b" }, "invalid"],
-    ["/a{/**}?/*", "/a/x", { 1: "x" }, "invalid"],
+    ["/a{/**}?/(\\d+).png", "/a/1.png", { 1: "1" }, "invalid"],
+    ["/a{/**}?/(\\d+).png", "/a/b/1.png", { 0: "b", 1: "1", _: "b" }, "invalid"],
     ["/{/**}?/(\\d+)", "//1", { 1: "1" }, "invalid"],
     ["/{/**}?/(\\d+)", "//b/1", { 0: "b", 1: "1", _: "b" }, "invalid"],
-    ["/a{/**}?/*-:x?", "/a/b-c", { 1: "b", x: "c" }, "invalid"],
-    ["/a{/**}?/*-:x?", "/a/z/b-c", { 0: "z", 1: "b", x: "c", _: "z" }, "invalid"],
+    ["/a{/**}?/(\\d+)-:x?", "/a/1-c", { 1: "1", x: "c" }, "invalid"],
+    ["/a{/**}?/(\\d+)-:x?", "/a/z/1-c", { 0: "z", 1: "1", x: "c", _: "z" }, "invalid"],
   ];
 
   for (const [route, path, params] of cases) {
@@ -1560,11 +1583,11 @@ describe("unnamed captures are numbered over the whole pattern", () => {
 
   it("gives a capture one key in every route a pattern registers", () => {
     const router = createEmptyRouter<string>();
-    addRoute(router, "GET", "/a{/**}?/*.png", "png");
+    addRoute(router, "GET", "/a{/**}?/(\\d+).png", "png");
     // Both routes match (the `**` over zero segments), the file is `1` in each
-    expect(findAllRoutes(router, "GET", "/a/x.png").map((m) => ({ ...m.params }))).toEqual([
-      { 1: "x" },
-      { 1: "x" },
+    expect(findAllRoutes(router, "GET", "/a/1.png").map((m) => ({ ...m.params }))).toEqual([
+      { 1: "1" },
+      { 1: "1" },
     ]);
   });
 

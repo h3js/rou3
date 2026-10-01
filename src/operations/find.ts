@@ -1,7 +1,7 @@
 import type { RouterContext, MatchedRoute, Node, MethodData } from "../types.ts";
 import { _findRanked } from "./find-all.ts";
 import { hasSuffixMatch } from "./_suffix.ts";
-import { getMatchParams, normalizePath, splitPath } from "./_utils.ts";
+import { getMatchParams, matchesZero, normalizePath, splitPath } from "./_utils.ts";
 
 /**
  * Find a route by path.
@@ -15,7 +15,10 @@ export function findRoute<T = unknown>(
   if (opts?.normalize) {
     path = normalizePath(path);
   }
-  if (path.charCodeAt(path.length - 1) === 47 /* '/' */) {
+  // One trailing slash is ignored, except by a trailing `*`, which it gives
+  // an empty capture (see `matchesZero`)
+  const slash = path.charCodeAt(path.length - 1) === 47; /* '/' */
+  if (slash) {
     path = path.slice(0, -1);
   }
 
@@ -41,10 +44,10 @@ export function findRoute<T = unknown>(
     segments.includes("") ||
     (ctx.root.hasSuffix && hasSuffixMatch(ctx.root, method, segments, 0))
   ) {
-    const matches = _findRanked(ctx, method, segments, true);
+    const matches = _findRanked(ctx, method, segments, slash, true);
     match = matches[matches.length - 1];
   } else {
-    match = _lookupTree<T>(ctx.root, method, segments, 0);
+    match = _lookupTree<T>(ctx.root, method, segments, 0, slash);
   }
 
   if (match === undefined) {
@@ -66,22 +69,21 @@ function _lookupTree<T>(
   method: string,
   segments: string[],
   index: number,
+  slash: boolean,
 ): MethodData<T> | undefined {
   // 0. End of path
   if (index === segments.length) {
     if (node.methods) {
-      const match = _selectMatcher(node.methods, method, segments, node.key === "*", false);
+      const match = _selectMatcher(node.methods, method, segments);
       if (match) {
         return match;
       }
     }
-    // Fallback to dynamic for last child (/test and /test/ matches /test/*)
-    return (
-      (node.param?.methods && _selectMatcher(node.param.methods, method, segments, true, true)) ||
-      (node.wildcard?.methods &&
-        _selectMatcher(node.wildcard.methods, method, segments, true, true)) ||
-      undefined
-    );
+    // A catch-all over zero segments (`/test` matches `/test/**`, `/test/`
+    // also `/test/*`)
+    return node.wildcard?.methods
+      ? _selectMatcher(node.wildcard.methods, method, segments, true, slash)
+      : undefined;
   }
 
   const segment = segments[index];
@@ -90,7 +92,7 @@ function _lookupTree<T>(
   if (node.static) {
     const staticChild = node.static[segment];
     if (staticChild) {
-      const match = _lookupTree(staticChild, method, segments, index + 1);
+      const match = _lookupTree(staticChild, method, segments, index + 1, slash);
       if (match) {
         return match;
       }
@@ -99,7 +101,7 @@ function _lookupTree<T>(
 
   // 2. Param
   if (node.param) {
-    const match = _lookupTree(node.param, method, segments, index + 1);
+    const match = _lookupTree(node.param, method, segments, index + 1, slash);
     if (match) {
       return match;
     }
@@ -107,7 +109,7 @@ function _lookupTree<T>(
 
   // 3. Wildcard
   if (node.wildcard && node.wildcard.methods) {
-    return _selectMatcher(node.wildcard.methods, method, segments, true, false);
+    return _selectMatcher(node.wildcard.methods, method, segments);
   }
 
   // No match
@@ -119,26 +121,27 @@ function _lookupTree<T>(
  * weight among fully-matching entries wins, ties resolve to the
  * first-registered (so duplicate registrations return the first). Weight is
  * the same model as `pushSorted` in find-all.ts and the compiled matcher: one
- * point per passing regex-constrained param, plus one for a required last
- * param on a `dynamicTerminal` (param/wildcard node). An entry whose regex
- * fails is skipped entirely, so lookup falls through to less specific
- * siblings or other node kinds instead of aborting.
+ * point per passing regex-constrained param, plus one or two for a required
+ * last param (see `pushSorted`). An entry whose regex fails is skipped
+ * entirely, so lookup falls through to less specific siblings or other node
+ * kinds instead of aborting.
  *
  * The method's entries and the method-agnostic (`""`) ones are siblings: a
  * `""` entry is chosen when it is strictly more specific, or when no entry of
  * the method fully matches (a method-scoped entry never hides it). On equal
  * weight the method-scoped entry wins.
  *
- * `optionalOnly` implements the end-of-path fallback: one param/wildcard node
- * can hold both required (`:id`, `**:name`) and optional (`*`, `**`) routes,
- * in any insertion order — only the optional ones match zero segments.
+ * `optionalOnly` implements the end-of-path fallback: one wildcard node can
+ * hold routes that need a segment (`**:name`, `*`) and ones that don't (`**`)
+ * in any insertion order — only those match zero segments (a `*` after a
+ * trailing slash, `slash`: see `matchesZero`).
  */
 function _selectMatcher<T>(
   methods: Record<string, MethodData<T>[] | undefined>,
   method: string,
   segments: string[],
-  dynamicTerminal: boolean,
-  optionalOnly: boolean,
+  optionalOnly?: boolean,
+  slash?: boolean,
 ): MethodData<T> | undefined {
   let any = methods[""];
   const match = methods[method] || any;
@@ -152,11 +155,7 @@ function _selectMatcher<T>(
   // Fast path: a single sibling with no regex constraints (the common case)
   const first = match[0];
   if (!any && match.length === 1 && first.paramsRegexp.length === 0) {
-    if (!optionalOnly) {
-      return first;
-    }
-    const pMap = first.paramsMap;
-    return pMap?.[pMap.length - 1]?.[2] /* optional */ ? first : undefined;
+    return !optionalOnly || matchesZero(first, slash) ? first : undefined;
   }
   let best: MethodData<T> | undefined;
   let bestWeight = -1;
@@ -165,14 +164,15 @@ function _selectMatcher<T>(
   let list: MethodData<T>[] | undefined = match;
   for (; list; list = list === any ? undefined : any) {
     for (const m of list) {
-      const pMap = m.paramsMap;
-      const lastOptional = pMap?.[pMap.length - 1]?.[2];
-      if (optionalOnly && !lastOptional) {
+      const last = m.paramsMap?.[m.paramsMap.length - 1];
+      if (optionalOnly && !matchesZero(m, slash)) {
         continue;
       }
-      // Required last param on a dynamic terminal weighs one point; a failed
-      // regex drops the entry below any candidate (bestWeight starts at -1)
-      let weight = dynamicTerminal && pMap && !lastOptional ? 1 : 0;
+      // A required last param weighs one point, two unless it may be empty
+      // (only a wildcard node's differ: a `*` weighs less than a `**:name`,
+      // `**` none); a failed regex drops the entry below any candidate
+      // (bestWeight starts at -1)
+      let weight = last && !last[2] ? (last[3] ? 1 : 2) : 0;
       const regexps = m.paramsRegexp;
       for (let i = 0; i < regexps.length; i++) {
         if (regexps[i]) {

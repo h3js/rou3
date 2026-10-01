@@ -223,25 +223,16 @@ const diffs = <T>(entries: Record<string, T>) => new Map(Object.entries(entries)
 // result, so any change in what rou3 returns fails: update the entry, or drop
 // it once rou3 agrees with URLPattern.
 const KNOWN_DIFFS = diffs<Result | Split>({
-  // `*` catch-all vs single-segment — URLPattern `*` = `(.*)`, rou3 `*` = `([^/]*)`
-  "/foo/* → /foo/bar/baz [match]": null,
-
   // Trailing slash — rou3 ignores at most one trailing slash, so `/foo/` is
-  // `/foo` (no empty last segment), and a trailing `*` is optional. URLPattern
-  // matches `/foo/` with an empty capture and rejects `/foo` for `/foo/*`.
+  // `/foo` (no empty last segment; only a trailing `*` takes nothing after
+  // it, as in URLPattern). URLPattern matches `/foo/` with an empty capture.
   // routeToRegExp reproduces the router here (#200).
   "/foo/(.*) → /foo/ [match]": null,
-  "/foo/* → /foo/ [match]": { "0": undefined },
-  "/foo/* → /foo [no match]": { "0": undefined },
   "/foo/:bar(.*) → /foo/ [match]": null,
 
   // Trailing slash after `**`: `/foo/` is `/foo`, zero segments, where the
   // `**` is unset (URLPattern: an empty capture)
   "/foo/** → /foo/ [match]": split({ "0": undefined }, {}),
-
-  // Relative inputs — rou3's regex is anchored at `/` (the router skips them)
-  "*/* → foo/bar [match]": null,
-  "*/{*} → foo/bar [match]": null,
 
   // Patterns without leading `/` — rou3 always prefixes `/` in regex
   ":name → foobar [match]": null,
@@ -296,6 +287,10 @@ const KNOWN_DIFFS = diffs<Result | Split>({
 // different meaning (modifiers on `*` / an unnamed group, group repetition,
 // a `/` or a capturing group in a constraint, a `\/`, Unicode param names).
 const RESERVED_PATTERNS = new Set([
+  // Two catch-alls (`*`, `**`, `:x+`, `:x*`): rou3 allows one per route
+  "*/*",
+  "*/{*}",
+  "*//*",
   "/foo/(.*)?",
   "/foo/*?",
   "/foo/(.*)+",

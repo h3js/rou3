@@ -35,9 +35,9 @@ describe("find-matchAll: basic", () => {
           ├── /foo ┈> [GET] /foo
           │       ├── /bar ┈> [GET] /foo/bar
           │       │       ├── /baz ┈> [GET] /foo/bar/baz
-          │       ├── /*
-          │       │       ├── /baz ┈> [GET] /foo/*/baz
           │       ├── /** ┈> [GET] /foo/**
+          │       │       ├── <suffix>
+          │       │       │       ├── /baz ┈> [GET] /foo/*/baz
           ├── /** ┈> [GET] /**"
     `);
   });
@@ -91,9 +91,9 @@ describe("matcher: complex", () => {
           │       ├── /bar ┈> [GET] /foo/bar
           │       ├── /baz ┈> [GET] /foo/baz
           │       │       ├── /** ┈> [GET] /foo/baz/**
-          │       ├── /* ┈> [GET] /foo/*
-          │       │       ├── /sub ┈> [GET] /foo/*/sub
-          │       ├── /** ┈> [GET] /foo/**
+          │       ├── /** ┈> [GET] /foo/* + /foo/**
+          │       │       ├── <suffix>
+          │       │       │       ├── /sub ┈> [GET] /foo/*/sub
           ├── /without-trailing ┈> [GET] /without-trailing
           ├── /with-trailing ┈> [GET] /with-trailing/
           ├── /c
@@ -111,7 +111,6 @@ describe("matcher: complex", () => {
     expect(_findAllRoutes(router, "GET", "/foo")).to.toMatchInlineSnapshot(`
       [
         "/foo/**",
-        "/foo/*",
         "/foo",
       ]
     `);
@@ -131,11 +130,12 @@ describe("matcher: complex", () => {
         ]
       `);
     expect(_findAllRoutes(router, "GET", "/foo/123/sub")).to.toMatchInlineSnapshot(`
-        [
-          "/foo/**",
-          "/foo/*/sub",
-        ]
-      `);
+      [
+        "/foo/**",
+        "/foo/*",
+        "/foo/*/sub",
+      ]
+    `);
     expect(_findAllRoutes(router, "GET", "/foo/123")).to.toMatchInlineSnapshot(`
         [
           "/foo/**",
@@ -199,8 +199,7 @@ describe("matcher: order", () => {
       "<root>
           ├── /hello ┈> [GET] /hello
           │       ├── /world ┈> [GET] /hello/world
-          │       ├── /* ┈> [GET] /hello/*
-          │       ├── /** ┈> [GET] /hello/**"
+          │       ├── /** ┈> [GET] /hello/* + /hello/**"
     `);
   });
 
@@ -209,7 +208,6 @@ describe("matcher: order", () => {
     expect(matches).to.toMatchInlineSnapshot(`
       [
         "/hello/**",
-        "/hello/*",
         "/hello",
       ]
     `);
@@ -231,6 +229,7 @@ describe("matcher: order", () => {
     expect(matches).to.toMatchInlineSnapshot(`
       [
         "/hello/**",
+        "/hello/*",
       ]
     `);
   });
@@ -355,30 +354,30 @@ describe("matcher: ordering contract: optional-syntax carve-out", () => {
 
   it("A2: same node — no provable instance, `:x*` doesn't contain `**`", () => {
     // `:path*` is `**:path` (needs a value) plus the route without it, so it
-    // misses `/api/v1//`, which `**` takes: no superset, and the tree order
-    // (weight: `**:path` is narrower) contradicts no `compareRoutes` claim.
-    expect(compareRoutes("/api/*/:path*", "/api/*/**")).toBe("partial");
+    // misses `/api/v1//`, which `**` takes: a subset, and the tree order
+    // (weight: `**:path` is narrower) agrees with it.
+    expect(compareRoutes("/api/:v/:path*", "/api/:v/**")).toBe("subset");
     for (const routes of [
-      ["/api/*/:path*", "/api/*/**"],
-      ["/api/*/**", "/api/*/:path*"],
+      ["/api/:v/:path*", "/api/:v/**"],
+      ["/api/:v/**", "/api/:v/:path*"],
     ]) {
       expect(_findAllRoutes(createRouter(routes), "GET", "/api/v1/x")).toEqual([
-        "/api/*/**",
-        "/api/*/:path*",
+        "/api/:v/**",
+        "/api/:v/:path*",
       ]);
     }
   });
 
   it("A3: matched entries in different nodes, traversal order decides (both orders)", () => {
-    // `/p/:id{/**}?` matches `/p/a` twice: through `/p/:id/**` (a child,
+    // `/p/:id{/**}?` matches `/p/a/` twice: through `/p/:id/**` (a child,
     // first) and `/p/:id` (the node itself, after the `*` child of
-    // `/p/:id/*`).
+    // `/p/:id/*`, which takes nothing after the trailing slash).
     expect(compareRoutes("/p/:id{/**}?", "/p/:id/*")).toBe("superset");
     for (const routes of [
       ["/p/:id{/**}?", "/p/:id/*"],
       ["/p/:id/*", "/p/:id{/**}?"],
     ]) {
-      expect(_findAllRoutes(createRouter(routes), "GET", "/p/a")).toEqual([
+      expect(_findAllRoutes(createRouter(routes), "GET", "/p/a/")).toEqual([
         "/p/:id{/**}?",
         "/p/:id/*",
         "/p/:id{/**}?",
@@ -417,25 +416,29 @@ describe("matcher: required params need a value", () => {
   ]);
 
   it("leaves out `:name` / `:name+` / `:name*` / `**:name` on an empty value", () => {
+    // On their node: `**` (none or more), then `*` (one or more, may be
+    // empty), then `**:rest` / `:y*` (need a value)
     expect(_findAllRoutes(router, "GET", "/a//")).toEqual(["/a/**", "/a/*", "/a/:id(\\d*)"]);
     expect(_findAllRoutes(router, "GET", "/a/1")).toEqual([
       "/**/:file",
       "/a/**",
+      "/a/*",
       "/a/**:rest",
       "/a/:y*",
-      "/a/*",
       "/a/:x",
       "/a/:id(\\d*)",
     ]);
     expect(_findAllRoutes(router, "GET", "/a//b")).toEqual([
       "/**/:file",
       "/a/**",
+      "/a/*",
       "/a/**:rest",
       "/a/:y*",
     ]);
     expect(_findAllRoutes(router, "GET", "/a///b")).toEqual([
       "/**/:file",
       "/a/**",
+      "/a/*",
       "/a/**:rest",
       "/a/:y*",
       "/a/:z+/b",
@@ -443,6 +446,7 @@ describe("matcher: required params need a value", () => {
     expect(_findAllRoutes(router, "GET", "/a//c")).toEqual([
       "/**/:file",
       "/a/**",
+      "/a/*",
       "/a/**:rest",
       "/a/:y*",
       "/**/c",
@@ -532,16 +536,17 @@ describe("matcher: regression #184", () => {
     expect(_findAllRoutes(router, "GET", "/42/x")).toEqual(["/(\\d+)/**"]);
   });
 
-  it("optional & required routes on one param node filter per entry", () => {
-    // A single param node can hold both an optional `*` and a required
-    // `:id`/`:id(\d+)` route; the end-of-path branch must filter each entry.
-    expect(_findAllRoutes(createRouter(["/foo/*", "/foo/:id"]), "GET", "/foo")).toEqual(["/foo/*"]);
-    // Reverse insertion order (required registered first) must still match `*`.
-    expect(_findAllRoutes(createRouter(["/foo/:id", "/foo/*"]), "GET", "/foo")).toEqual(["/foo/*"]);
-    // A required regex sibling must not be pushed (previously crashed in getMatchParams).
-    expect(_findAllRoutes(createRouter(["/foo/*", "/foo/:id(\\d+)"]), "GET", "/foo")).toEqual([
-      "/foo/*",
-    ]);
+  it("a `*` and required params on `/foo` take a segment, the `*` none after a slash", () => {
+    // A `*` is a catch-all on the wildcard node, a `:id` a param node: at the
+    // end of the path only the `*` can match (after the trailing slash).
+    for (const routes of [
+      ["/foo/*", "/foo/:id"],
+      ["/foo/:id", "/foo/*"],
+      ["/foo/*", "/foo/:id(\\d+)"],
+    ]) {
+      expect(_findAllRoutes(createRouter(routes), "GET", "/foo")).toEqual([]);
+      expect(_findAllRoutes(createRouter(routes), "GET", "/foo/")).toEqual(["/foo/*"]);
+    }
   });
 
   // Regression #186: the optional-`**` presence guard (`l>currentIdx-1`) must
@@ -600,7 +605,8 @@ describe("matcher: out-of-bounds segment vs literal 'undefined' key", () => {
     expect(_findAllRoutes(router, "GET", "/")).toEqual([]);
     expect(_findAllRoutes(router, "GET", "/w1")).toEqual(["/w1"]);
     // a real "undefined" segment still matches normally
-    expect(_findAllRoutes(router, "GET", "/undefined")).toEqual(["/undefined/*"]);
+    expect(_findAllRoutes(router, "GET", "/undefined")).toEqual([]);
+    expect(_findAllRoutes(router, "GET", "/undefined/")).toEqual(["/undefined/*"]);
     expect(_findAllRoutes(router, "GET", "/w1/undefined")).toEqual(["/w1/undefined/**"]);
   });
 });

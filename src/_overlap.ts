@@ -7,20 +7,26 @@ import {
   minLength,
   NON_EMPTY,
   stableLength,
+  withZeroTail,
 } from "./_subsume.ts";
 import type { MethodData, Node } from "./types.ts";
 
 /**
  * A canonical (fully expanded) route shape: fixed single-segment matchers
  * (`string` literal | `RegExp` constraint, `NON_EMPTY` for a `:name` |
- * `undefined` = any) followed by a variable-length tail. The tail (trailing
- * `*`, `**`, `**:name`) matches any segment values, so it only constrains the
- * total number of segments: trailing bare `*` -> `[0, 1]`, `**` ->
- * `[0, Infinity]`, `**:name` -> `[1, Infinity]`, no variable tail -> `[0, 0]`.
- * A `**:name` needs a value (`some`): a one-segment tail can't be `""`.
+ * `undefined` = any) followed by a variable-length tail. The tail (a
+ * catch-all: `*`, `**`, `**:name`) matches any segment values, so it only
+ * constrains the total number of segments: `**` -> `[0, Infinity]`, `*` and
+ * `**:name` -> `[1, Infinity]`, no variable tail -> `[0, 0]`. A `**:name`
+ * needs a value (`some`): a one-segment tail can't be `""`. A trailing `*`
+ * also matches no tail segment after a trailing slash (`slash`, see
+ * `matchesZero`): `/a/*` matches `/a/` but not `/a`, which a path of
+ * segments alone can't tell apart, so overlap reads its tail as `[0, …]`
+ * (`/a/` matches every route `/a` matches) and containment checks those
+ * paths on their own (see `shapeSubsumes`).
  *
- * Segments after a `**` form the `suffix`: fixed matchers aligned to the end
- * of the path, after the tail (`/**\/_payload.json` -> `[] [0, Infinity]
+ * Segments after a catch-all form the `suffix`: fixed matchers aligned to the
+ * end of the path, after the tail (`/**\/_payload.json` -> `[] [0, Infinity]
  * ["_payload.json"]`). Never empty when set.
  */
 export interface RouteShape {
@@ -29,6 +35,7 @@ export interface RouteShape {
   tailMax: number;
   suffix?: (string | RegExp | undefined)[];
   some?: true;
+  slash?: true;
 }
 
 /**
@@ -90,6 +97,10 @@ export function shapeOf(edges: Edge[], entry: MethodData): RouteShape {
  * so the value check is independent of the chosen length.
  */
 export function shapesOverlap(a: RouteShape, b: RouteShape): boolean {
+  // With a trailing slash, a path matches every route the path without it
+  // matches, and a `*`'s empty tail too
+  if (a.slash) a = withZeroTail(a);
+  if (b.slash) b = withZeroTail(b);
   if (a.suffix || b.suffix || a.some || b.some) {
     // Try every common length up to the one that stands for all longer ones
     const lo = Math.max(minLength(a), minLength(b));
@@ -193,6 +204,7 @@ function _computeShape(edges: Edge[], entry: MethodData): RouteShape {
   let tailMin = 0;
   let tailMax = 0;
   let some: true | undefined;
+  let slash: true | undefined;
   const pMap = entry.paramsMap;
   for (let d = 0; d < edges.length; d++) {
     const edge = edges[d];
@@ -201,49 +213,29 @@ function _computeShape(edges: Edge[], entry: MethodData): RouteShape {
       into.push(edge);
     } else if (edge === 1) {
       // `**` is optional, `**:name` (`:name+`, `:name*`) requires one segment
-      // with a value (see `emptyParam`). Segments after it are the suffix,
-      // aligned to the end of the path.
-      const optional = pMap!.find((e) => e[0] === -(d + 1))![2];
+      // with a value (see `emptyParam`), a `*` one segment (none, last, after
+      // a trailing slash: named by a digit, see `matchesZero`). Segments
+      // after it are the suffix, aligned to the end of the path.
+      const [, name, optional, empty] = pMap!.find((e) => e[0] === -(d + 1))!;
       tailMin = optional ? 0 : 1;
       tailMax = Number.POSITIVE_INFINITY;
-      if (!optional) some = true;
+      if (!optional && !empty) some = true;
       if (d < edges.length - 1) suffix = [];
-    } else if (pMap) {
-      // Param: classified by this entry's paramsMap entry at this segment index.
-      const p = pMap.find((e) => e[0] === d)!;
-      if (p[1] instanceof RegExp) {
-        into.push(p[1]);
-      } else if (p[2] /* bare `*` */ && d === edges.length - 1) {
-        // A trailing bare `*` matches zero-or-one segment; elsewhere exactly one.
-        tailMax = 1;
-      } else {
-        // A `:name` needs a value, a `*` (named by a digit) doesn't
-        into.push((p[1] as string) > ":" ? NON_EMPTY : undefined);
+      // (the root `/` always has the slash: `/*` is `/**`)
+      else if (!optional && (name as string) < ":") {
+        if (d > 0) slash = true;
+        else tailMin = 0;
       }
+    } else if (pMap) {
+      // Param: classified by this entry's paramsMap entry at this segment
+      // index. A `:name` needs a value.
+      const p = pMap.find((e) => e[0] === d)!;
+      into.push(p[1] instanceof RegExp ? p[1] : NON_EMPTY);
     }
   }
-  // Canonical form: trailing any-value matchers are equivalent to tail
-  // positions (both match exactly one arbitrary segment), so fold them into
-  // the tail. This is what lets `/a/*/**` compare equal to shapes reached
-  // through the tail model (`/a/**/*`). A `:name` needs a value (`NON_EMPTY`),
-  // and nothing folds into a `**:name`'s tail: it would move its first
-  // segment.
-  let f = fixed.length;
-  while (f > 0 && !some && fixed[f - 1] === undefined) f--;
-  if (f < fixed.length) {
-    tailMin += fixed.length - f;
-    tailMax += fixed.length - f;
-    fixed.length = f;
-  }
-  if (suffix) {
-    // Likewise for leading any-value matchers of the suffix (`/**\/:x/y` is
-    // `/**:x/y`); a suffix of them only (`/**\/:x`) is just a longer tail.
-    let s = 0;
-    while (s < suffix.length && !some && suffix[s] === undefined) s++;
-    tailMin += s;
-    if (s < suffix.length) return { fixed, tailMin, tailMax, suffix: suffix.slice(s), some };
-  }
-  return { fixed, tailMin, tailMax, some };
+  return suffix
+    ? { fixed, tailMin, tailMax, suffix, some }
+    : { fixed, tailMin, tailMax, some, slash };
 }
 
 /**

@@ -30,9 +30,9 @@ export function collectSuffix<T>(
     for (const m of match) {
       const w = m.suffix![0];
       let weight = 0;
-      for (const [index, , optional] of m.paramsMap!) {
+      for (const [index, , optional, empty] of m.paramsMap!) {
         if (index < 0 && !optional) {
-          weight = end > start ? 1 : -1;
+          weight = end > start ? (empty ? 1 : 2) : -1;
         }
       }
       const regexps = m.paramsRegexp;

@@ -1,6 +1,5 @@
 import { expandGroupDelimiters, scanFirstGroup } from "../_group-delimiters.ts";
 import { toGroupName, toUnnamedGroupKey } from "../_group-names.ts";
-import { replaceSegmentWildcards } from "../_segment-wildcards.ts";
 import { createRouter } from "../context.ts";
 import { NullProtoObj } from "../object.ts";
 import type { Node, RouterContext, ParamsIndexMap } from "../types.ts";
@@ -13,9 +12,11 @@ import {
   expandModifiers,
   invalidSyntax,
   MISPLACED_MODIFIER,
+  oneCatchAll,
   PARAM_MODIFIER,
   segmentKey,
   splitRoute,
+  splitStar,
 } from "./_utils.ts";
 
 /**
@@ -111,6 +112,51 @@ function _add<T>(
     return count;
   }
 
+  const star = path.includes("*");
+  // A `*` inside a segment: the routes the tree reads it as (see `splitStar`)
+  const split = star ? splitStar(segments, input) : undefined;
+  if (split) {
+    const [routes, join, head] = split;
+    if (routes.length > 1) route ??= expandedRouteId(path);
+    let count = 0;
+    for (const r of routes) {
+      count = _insert(
+        ctx,
+        method,
+        r,
+        data,
+        route,
+        input,
+        unnamed,
+        star,
+        r === segments ? -1 : join,
+        head,
+      );
+    }
+    return count;
+  }
+  return _insert(ctx, method, segments, data, route, input, unnamed, star);
+}
+
+/**
+ * Insert one route (`segments`, after expansion) of `input`, returning how
+ * many unnamed captures it has (see `_add`). `star`: it may have a catch-all
+ * with segments after it. `join`: the index of the `**` a `*` inside a
+ * segment was split around (see `splitStar`), after its first piece where
+ * `head` (the pieces are one capture).
+ */
+function _insert<T>(
+  ctx: RouterContext<T>,
+  method: string,
+  segments: string[],
+  data: T | undefined,
+  route: string | undefined,
+  input: string,
+  unnamed: Unnamed,
+  star: boolean,
+  join = -1,
+  head?: boolean,
+): number {
   let node = ctx.root;
 
   let _unnamedParamIndex = 0;
@@ -124,35 +170,44 @@ function _add<T>(
   // the wildcard's `suffix` trie last segment first, once the params are read
   let suffix: (string | 1)[] | undefined;
   let wildcardIndex = -1;
-  // Nodes on the way to the `**`, flagged `hasSuffix` for a suffix route
-  const trail: Node<T>[] | undefined = path.includes("**") ? [] : undefined;
+  // Nodes on the way to the catch-all, flagged `hasSuffix` for a suffix route
+  const trail: Node<T>[] | undefined = star ? [] : undefined;
 
   for (let i = 0; i < segments.length; i++) {
     let segment = segments[i];
     const key = segmentKey(segment);
 
-    // Wildcard
+    // Wildcard (a catch-all: `**`, `**:name` or a whole-segment `*`)
     if (key === 2) {
       if (suffix) {
-        throw new Error(
-          `rou3: a route can have only one \`**\`, \`:name+\` or \`:name*\` (${input})`,
-        );
+        oneCatchAll(input);
       }
       trail?.push(node);
       if (!node.wildcard) {
         node.wildcard = { key: "**" };
       }
       node = node.wildcard;
-      // A bare `**` is optional and an unnamed capture (`"0"`, `"1"`, ...,
-      // numbered with `*` and unnamed groups), as in URLPattern. Its value is
-      // also reported as `_` (deprecated, see `getMatchParams`), so that name
-      // is taken.
+      // A `*` takes one segment or more (or, last, none after a trailing
+      // slash: see `matchesZero`), empty ones too (a `**:name` needs a value)
+      const empty = segment.length === 1;
+      // A bare `**` is optional; it and a `*` are unnamed captures (`"0"`,
+      // `"1"`, ..., numbered with unnamed groups), as in URLPattern. A bare
+      // `**`'s value is also reported as `_` (deprecated, see
+      // `getMatchParams`), so that name is taken. The `**` of a split `*` is
+      // part of its capture: its number (taken by the piece before it, if
+      // any), no `_` alias.
       paramsMap.push([
         -(i + 1),
-        segment.length === 2
-          ? (addName(names, "_", input), String(unnamed(_unnamedParamIndex++)))
-          : addName(names, segment.slice(3), input),
+        i === join
+          ? String(unnamed(head ? _unnamedParamIndex - 1 : _unnamedParamIndex++))
+          : segment.length === 2
+            ? (addName(names, "_", input), String(unnamed(_unnamedParamIndex++)))
+            : empty
+              ? String(unnamed(_unnamedParamIndex++))
+              : addName(names, segment.slice(3), input),
         segment.length === 2 /* optional */,
+        empty,
+        i === join,
       ]);
       if (i === segments.length - 1) {
         break;
@@ -173,19 +228,22 @@ function _add<T>(
         }
         node = node.param;
       }
-      if (segment === "*") {
-        // A trailing `*` may match no segment, but not after a `**`
-        paramsMap.push([i, String(unnamed(_unnamedParamIndex++)), !suffix /* optional */]);
-      } else if (!/^:[A-Za-z_]\w*$/.test(segment)) {
-        const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex, names, input, (n) =>
-          toUnnamedGroupKey(unnamed(n)),
+      if (!/^:[A-Za-z_]\w*$/.test(segment)) {
+        // The last piece of a split `*` starts with it: its number
+        const tail = i === join + 1 && segment.charCodeAt(0) === 42; /* * */
+        const [regexp, nextIndex] = getParamRegexp(
+          segment,
+          _unnamedParamIndex - (tail ? 1 : 0),
+          names,
+          input,
+          (n) => toUnnamedGroupKey(unnamed(n)),
         );
         _unnamedParamIndex = nextIndex;
         paramsRegexp[i] = regexp;
         if (!suffix) {
           node.hasRegexParam = true;
         }
-        paramsMap.push([i, regexp, false]);
+        paramsMap.push([i, regexp, false, false, tail]);
       } else {
         paramsMap.push([i, addName(names, segment.slice(1), input), false]);
       }
@@ -346,7 +404,11 @@ export function getParamRegexp(
         // `_e`)
         invalidSyntax(MISPLACED_MODIFIER, input);
       } else if (c === 42) {
+        // A `*` here is the part of a catch-all in this segment (see
+        // `splitStar`), an unnamed group numbered with the others
         _e = j + 1;
+        _s += "([^/]*)";
+        continue;
       }
     } else if (c === 58) {
       // A `:` inside a group (`(?:`) is no param
@@ -377,8 +439,6 @@ export function getParamRegexp(
     }
     _s += segment[j];
   }
-  [_s, _i] = replaceSegmentWildcards(_s, _i, groupKey);
-
   const regex = decodeEscapes(
     _s
       // Names were checked and recorded above; a `\uFFFE:` is inside a group

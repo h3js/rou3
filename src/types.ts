@@ -4,11 +4,17 @@ export interface RouterContext<T = unknown> {
 }
 
 /**
- * One entry per param: its route index (`-(i + 1)` for a `**` at `i`), its
- * name (`"0"`, `"1"`, … for a `*`) or segment regex, and whether it may match
- * no segment (a trailing `*`, a bare `**`).
+ * One entry per param: its route index (`-(i + 1)` for a catch-all at `i`),
+ * its name (`"0"`, `"1"`, … for a `*` or a bare `**`) or segment regex,
+ * whether it may match no segment (a bare `**`; a trailing `*` after a
+ * trailing slash only, see `matchesZero`), whether a catch-all that needs a
+ * segment may capture `""` (a `*`, the `**:name` a `:name*` expands to; a
+ * `:name` / `**:name` needs a value), and whether it adds to the capture of a
+ * `*` inside a segment that an earlier piece started (see `splitStar`).
  */
-export type ParamsIndexMap = Array<[Index: number, name: string | RegExp, optional: boolean]>;
+export type ParamsIndexMap = Array<
+  [Index: number, name: string | RegExp, optional: boolean, empty?: boolean, join?: boolean]
+>;
 export type MethodData<T = unknown> = {
   data: T;
   paramsMap?: ParamsIndexMap;
@@ -103,34 +109,21 @@ type ScanWildcard<
           : C extends "*"
             ? Rest extends `*:${infer Named}` // Named catch-all (**:name), a key of `ExtractParams`
               ? ExtractWildcards<Named, Count, Acc, Opt>
-              : Rest extends `*${infer Tail}` // `**`, `**<rest>` is `**/*<rest>`
-                ? Tail extends `{${infer Body}}${infer After}` // `**{.md}?` is `**` or `**/*.md`
-                  ? Body extends "" | `/${string}`
-                    ? ExtractWildcards<
-                        Tail,
-                        [...Count, unknown],
-                        Acc | [`${Count["length"]}`, true, true],
-                        Opt
-                      >
-                    : ExtractWildcards<
-                        Tail,
-                        [...Count, unknown, unknown],
-                        | Acc
-                        | [`${Count["length"]}`, true, true]
-                        | [
-                            `${[...Count, unknown]["length"]}`,
-                            After extends `?${string}` ? true : Opt,
-                            false,
-                          ],
-                        Opt
-                      >
-                  : ExtractWildcards<
-                      Tail extends "" | `${"/" | "}"}${string}` ? Tail : `*${Tail}`,
-                      [...Count, unknown],
-                      Acc | [`${Count["length"]}`, true, true],
-                      Opt
-                    >
-                : ExtractWildcards<
+              : Rest extends `*${infer Tail}` // `**`
+                ? ExtractWildcards<
+                    Tail,
+                    [...Count, unknown],
+                    | Acc
+                    // A bare `**` (a `{` / `}` is a group's: `**{.md}?` is `**`
+                    // or `*.md`, one key), unset over zero segments; `**<rest>`
+                    // reads like `*<rest>`
+                    | (Tail extends "" | `${"/" | "{" | "}"}${string}`
+                        ? [`${Count["length"]}`, true, true]
+                        : [`${Count["length"]}`, Opt, false]),
+                    Opt
+                  >
+                : // A `*`: set (`""` at least), unless in an optional group
+                  ExtractWildcards<
                     Rest,
                     [...Count, unknown],
                     Acc | [`${Count["length"]}`, Opt, false],
@@ -144,28 +137,6 @@ type ScanWildcard<
 type GroupOptional<TPath extends string> = TPath extends `{${string}}${infer After}`
   ? After extends `?${string}`
     ? true
-    : false
-  : false;
-
-// A trailing bare `*` segment matches zero segments too, so its capture may be
-// undefined; not after a `**` (or a `:name+`, which is one), where it takes one
-type ExtractTrailingWildcard<
-  TPath extends string,
-  TRoute extends string,
-> = TRoute extends `${string}**${string}`
-  ? never
-  : HasRepeatParam<TRoute> extends true
-    ? never
-    : TPath extends `${infer Prefix}/*${"" | "/"}`
-      ? Exclude<ExtractWildcards<TPath>, ExtractWildcards<Prefix>>[0]
-      : never;
-
-// A `:name+` before the last segment (not a static segment ending in `+`)
-type HasRepeatParam<TRoute extends string> = TRoute extends `${string}:${infer Rest}`
-  ? Rest extends `${infer Token}/${infer Tail}`
-    ? Token extends `${string}+`
-      ? true
-      : HasRepeatParam<`/${Tail}`>
     : false
   : false;
 
@@ -234,19 +205,22 @@ type StripParams<TPath extends string> = TPath extends `${infer Prefix}**:${infe
   : TPath extends `${infer Prefix}:${infer Rest}`
     ? Prefix extends `${string}${"\\" | "(?"}` // An escaped `\:` or a `(?:` group is no param
       ? `${Prefix}:${StripParams<Rest>}`
-      : Rest extends `${string}/${infer Tail}`
-        ? `${Prefix}/${StripParams<Tail>}`
-        : Prefix
+      : `${Prefix}${StripParams<StripModifier<AfterConstraint<AfterName<Rest>>>>}`
     : TPath;
+
+// `S` past the param name it starts with (see `NameRun`)
+type AfterName<S extends string> = S extends `${NameRun<S>}${infer After}` ? After : S;
+
+// `S` past a `?` / `+` / `*` modifier it starts with (a `*` right after a
+// param is one)
+type StripModifier<S extends string> = S extends `${"?" | "+" | "*"}${infer After}` ? After : S;
 
 export type InferRouteParams<TPath extends string> = {
   [Param in ExtractParams<TPath> as Param[0]]: Param[1] extends true ? string | undefined : string;
 } & {
   [Wildcard in ExtractWildcards<StripParams<TPath>> as Wildcard[0]]: Wildcard[1] extends true
     ? string | undefined
-    : Wildcard[0] extends ExtractTrailingWildcard<StripParams<TPath>, TPath>
-      ? string | undefined
-      : string;
+    : string;
 } & (true extends ExtractWildcards<StripParams<TPath>>[2]
     ? DoubleStarAlias
     : unknown) extends infer Params

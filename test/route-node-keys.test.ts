@@ -15,38 +15,42 @@ describe("routeNodeKeys", () => {
       ["/a", ["/a"]],
       ["/a/b", ["/a/b"]],
 
-      // Param edge (`node.param`, key `*`): name and constraint live in the
+      // Param edge (`node.param`, key `:_N`): name and constraint live in the
       // *entry*, not the node, so every one of these is the same node.
-      ["/users/:id", ["/users/*"]],
-      ["/users/*", ["/users/*"]],
-      ["/users/:id(\\d+)", ["/users/*"]],
-      ["/users/(\\d+)", ["/users/*"]],
-      ["/users/*.png", ["/users/*"]],
-      ["/users/pre-:id-suf", ["/users/*"]],
-      ["/users/file-*-*.png", ["/users/*"]],
+      ["/users/:id", ["/users/:_0"]],
+      ["/users/:id(\\d+)", ["/users/:_0"]],
+      ["/users/(\\d+)", ["/users/:_0"]],
+      ["/users/pre-:id-suf", ["/users/:_0"]],
 
-      // Wildcard edge (`node.wildcard`, key `**`).
+      // Wildcard edge (`node.wildcard`, key `**`): every catch-all.
       ["/admin/**", ["/admin/**"]],
+      ["/admin/*", ["/admin/**"]],
       ["/admin/**:rest", ["/admin/**"]],
       ["/admin/:x+", ["/admin/**"]],
+      // A `*` inside a segment: a `**` and the segment's part around it (both
+      // ways for text on both sides of the `*`)
+      ["/users/*.png", ["/users/**/:_0"]],
+      ["/users/file-*", ["/users/:_0/**"]],
+      ["/users/file-*.png", ["/users/:_0", "/users/:_0/**/:_1"]],
       // Segments after `**` (its suffix trie): the `**` name is in the entry.
       ["/admin/**/anything", ["/admin/**/anything"]],
       ["/admin/**:rest/anything", ["/admin/**/anything"]],
       ["/admin/:x+/anything", ["/admin/**/anything"]],
       ["/**/_payload.json", ["/**/_payload.json"]],
-      ["/**/:file/og.png", ["/**/*/og.png"]],
-      ["/**/*.png", ["/**/*"]],
+      ["/**/:file/og.png", ["/**/:_0/og.png"]],
+      ["/*/og.png", ["/**/og.png"]],
+      ["/**.md", ["/**/:_0"]],
       ["/a/**/\\*", ["/a/**/\\*"]],
 
       // Literal text is percent-encoded, as the tree keys it.
-      ["/café/:id", ["/caf%C3%A9/*"]],
-      ["/caf%C3%A9/:id", ["/caf%C3%A9/*"]],
+      ["/café/:id", ["/caf%C3%A9/:_0"]],
+      ["/caf%C3%A9/:id", ["/caf%C3%A9/:_0"]],
       ["/a\\{b\\}/\\?", ["/a%7Bb%7D/%3F"]],
       ["/**/é", ["/**/%C3%A9"]],
 
       // Escaped literals are static keys, never markers.
       ["/a/\\*", ["/a/\\*"]],
-      ["/a/*", ["/a/*"]],
+      ["/a/*", ["/a/**"]],
       ["/a/\\*\\*", ["/a/\\*\\*"]],
       ["/a/**", ["/a/**"]],
       // Route-syntax punctuation stays escaped in the key.
@@ -69,13 +73,14 @@ describe("routeNodeKeys", () => {
 
   describe("multi-expansion patterns", () => {
     const cases: [pattern: string, keys: string[]][] = [
-      ["/a/:x?", ["/a", "/a/*"]],
+      ["/a/:x?", ["/a", "/a/:_0"]],
       ["/a/:x*", ["/a", "/a/**"]],
       ["/a/:x+", ["/a/**"]],
       ["/book{s}?", ["/books", "/book"]],
       ["/x{/a}?{/b}?", ["/x", "/x/a", "/x/a/b", "/x/b"]],
       // 4 registrations (`/a/:x/:y`, `/a/:x`, `/a/:y`, `/a`) onto 3 nodes.
-      ["/a/:x?/:y?", ["/a", "/a/*", "/a/*/*"]],
+      ["/a/:x?/:y?", ["/a", "/a/:_0", "/a/:_0/:_1"]],
+      ["/a{/*}?", ["/a", "/a/**"]],
     ];
 
     it.each(cases)("%j -> %j", (pattern, keys) => {
@@ -85,7 +90,7 @@ describe("routeNodeKeys", () => {
     it("returns a fresh array the caller may mutate", () => {
       const first = routeNodeKeys("/a/:x?");
       first.push("/mutated");
-      expect(routeNodeKeys("/a/:x?")).toEqual(["/a", "/a/*"]);
+      expect(routeNodeKeys("/a/:x?")).toEqual(["/a", "/a/:_0"]);
     });
   });
 
@@ -124,18 +129,18 @@ describe("routeNodeKeys", () => {
       // method-scoped entry deleted the gate; now both are siblings.
       const ctx = createRouter<{ path: string }>();
       addRoute(ctx, "", "/users/*", { path: "gate" });
-      addRoute(ctx, "GET", "/users/:id", { path: "handler" });
+      addRoute(ctx, "GET", "/users/**:rest", { path: "handler" });
       expect(formatTree(ctx.root)).toMatchInlineSnapshot(`
         "<root>
             ├── /users
-            │       ├── /* ┈> [*] gate, [GET] handler"
+            │       ├── /** ┈> [*] gate, [GET] handler"
       `);
       expect(findAllRoutes(ctx, "GET", "/users/42").map((r) => r.data.path)).toEqual([
         "gate",
         "handler",
       ]);
       // ...and routeNodeKeys still reports the shared node up-front.
-      expect(routeNodeKeys("/users/*")).toEqual(routeNodeKeys("/users/:id"));
+      expect(routeNodeKeys("/users/*")).toEqual(routeNodeKeys("/users/**:rest"));
     });
 
     it("a method-agnostic route is never shadowed by a disjoint-key route", () => {
@@ -243,7 +248,7 @@ describe("routeNodeKeys", () => {
       // Any `\x` is a literal `x`, so escaped spellings share a node (#227).
       expect(reachable.size).toBeGreaterThan(75);
       // The dynamic markers are reserved: no static key ever encodes to them.
-      expect(byKey.get("*")).toBe("param");
+      expect(byKey.get(":_0")).toBe("param");
       expect(byKey.get("**")).toBe("wildcard");
     });
   });
@@ -253,8 +258,8 @@ describe("routeNodeKeys", () => {
       // The key erases regex constraints, so these share a node while matching
       // disjoint paths. This is deliberate: node identity is syntactic,
       // match-set containment is semantic (that is `compareRoutes`'s job).
-      expect(routeNodeKeys("/u/:id(\\d+)")).toEqual(["/u/*"]);
-      expect(routeNodeKeys("/u/:slug([a-z]+)")).toEqual(["/u/*"]);
+      expect(routeNodeKeys("/u/:id(\\d+)")).toEqual(["/u/:_0"]);
+      expect(routeNodeKeys("/u/:slug([a-z]+)")).toEqual(["/u/:_0"]);
 
       const ctx = createRouter<string>();
       addRoute(ctx, "GET", "/u/:id(\\d+)", "num");
@@ -263,8 +268,9 @@ describe("routeNodeKeys", () => {
       expect(findRoute(ctx, "GET", "/u/abc")?.data).toBe("slug");
     });
 
-    it("widens `**:name` to `**`, so named and bare catch-alls share a key", () => {
+    it("widens `**:name` and `*` to `**`, so catch-alls share a key", () => {
       expect(routeNodeKeys("/admin/**:rest")).toEqual(routeNodeKeys("/admin/**"));
+      expect(routeNodeKeys("/admin/*")).toEqual(routeNodeKeys("/admin/**"));
     });
   });
 
@@ -298,6 +304,11 @@ const EXTRA_PATTERNS = [
   "/a//b",
   "/a/b\\:c",
   "/a/*.png",
+  "/a/x-*",
+  "/a/x-*.png",
+  "/a/*/b",
+  "/:x/*",
+  "/a{/*}?",
   "/a/pre-:id-suf",
   "/a/\\*\\*",
   "/:x/:y",
@@ -308,7 +319,7 @@ const EXTRA_PATTERNS = [
   "/**:r/a",
   "/**/:x",
   "/**/:x(\\d+)",
-  "/**/*.png",
+  "/*.png",
   "/**/a/b",
   "/**/:x/b",
   "/a/**/b",
@@ -340,9 +351,16 @@ const PATHS = [
   "/x/a/b/b",
   "/b/x/b",
   "/a/b/*",
+  "/a/b/",
+  "/a/x-b/c",
+  "/a/x-b.png",
+  "/a/x-b/c.png",
 ];
 
-/** Segment alphabet at depth <= 2, each with each tail, plus hand-picked extras. */
+/**
+ * Segment alphabet at depth <= 2, each with each tail, plus hand-picked
+ * extras; the ones `addRoute` accepts (one catch-all per route).
+ */
 function buildCorpus(): string[] {
   const corpus: string[] = [];
   for (const s1 of SEGMENTS) {
@@ -353,7 +371,14 @@ function buildCorpus(): string[] {
       for (const tail of TAILS) corpus.push("/" + s1 + "/" + second + tail);
     }
   }
-  return corpus.concat(EXTRA_PATTERNS);
+  return corpus.concat(EXTRA_PATTERNS).filter((pattern) => {
+    try {
+      addRoute(createRouter(), "", pattern);
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**

@@ -1,6 +1,13 @@
 import type { RouterContext, Node, MatchedRoute, MethodData } from "../types.ts";
 import { collectSuffix, rankFromEnd } from "./_suffix.ts";
-import { emptyParam, getMatchParams, methodEntries, normalizePath, splitPath } from "./_utils.ts";
+import {
+  emptyParam,
+  getMatchParams,
+  matchesZero,
+  methodEntries,
+  normalizePath,
+  splitPath,
+} from "./_utils.ts";
 
 /**
  * Find all route patterns that match the given path.
@@ -14,11 +21,13 @@ export function findAllRoutes<T>(
   if (opts?.normalize) {
     path = normalizePath(path);
   }
-  if (path.charCodeAt(path.length - 1) === 47 /* '/' */) {
+  // A trailing `*` takes the one ignored trailing slash (see `matchesZero`)
+  const slash = path.charCodeAt(path.length - 1) === 47; /* '/' */
+  if (slash) {
     path = path.slice(0, -1);
   }
   const segments = splitPath(path);
-  const matches = _findRanked(ctx, method, segments);
+  const matches = _findRanked(ctx, method, segments, slash);
 
   // Fresh objects (the entries are internal); static routes and
   // `params: false` carry no `params` key, as in `findRoute` and compiled
@@ -33,16 +42,17 @@ export function findAllRoutes<T>(
 /**
  * Every route matching `segments`, least -> most specific: in tree order, or
  * ranked from the end of the path once a route with segments after `**` is
- * among them. `reverse`: see `_findAll`; the last match is then the one
- * `findRoute` picks.
+ * among them. `slash`: the path had a trailing slash (see `matchesZero`).
+ * `reverse`: see `_findAll`; the last match is then the one `findRoute` picks.
  */
 export function _findRanked<T>(
   ctx: RouterContext<T>,
   method: string,
   segments: string[],
+  slash: boolean,
   reverse?: boolean,
 ): MethodData<T>[] {
-  let matches = _findAll(ctx.root, method, segments, 0, [], reverse);
+  let matches = _findAll(ctx.root, method, segments, 0, slash, [], reverse);
   // A `:name` / `**:name` can't take an empty segment (see `emptyParam`)
   if (segments.includes("")) {
     matches = matches.filter((m) => !emptyParam(m, segments));
@@ -67,6 +77,7 @@ export function _findAll<T>(
   method: string,
   segments: string[],
   index: number,
+  slash: boolean,
   matches: MethodData<T>[] = [],
   reverse?: boolean,
 ): MethodData<T>[] {
@@ -76,19 +87,12 @@ export function _findAll<T>(
   if (node.wildcard) {
     const match = node.wildcard.methods && methodEntries(node.wildcard.methods, method, reverse);
     if (match) {
-      if (index < segments.length) {
-        pushSorted(matches, match, true);
-      } else {
-        // Zero segments remain: only optional (`**`) wildcards match (mirrors findRoute)
-        const optional: MethodData<T>[] = [];
-        for (const m of match) {
-          const pMap = m.paramsMap;
-          if (pMap?.[pMap.length - 1]?.[2] /* optional */) {
-            optional.push(m);
-          }
-        }
-        pushSorted(matches, optional, true);
-      }
+      // Zero segments remain: a `**`, or a `*` after a trailing slash
+      // (mirrors findRoute)
+      pushSorted(
+        matches,
+        index < segments.length ? match : match.filter((m) => matchesZero(m, slash)),
+      );
     }
     // Routes with segments after the `**` (narrower than a bare one)
     if (node.wildcard.suffix) {
@@ -104,32 +108,15 @@ export function _findAll<T>(
     }
   }
 
-  // 2. Param
-  if (node.param) {
-    if (index < segments.length) {
-      // Consume this segment as the param, then validate regex constraints on
-      // the newly collected matches (mirrors `_lookupTree` in find.ts).
-      const start = matches.length;
-      _findAll(node.param, method, segments, index + 1, matches, reverse);
-      if (node.param.hasRegexParam) {
-        for (let r = matches.length - 1; r >= start; r--) {
-          if (matches[r].paramsRegexp[index]?.test(segment) === false) matches.splice(r, 1);
-        }
-      }
-    } else if (node.param.methods) {
-      // End of path: only optional trailing params match (e.g. `/*` matches `/`).
-      // Filter per entry — one param node can hold both optional (`*`) and
-      // required (`:id`, `:id(\d+)`) routes (mirrors the wildcard branch above).
-      const match = methodEntries(node.param.methods, method, reverse);
-      if (match) {
-        const optional: MethodData<T>[] = [];
-        for (const m of match) {
-          const pMap = m.paramsMap;
-          if (pMap?.[pMap.length - 1]?.[2] /* optional */) {
-            optional.push(m);
-          }
-        }
-        pushSorted(matches, optional, true);
+  // 2. Param (a segment: at the end of the path, only catch-alls match)
+  if (node.param && index < segments.length) {
+    // Consume this segment as the param, then validate regex constraints on
+    // the newly collected matches (mirrors `_lookupTree` in find.ts).
+    const start = matches.length;
+    _findAll(node.param, method, segments, index + 1, slash, matches, reverse);
+    if (node.param.hasRegexParam) {
+      for (let r = matches.length - 1; r >= start; r--) {
+        if (matches[r].paramsRegexp[index]?.test(segment) === false) matches.splice(r, 1);
       }
     }
   }
@@ -140,7 +127,7 @@ export function _findAll<T>(
   if (index < segments.length) {
     const staticChild = node.static?.[segment];
     if (staticChild) {
-      _findAll(staticChild, method, segments, index + 1, matches, reverse);
+      _findAll(staticChild, method, segments, index + 1, slash, matches, reverse);
     }
   }
 
@@ -148,10 +135,7 @@ export function _findAll<T>(
   if (index === segments.length && node.methods) {
     const match = methodEntries(node.methods, method, reverse);
     if (match) {
-      // A param node (`key === "*"`) is a dynamic terminal, so a required last
-      // param (`:id`) outweighs an optional one (`*`); static terminals don't
-      // distinguish them (mirrors the compiler's `hasLastOptionalParam`).
-      pushSorted(matches, match, node.key === "*");
+      pushSorted(matches, match);
     }
   }
 
@@ -167,14 +151,11 @@ export function _findAll<T>(
  * before the method's own.
  *
  * Weight matches the compiler's model: one point per regex-constrained param,
- * plus one for a required last param on a `dynamicTerminal` (param/wildcard
- * node) — static terminals don't distinguish required from optional there.
+ * plus one for a required last param, two unless it may be empty. Siblings
+ * differ there only on a wildcard node (`**` none, `*` one, `**:name` two);
+ * elsewhere it adds the same to all, which the compiler leaves out.
  */
-function pushSorted<T>(
-  matches: MethodData<T>[],
-  match: MethodData<T>[],
-  dynamicTerminal: boolean,
-): void {
+function pushSorted<T>(matches: MethodData<T>[], match: MethodData<T>[]): void {
   if (match.length > 1) {
     match = match
       .map((m): [MethodData<T>, number] => {
@@ -183,7 +164,9 @@ function pushSorted<T>(
         for (let i = 0; i < rx.length; i++) {
           if (rx[i]) w++;
         }
-        if (dynamicTerminal && pm && !pm[pm.length - 1][2] /* required */) w++;
+        // A required last param, more so where it can't be empty
+        const last = pm?.[pm.length - 1];
+        if (last && !last[2]) w += last[3] ? 1 : 2;
         return [m, w];
       })
       .sort((a, b) => a[1] - b[1])

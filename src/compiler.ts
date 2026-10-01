@@ -205,6 +205,9 @@ interface CompilerContext {
   // Compiling the collector of a single-match router with `rank`: same-node
   // ties keep the order that puts the tree order's pick last
   collector?: boolean;
+  // Some matcher reads `t`, whether the path had a trailing slash (a `*`
+  // over zero segments, see `matchesZero`)
+  slash?: boolean;
 }
 
 function compileRouteMatch(ctx: CompilerContext): string {
@@ -255,12 +258,16 @@ function compileRouteMatch(ctx: CompilerContext): string {
 
   // One trailing slash is stripped (#209); root "/" collapses to "" (0
   // segments) so required root wildcards/params (`/**:name`, `/:x`) don't
-  // match "/" — matching findRoute/findAllRoutes.
+  // match "/" — matching findRoute/findAllRoutes. A trailing `*` reads
+  // whether there was one (`t`).
   const collect = ctx.rank ? `let r=[],k=[];` : `let r=[];`;
   const done = ctx.rank
     ? `return ${rankRef(ctx)}(r.reverse(),k.reverse(),l-1);`
     : "return r.reverse();";
-  return `${matchAll ? collect : ""}${normalizeHelper}${normalizePathHelper}if(p.charCodeAt(p.length-1)===47)p=p.slice(0,-1);${code}${matchAll ? done : ""}`;
+  const strip = ctx.slash
+    ? `let t=p.charCodeAt(p.length-1)===47;if(t)p=p.slice(0,-1);`
+    : `if(p.charCodeAt(p.length-1)===47)p=p.slice(0,-1);`;
+  return `${matchAll ? collect : ""}${normalizeHelper}${normalizePathHelper}${strip}${code}${matchAll ? done : ""}`;
 }
 
 // Below this many static paths an `else if` chain of `p === "..."` compares
@@ -423,12 +430,18 @@ function compileFinalMatch(
   // Add param properties
   const { paramsMap } = data;
   if (paramsMap && paramsMap.length > 0) {
-    // Check for optional end parameters
+    // A catch-all ending the route (`currentIdx` is where it starts)
     const lastParam = paramsMap[paramsMap.length - 1];
     if (currentIdx !== -1) {
       if (!lastParam[2]) {
-        // Last segment is required (a param or a `**:name` wildcard)
-        conditions.push(`l>${currentIdx}`);
+        // It needs a segment (a `**:name`), or, a `*`, takes none after a
+        // trailing slash (see `matchesZero`)
+        if ((lastParam[1] as string) < ":") {
+          ctx.slash = true;
+          conditions.push(`(l>${currentIdx}||t&&l===${currentIdx})`);
+        } else {
+          conditions.push(`l>${currentIdx}`);
+        }
       } else if (lastParam[0] < 0 && paramsMap.length > 1) {
         // Optional `**` tail, but the required leading param(s) must be present
         conditions.push(`l>${currentIdx - 1}`);
@@ -448,12 +461,22 @@ function compileFinalMatch(
     // Where a bare `**`'s properties are in `paramsCode`: they are unset over
     // zero segments (see `getMatchParams`)
     let starStar: [start: number, end: number] | undefined;
+    // A `*` inside a segment is split around a `**` (see `splitStar`): its
+    // pieces' values, joined by `/` into one property where the first one is
+    // (`\0`), the `**`'s only where it has a segment
+    const join = paramsMap.find((map) => map[4] && map[0] < 0)?.[1];
+    const pieces: [value: string, nonEmpty?: string][] = [];
+    const prop = (key: string, value: string, nonEmpty?: string) => {
+      if (key !== join) return `${propKey(key)}:${value},`;
+      pieces.push([value, nonEmpty]);
+      return pieces.length > 1 ? "" : `${propKey(key)}:\0,`;
+    };
     let tmpCount = 0;
     for (let i = 0; i < paramsMap.length; i++) {
       const map = paramsMap[i];
       if (typeof map[1] === "string") {
-        let code = `${propKey(map[1])}:${params[i]},`;
-        if (map[0] < 0 && map[2]) {
+        let code = prop(map[1], params[i], map[4] ? suffixGuard || `l>${currentIdx}` : undefined);
+        if (map[0] < 0 && map[2] && !map[4]) {
           // Also `_` (deprecated alias): the tail is computed once, into `_w`
           code = `${propKey(map[1])}:_w=${params[i]},_:_w,`;
           ctx.starStarTemp = true;
@@ -464,7 +487,8 @@ function compileFinalMatch(
         const guard = nonEmptyGuard(map, params[i], data.suffix);
         if (guard) {
           conditions.push(guard);
-          guardConditions++;
+          // A catch-all's weighs a point (a `**:name` outweighs a `*`)
+          if (map[0] >= 0) guardConditions++;
         }
         continue;
       }
@@ -481,7 +505,7 @@ function compileFinalMatch(
         conditions.push(`${regexp}.test(${params[i]})`);
       } else if (groups.whole) {
         conditions.push(`${regexp}.test(${params[i]})`);
-        paramsCode += `${propKey(fromGroupName(groups.names[0]))}:${params[i]},`;
+        paramsCode += prop(fromGroupName(groups.names[0]), params[i]);
       } else {
         const tmp = `_m${tmpCount++}`;
         conditions.push(`(${tmp}=${regexp}.exec(${params[i]}))!==null`);
@@ -489,14 +513,33 @@ function compileFinalMatch(
         // gets no key when absent, as in the interpreter
         const optional = map[1].source.endsWith("))?$") && groups.names[groups.names.length - 1];
         for (const name of groups.names) {
-          const prop = `${propKey(fromGroupName(name))}:${tmp}.groups.${name}`;
+          const key = fromGroupName(name);
           paramsCode +=
-            name === optional ? `...(${tmp}.groups.${name}!==void 0&&{${prop}}),` : `${prop},`;
+            name === optional
+              ? `...(${tmp}.groups.${name}!==void 0&&{${propKey(key)}:${tmp}.groups.${name}}),`
+              : prop(key, `${tmp}.groups.${name}`);
         }
       }
     }
     if (tmpCount > (ctx.regexTemps || 0)) {
       ctx.regexTemps = tmpCount;
+    }
+    if (pieces.length > 0) {
+      // `pre` + `/**` + `/post` (`**/post`: no `/` after an empty `**`)
+      let value = "";
+      for (let k = 0; k < pieces.length; k++) {
+        const [piece, nonEmpty] = pieces[k];
+        value += nonEmpty
+          ? k
+            ? `+(${nonEmpty}?"/"+${piece}:"")`
+            : `(${nonEmpty}?${piece}+"/":"")`
+          : k === 0
+            ? piece
+            : k === 1 && pieces[0][1]
+              ? `+${piece}`
+              : `+"/"+${piece}`;
+      }
+      paramsCode = paramsCode.replace("\0", value);
     }
 
     // The `**` has a segment where it starts before the end of the path (of
@@ -526,25 +569,14 @@ function compileNode(
   // a param segment makes the offset unknown at compile time.
   staticPrefixLen: number,
 ): string {
-  // Widen the end-of-path check to `l===c||l===c-1` (and emit the per-matcher
-  // length guards) only when some matcher's last param is actually optional
-  // (`/x` and `/x/` match `/x/*`) — for all-required nodes (plain `:id`, the
-  // common case) a single `l===c` suffices. `node.key === "*"` alone would
-  // also catch every required-only param node and static nodes for escaped
-  // `\*` segments, emitting a dead widened branch.
-  const hasLastOptionalParam = node.key === "*" && hasOptionalLastParam(node.methods);
   let code = "",
     hasIf = false;
 
+  // A route ending in a param (a catch-all ending one is on a wildcard node)
   if (node.methods && params.length > 0) {
-    const match = compileMethodMatch(
-      ctx,
-      node.methods,
-      params,
-      hasLastOptionalParam ? currentIdx - 1 : -1,
-    );
+    const match = compileMethodMatch(ctx, node.methods, params, -1);
     if (match) {
-      code += `if(l===${currentIdx}${hasLastOptionalParam ? `||l===${currentIdx - 1}` : ""}){${match}}`;
+      code += `if(l===${currentIdx}){${match}}`;
       hasIf = true;
     }
   }
@@ -962,37 +994,21 @@ function propKey(name: string): string {
 /**
  * The condition under which param `map` (read as `param`) has a value, where
  * it needs one (mirrors `emptyParam` in operations/_utils.ts): a `:name`'s
- * segment is not empty (a `*` has a digit name), and a `**:name` (`:name+`,
- * `:name*`) takes two segments or more, or one that is not empty (a `**` may
- * capture `""`). Its `**` starts at `s[c]` and `n` segments follow it.
+ * segment is not empty, and a `**:name` (`:name+`, `:name*`) takes two
+ * segments or more, or one that is not empty (a `**` and a `*` may capture
+ * `""`). Its `**` starts at `s[c]` and `n` segments follow it.
  */
 function nonEmptyGuard(
-  [index, name, optional]: NonNullable<MethodData["paramsMap"]>[number],
+  [index, name, optional, empty]: NonNullable<MethodData["paramsMap"]>[number],
   param: string,
   suffix: MethodData["suffix"],
 ): string | undefined {
   if (index >= 0) {
     return (name as string).charCodeAt(0) > 57 /* not a digit */ ? param : undefined;
   }
-  if (optional) {
+  if (optional || empty) {
     return;
   }
   const c = ~index + 1;
   return `(l>${c + (suffix ? suffix[1] : 0) + 1}||s[${c}])`;
-}
-
-// One param node can hold both required (`:id`, `:id(\d+)`) and optional
-// (`*`) routes for the same or different methods, in any insertion order.
-function hasOptionalLastParam(
-  methods: Record<string, MethodData<any>[] | undefined> | undefined,
-): boolean {
-  for (const key in methods) {
-    for (const m of methods[key] || []) {
-      const pMap = m.paramsMap;
-      if (pMap?.[pMap.length - 1]?.[2] /* optional */) {
-        return true;
-      }
-    }
-  }
-  return false;
 }

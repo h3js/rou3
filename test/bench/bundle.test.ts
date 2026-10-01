@@ -151,8 +151,16 @@ describe("benchmark", () => {
     // the one with it (`skipGroup`, counted by `_add` itself).
     // +67B raw / +25B gzip: early bails keep `{…}?` groups without unnamed
     // captures as fast as before (no `skipGroup` counting).
-    expect(bytes).toBeLessThanOrEqual(11305); // <11.31kb
-    expect(gzipSize).toBeLessThanOrEqual(4755); // <4.76kb
+    // +361B raw / +217B gzip: a `*` is a greedy catch-all as in URLPattern
+    // (one segment or more, none after the lookup path's trailing slash):
+    // `matchesZero` and the `slash` flag through both walks, a whole-segment
+    // `*` on the wildcard node (the param-node end-of-path fallback is gone),
+    // `splitStar` reading a `*` inside a segment as its segment-local parts
+    // around a `**` and `getMatchParams` joining their captures, `**:name`
+    // outweighing `*` on a shared node, and the one-catch-all error naming
+    // `*`. `replaceSegmentWildcards` and `dynamicTerminal` are gone.
+    expect(bytes).toBeLessThanOrEqual(11666); // <11.67kb
+    expect(gzipSize).toBeLessThanOrEqual(4972); // <4.98kb
   });
 });
 

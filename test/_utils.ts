@@ -65,20 +65,24 @@ function _formatMethods(node: Node<{ path?: string }>) {
     .join(", ")}`;
 }
 
-/** The keys of the bare `**` captures (unnamed, numbered) under `node`. */
-export function bareCatchAllKeys(node: Node<unknown> | undefined): string[] {
+/**
+ * The keys of the bare `**` captures (unnamed, numbered) under `node`, or with
+ * `join`, of the `**`s a `*` inside a segment is split around (no alias).
+ */
+export function bareCatchAllKeys(node: Node<unknown> | undefined, join = false): string[] {
   if (!node) return [];
   const keys: string[] = [];
   for (const entries of Object.values(node.methods || {})) {
-    for (const [index, name, optional] of entries?.flatMap((m) => m.paramsMap || []) || []) {
-      if (index < 0 && optional) keys.push(name as string);
+    for (const [index, name, optional, , joins] of entries?.flatMap((m) => m.paramsMap || []) ||
+      []) {
+      if (index < 0 && optional && !joins === !join) keys.push(name as string);
     }
   }
   return keys.concat(
-    ...Object.values(node.static || {}).map((child) => bareCatchAllKeys(child)),
-    bareCatchAllKeys(node.param),
-    bareCatchAllKeys(node.wildcard),
-    bareCatchAllKeys(node.suffix),
+    ...Object.values(node.static || {}).map((child) => bareCatchAllKeys(child, join)),
+    bareCatchAllKeys(node.param, join),
+    bareCatchAllKeys(node.wildcard, join),
+    bareCatchAllKeys(node.suffix, join),
   );
 }
 
@@ -95,7 +99,9 @@ export function withoutAlias<T extends Record<string, string | undefined>>(
   const keys = bareCatchAllKeys(router.root);
   if (keys.length === 0) return { ...params };
   const key = keys.find((k) => k in rest);
-  if (key === undefined ? "_" in params : alias !== rest[key]) {
+  // A route the pattern registers with a split `*` under that key has none
+  const split = alias === undefined && bareCatchAllKeys(router.root, true).includes(key!);
+  if (key === undefined ? "_" in params : alias !== rest[key] && !split) {
     throw new Error(`test: \`_\` is no alias of the \`**\` key in ${JSON.stringify(params)}`);
   }
   return rest as T;

@@ -91,7 +91,7 @@ describe("Router lookup", function () {
         expect(formatTree(router.root)).toMatchInlineSnapshot(`
           "<root>
               ├── /blog
-              │       ├── /* ┈> [GET] /blog/*
+              │       ├── /** ┈> [GET] /blog/*
               ├── /carbon
               │       ├── /* ┈> [GET] /carbon/:element
               │       │       ├── /test
@@ -125,9 +125,11 @@ describe("Router lookup", function () {
             cool: "more",
           },
         },
-        "/blog": { data: { path: "/blog/*" } },
-        "/blog/": { data: { path: "/blog/*" } },
-        "/blog/123": { data: { path: "/blog/*" } },
+        // A `*` takes one segment or more, or none after a trailing slash
+        "/blog": undefined,
+        "/blog/": { data: { path: "/blog/*" }, params: { "0": "" } },
+        "/blog/123": { data: { path: "/blog/*" }, params: { "0": "123" } },
+        "/blog/1/2": { data: { path: "/blog/*" }, params: { "0": "1/2" } },
       },
     );
 
@@ -281,7 +283,7 @@ describe("Router lookup", function () {
               ├── /test ┈> [GET] /test
               │       ├── /** ┈> [GET] /test/**
               ├── /dynamic
-              │       ├── /* ┈> [GET] /dynamic/*"
+              │       ├── /** ┈> [GET] /dynamic/*"
         `),
       {
         "/wildcard": {
@@ -298,8 +300,14 @@ describe("Router lookup", function () {
           data: { path: "/wildcard/**" },
           params: { "0": "abc/def", _: "abc/def" },
         },
-        "/dynamic": {
+        "/dynamic": undefined,
+        "/dynamic/": {
           data: { path: "/dynamic/*" },
+          params: { "0": "" },
+        },
+        "/dynamic/a/b": {
+          data: { path: "/dynamic/*" },
+          params: { "0": "a/b" },
         },
         "/test": {
           data: { path: "/test" },
@@ -323,7 +331,7 @@ describe("Router lookup", function () {
           "<root>
               ├── /polymer
               │       ├── /route
-              │       │       ├── /* ┈> [GET] /polymer/route/*
+              │       │       ├── /** ┈> [GET] /polymer/route/*
               │       ├── /** ┈> [GET] /polymer/**"
         `),
       {
@@ -334,6 +342,14 @@ describe("Router lookup", function () {
         "/polymer/route/anon": {
           data: { path: "/polymer/route/*" },
           params: { "0": "anon" },
+        },
+        "/polymer/route/a/b": {
+          data: { path: "/polymer/route/*" },
+          params: { "0": "a/b" },
+        },
+        "/polymer/route": {
+          data: { path: "/polymer/**" },
+          params: { "0": "route", _: "route" },
         },
         "/polymer/constructor": {
           data: { path: "/polymer/**" },
@@ -507,28 +523,49 @@ describe("Router lookup", function () {
   });
 
   describe("wildcard segment patterns", function () {
+    // A `*` inside a segment spans segments too (URLPattern's `(.*)`)
     testRouter(["/files/*.png"], undefined, {
       "/files/logo.png": {
         data: { path: "/files/*.png" },
         params: { "0": "logo" },
       },
+      "/files/a/logo.png": {
+        data: { path: "/files/*.png" },
+        params: { "0": "a/logo" },
+      },
       "/files/icon.jpg": undefined,
     });
 
-    testRouter(["/files/file-*-*.png"], undefined, {
+    testRouter(["/files/file-*.png"], undefined, {
       "/files/file-a-b.png": {
-        data: { path: "/files/file-*-*.png" },
-        params: { "0": "a", "1": "b" },
+        data: { path: "/files/file-*.png" },
+        params: { "0": "a-b" },
       },
-      "/files/file-a.png": undefined,
+      "/files/file-a/b.png": {
+        data: { path: "/files/file-*.png" },
+        params: { "0": "a/b" },
+      },
+      "/files/file-a": undefined,
+      "/files/a/file-b.png": undefined,
     });
 
-    testRouter(["/combo/*.png/*-v"], undefined, {
+    testRouter(["/combo/:name.png/*-v"], undefined, {
       "/combo/logo.png/abc-v": {
-        data: { path: "/combo/*.png/*-v" },
-        params: { "0": "logo", "1": "abc" },
+        data: { path: "/combo/:name.png/*-v" },
+        params: { name: "logo", "0": "abc" },
+      },
+      "/combo/logo.png/a/bc-v": {
+        data: { path: "/combo/:name.png/*-v" },
+        params: { name: "logo", "0": "a/bc" },
       },
       "/combo/logo.png/v": undefined,
+    });
+
+    // Two `*`s are two catch-alls
+    it("throws for two `*`s in a segment", () => {
+      expect(() => addRoute(createRouter([]), "GET", "/files/file-*-*.png")).toThrow(
+        /^rou3: a route can have only one `\*`/,
+      );
     });
   });
 
@@ -953,16 +990,17 @@ describe("Router remove", function () {
     const router = createRouter(["/a/b", "/a/b/*"]);
 
     removeRoute(router, "GET", "/a/b");
-    expect(findRoute(router, "GET", "/a/b")).to.deep.equal({
+    expect(findRoute(router, "GET", "/a/b")).to.deep.equal(undefined);
+    expect(findRoute(router, "GET", "/a/b/")).to.deep.equal({
       data: { path: "/a/b/*" },
-      params: { "0": undefined },
+      params: { "0": "" },
     });
     expect(findRoute(router, "GET", "/a/b/c")).to.deep.equal({
       params: { "0": "c" },
       data: { path: "/a/b/*" },
     });
     removeRoute(router, "GET", "/a/b/*");
-    expect(findRoute(router, "GET", "/a/b")).to.deep.equal(undefined);
+    expect(findRoute(router, "GET", "/a/b/")).to.deep.equal(undefined);
   });
 
   it("should be able to remove placeholder routes", function () {
@@ -1203,12 +1241,12 @@ describe("Router remove", function () {
       ["/f/**:path", "/f/:path+", "/f/x/y"],
       ["/a", "/a/:x*", "/a"],
       // A group right after `**` is not the rest of its segment: `/a/**{.md}?`
-      // is `/a/**` or `/a/**.md`, not `/a/**/*{.md}?` (same identity once
-      // rewritten, and both register `/a/**/*.md` on one node).
-      ["/a/**/*{.md}?", "/a/**{.md}?", "/a/x/y"],
-      ["/a/**{.md}?", "/a/**/*{.md}?", "/a/x/y.md"],
-      ["/a{/**/*}?", "/a{/**}?", "/a/x/y"],
-      ["/a{/**}?", "/a{/**/*}?", "/a"],
+      // is `/a/**` or `/a/**.md` (`/a/*.md`), which `/a/*{.md}?` registers on
+      // the same node too.
+      ["/a/*{.md}?", "/a/**{.md}?", "/a/x/y"],
+      ["/a/**{.md}?", "/a/*{.md}?", "/a/x/y.md"],
+      ["/a{/*}?", "/a{/**}?", "/a/x/y"],
+      ["/a{/**}?", "/a{/*}?", "/a"],
       // An optional param after a capture is one entry (compiled in place)
       ["/a/*-:x", "/a/*-:x?", "/a/b-c"],
       ["/a/*-:x?", "/a/*-:x", "/a/b-c"],
