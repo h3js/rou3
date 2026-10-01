@@ -4,15 +4,152 @@ import { compileRouter } from "../src/compiler.ts";
 import { fromGroupName } from "../src/_group-names.ts";
 import { normalizePath } from "../src/operations/_utils.ts";
 
-// https://github.com/web-platform-tests/wpt/blob/master/urlpattern/resources/urlpatterntestdata.json
+// Vendored verbatim from web-platform-tests (wpt master 5cd8e3fa0a6c, 2026-10-01;
+// the file last changed in 23aac9278460):
+// https://github.com/web-platform-tests/wpt/blob/5cd8e3fa0a6c4ca11fa565f7c0956802c8e0045d/urlpattern/resources/urlpatterntestdata.json
+// Read the way WPT's runner (`urlpattern/resources/urlpatterntests.js`) reads it.
 import testData from "./wpt/urlpatterntestdata.json" with { type: "json" };
 
+type WptResult = { input: string; groups: Record<string, string | null> };
+
 type WptEntry = {
-  pattern: Array<Record<string, string> | string>;
-  inputs: Array<Record<string, string>>;
-  expected_obj?: string | Record<string, string>;
-  expected_match: null | Record<string, { input: string; groups: Record<string, string | null> }>;
+  "//"?: string;
+  // `[init or URL string, base URL or options?, options?]`
+  pattern: Array<Record<string, unknown> | string>;
+  // `[init or URL string, base URL?]`
+  inputs?: Array<Record<string, string> | string>;
+  expected_obj?: "error" | Record<string, string>;
+  // `null`: no match, `"error"`: test() / exec() throw on the inputs
+  expected_match?: null | "error" | Record<string, WptResult>;
+  // Components that match exactly `""` (no default `*` capture)
+  exactly_empty_components?: string[];
 };
+
+type PathnameTest = {
+  label: string;
+  pattern: string;
+  /** `undefined`: URLPattern rejects the pattern (`expected_obj: "error"`) */
+  input?: string;
+  /** Pathname groups, `null` for no match (an unset group is `undefined`) */
+  groups?: Record<string, string | undefined> | null;
+  /** Why no strategy can run this case */
+  skip?: string;
+};
+
+/**
+ * The pathname cases in the WPT data. Entries whose pattern is not a lone
+ * `pathname` init are out of scope for a path router and only counted
+ * (`outOfScope`, by reason).
+ */
+function readPathnameTests() {
+  const tests: PathnameTest[] = [];
+  const outOfScope = new Map<string, number>();
+  const labelCounts = new Map<string, number>();
+  for (const entry of testData as WptEntry[]) {
+    const test = readEntry(entry);
+    if (typeof test === "string") {
+      outOfScope.set(test, (outOfScope.get(test) ?? 0) + 1);
+      continue;
+    }
+    const count = (labelCounts.get(test.label) ?? 0) + 1;
+    labelCounts.set(test.label, count);
+    if (count > 1) test.label += ` #${count}`;
+    tests.push(test);
+  }
+  return { tests, outOfScope };
+}
+
+function readEntry(entry: WptEntry): PathnameTest | string {
+  const [init, options] = entry.pattern;
+  if (init === undefined) return "no pattern (an empty init matches any URL)";
+  if (typeof init === "string") return "URL string pattern (constrains every component)";
+  if (!("pathname" in init)) return "no pathname component";
+  if (Object.keys(init).length > 1)
+    return "constrains other components too (`baseURL`, `protocol`)";
+  const pattern = init.pathname as string;
+
+  if (entry.expected_obj === "error") {
+    const test: PathnameTest = { label: `${pattern} (expected error)`, pattern };
+    if (options !== undefined) {
+      test.skip = "a base URL next to an init throws in the constructor, the pattern is fine";
+    }
+    return test;
+  }
+
+  const inputs = entry.inputs ?? [];
+  const label = `${pattern} → ${inputs.length > 0 ? JSON.stringify(inputs) : "(no inputs)"}`;
+  if (options !== undefined) {
+    const reason =
+      typeof options === "object" && options.ignoreCase
+        ? "`ignoreCase`: rou3 is always case-sensitive"
+        : `constructor options ${JSON.stringify(options)}`;
+    return { label, pattern, skip: reason };
+  }
+  if (inputs.length === 0) {
+    return { label, pattern, skip: "no inputs: checks the canonical pattern string only" };
+  }
+  if (entry.expected_match === "error") {
+    return { label, pattern, skip: "exec() throws on its arguments (a base URL next to an init)" };
+  }
+
+  const input = readInput(inputs);
+  if (typeof input === "string") return { label, pattern, skip: input };
+
+  // WPT's runner: a missing component result is `""` with a `"0": ""` capture,
+  // unless the component is in `exactly_empty_components`
+  const result: WptResult | null = entry.expected_match
+    ? (entry.expected_match.pathname ?? {
+        input: "",
+        groups: entry.exactly_empty_components?.includes("pathname") ? {} : { "0": "" },
+      })
+    : null;
+  if (result && input.from && result.input !== input.pathname) {
+    throw new Error(`wpt: "${input.from}" resolves to "${input.pathname}", not "${result.input}"`);
+  }
+  // `null` in the data is an unset (`undefined`) group
+  const groups = result
+    ? Object.fromEntries(Object.entries(result.groups).map(([k, v]) => [k, v ?? undefined]))
+    : null;
+  const from = input.from ? ` (from ${input.from})` : "";
+  return {
+    label: `${pattern} → ${input.pathname}${from} [${groups ? "match" : "no match"}]`,
+    pattern,
+    input: input.pathname,
+    groups,
+  };
+}
+
+/**
+ * The pathname rou3 is handed for a WPT input: an init `pathname` as written
+ * (rou3 does not canonicalize, see percent-encoding in `KNOWN_DIFFS`), resolved
+ * against its `baseURL`, or a URL string's parsed pathname. Returns a skip
+ * reason when there is no path to route.
+ */
+function readInput(
+  inputs: NonNullable<WptEntry["inputs"]>,
+): { pathname: string; from?: string } | string {
+  const [input, baseURL] = inputs;
+  if (typeof input === "string") {
+    const from = JSON.stringify(baseURL === undefined ? input : [input, baseURL]);
+    try {
+      return { pathname: new URL(input, baseURL as string | undefined).pathname, from };
+    } catch {
+      return "input is not a valid URL (URLPattern returns null)";
+    }
+  }
+  if (input.protocol !== undefined) {
+    return "input `protocol` decides how its pathname is canonicalized";
+  }
+  if (input.pathname === undefined) return "input has no pathname";
+  if (input.baseURL !== undefined) {
+    return {
+      pathname: new URL(input.pathname, input.baseURL).pathname,
+      from: JSON.stringify(input),
+    };
+  }
+  // Other components (`hostname`) are wildcards in a pathname-only pattern
+  return { pathname: input.pathname };
+}
 
 function normalizeGroups(groups: Record<string, string> | undefined): Record<string, string> {
   if (!groups) return {};
@@ -25,76 +162,31 @@ function normalizeGroups(groups: Record<string, string> | undefined): Record<str
   return result;
 }
 
-function getPathnameTests(): Array<{
-  pattern: string;
-  input: string | undefined;
-  expectedMatch: boolean;
-  expectedGroups: Record<string, string | null>;
-  isError: boolean;
-}> {
-  const tests: ReturnType<typeof getPathnameTests> = [];
-
-  for (const entry of testData as Array<string | WptEntry>) {
-    if (typeof entry === "string") continue;
-
-    const p = entry.pattern;
-    if (!Array.isArray(p) || p.length === 0) continue;
-    if (typeof p[0] !== "object" || p[0] === null) continue;
-
-    const keys = Object.keys(p[0]);
-    if (keys.length !== 1 || keys[0] !== "pathname") continue;
-
-    const pattern = (p[0] as Record<string, string>).pathname;
-    const isError = entry.expected_obj === "error";
-    const input = entry.inputs?.[0]?.pathname;
-    const expectedMatch = entry.expected_match !== null;
-    const expectedGroups = entry.expected_match?.pathname?.groups ?? {};
-
-    tests.push({ pattern, input, expectedMatch, expectedGroups, isError });
-  }
-
-  return tests;
-}
-
-// Patterns to skip: outside rou3's scope or using unsupported syntax
-const SKIP_PATTERNS = new Set([
-  // Non-path patterns
-  "var x = 1;",
-
-  // Path normalization (`.`, `..`) — rou3 does not resolve relative segments
-  "/foo/../bar",
-  "./foo",
-  "../foo",
-
-  // Regex set operations (v-flag syntax) — not used in rou3 routes
-  "/([[a-z]--a])",
-  "/([\\d&&[0-1]])",
-]);
-
 /**
  * Known semantic differences between rou3 and URLPattern:
  *
- * 1. Trailing slash: rou3 adds `/?$` — optionally matches trailing `/`
+ * 1. Trailing slash: rou3 ignores at most one trailing `/`
  * 2. `*` semantics: URLPattern `*` = greedy catch-all `(.*)`;
  *    rou3 `*` = single-segment unnamed param `([^/]*)`
- * 3. `(.*)` semantics: URLPattern `(.*)` matches across `/`;
- *    rou3 `(.*)` is segment-scoped (no cross-segment matching)
- * 4. `**` semantics: URLPattern `**` = literal `**`;
- *    rou3 `**` = catch-all wildcard
+ * 3. `(.*)` semantics: URLPattern `(.*)` matches across `/`; so does
+ *    `routeToRegExp`, while the tree's `(.*)` is segment-scoped
+ * 4. `**` semantics: URLPattern parses `**` as `*` with a `*` modifier (a
+ *    catch-all captured as `"0"`); rou3 `**` is a catch-all captured as `_`
  * 5. `{...}+`/`{...}*`, and modifiers on `*` or an unnamed group
  *    (`(.*)?`, `*+`): URLPattern supports them; rou3 rejects them (see
  *    `RESERVED_PATTERNS`)
  * 6. Backslash escaping: any `\x` is a literal `x` in both (inside a
  *    constraint it is regex); rou3 rejects a `\/`
- * 7. Path normalization: URLPattern resolves `.`/`..` in input;
- *    rou3 does not
- * 8. Case sensitivity: URLPattern may be case-insensitive;
+ * 7. Path normalization: URLPattern resolves `.`/`..` in patterns and
+ *    inputs; rou3 only in inputs (`normalize`)
+ * 8. Case sensitivity: URLPattern may be case-insensitive (`ignoreCase`);
  *    rou3 is always case-sensitive
  * 9. Percent-encoding: URLPattern encodes the input; rou3 does not
+ * 10. Relative paths: rou3 reads every pattern as absolute (`/`-prefixed)
  */
 
 // Known diff labels: tests where rou3 intentionally behaves differently.
-// Tracked as `it.fails()` so we notice if rou3 gains compatibility.
+// Asserted to differ (and not to throw) so we notice if rou3 gains compatibility.
 // Labels include `[match]` or `[no match]` to disambiguate duplicate patterns.
 const KNOWN_DIFFS = new Set([
   // `(.*)` cross-segment — a regex group `(.*)` matches across `/` (URLPattern
@@ -115,32 +207,24 @@ const KNOWN_DIFFS = new Set([
   "/foo/* → /foo [no match]",
   "/foo/:bar(.*) → /foo/ [match]",
 
-  // `**` — rou3 catch-all vs URLPattern literal double-star
+  // `**` — URLPattern reads `**` as `*` with a `*` modifier and captures it as
+  // `"0"`; rou3 names the bare `**` capture `_`
   "/foo/** → /foo/ [match]",
   "/foo/** → /foo/bar [match]",
   "/foo/** → /foo/bar/baz [match]",
-
-  // Non-`/`-prefixed input — URLPattern normalizes input paths
-  "/foo/bar → foo/bar [match]",
-
-  // Case-insensitive match — rou3 is case-sensitive
-  "/foo/bar → /FOO/BAR [match]",
 
   // Percent-encoding — URLPattern encodes the input (`/café` is
   // `/caf%C3%A9`), rou3 matches it as given
   "/caf%C3%A9 → /café [match]",
 
-  // `*/` patterns — URLPattern treats `*` as catch-all
+  // Relative inputs — rou3's regex is anchored at `/` (the router skips them)
   "*/* → foo/bar [match]",
-  "*\\/* → foo/bar [match]",
   "*/{*} → foo/bar [match]",
-  "*//* → foo//bar [match]",
 
   // Patterns without leading `/` — rou3 always prefixes `/` in regex
   ":name → foobar [match]",
   "(foo)(.*) → foobarbaz [match]",
   "{(foo)bar}(.*) → foobarbaz [match]",
-  "(foo)?(.*) → foobarbaz [match]",
   "{:foo}(.*) → foobarbaz [match]",
   "{:foo}(barbaz) → foobarbaz [match]",
   "{:foo}{(.*)} → foobarbaz [match]",
@@ -155,17 +239,40 @@ const KNOWN_DIFFS = new Set([
   ":foo{}(.*) → foobar [match]",
   ":foo{}bar → foobar [match]",
   ":foo{}?bar → foobar [match]",
-  "*{}**? → foobar [match]",
   ":foo(baz)(.*) → bazbar [match]",
   ":foo(baz)bar → bazbar [match]",
   ":foo./ → bar./ [match]",
   ":foo../ → bar../ [match]",
+  "./foo → ./foo [match]",
+  "../foo → ../foo [match]",
+  "var x = 1; → var x = 1; [match]",
+
+  // A relative pattern never matches an absolute path in URLPattern; rou3
+  // reads it as absolute
+  'foo/bar → /foo/bar (from "https://example.com/foo/bar") [no match]',
+
+  // `.`/`..` in a pattern — URLPattern resolves them (`/foo/../bar` is
+  // `/bar`); rou3 reads them as literal segments
+  "/foo/../bar → /bar [match]",
+
+  // `v`-flag set operations — rou3 compiles constraints without the `v` flag,
+  // so `--` / `&&` are plain class chars
+  "/([[a-z]--a]) → /z [match]",
+  "/([\\d&&[0-1]]) → /0 [match]",
+
+  // Trailing slash on a no-match case — rou3 ignores one trailing `/`, so
+  // `/foo/bar/` is `/foo/bar` (a second one is an empty last segment)
+  "/foo/bar → /foo/bar/ [no match]",
+  "/foo/:bar → /foo/bar/ [no match]",
+  "/foo/:bar? → /foo/ [no match]",
+  "/foo/:bar* → /foo/ [no match]",
+  "/foo{/bar}? → /foo/ [no match]",
 ]);
 
 // Valid URLPattern syntax rou3 has no meaning for (yet): every strategy
 // throws a `rou3:` error for these patterns instead of matching with a
 // different meaning (modifiers on `*` / an unnamed group, group repetition,
-// a `/` in a constraint, Unicode param names).
+// a `/` or a capturing group in a constraint, a `\/`, Unicode param names).
 const RESERVED_PATTERNS = new Set([
   "/foo/(.*)?",
   "/foo/*?",
@@ -174,57 +281,30 @@ const RESERVED_PATTERNS = new Set([
   "/foo/(.*)*",
   "/foo{/bar}+",
   "/foo{/bar}*",
+  "(foo)?(.*)",
+  // `{}*`: repetition of an empty group
+  "*{}**?",
   // A `/` inside a constraint: the pattern is split on `/` first
   "/foo/([^\\/]+?)",
+  // A `\/`: the pattern is split on `/` first
+  "*\\/*",
+  // A capturing group inside a constraint: it would be a stray param
+  "/:foo((?<x>a))",
+  "/foo/(bar(?<x>baz))",
   // Unicode param names: rou3 names are ASCII, and a non-ASCII char right
   // after one throws instead of ending it
   "/:café",
   "/:℘",
   "/:㐀",
+  "/:𠀀",
   "test/:a𐑐b",
 ]);
 
-// Additional known diffs specific to router-based matching (addRoute+findRoute / compileRouter)
-// These patterns use syntax that routeToRegExp handles but the tree cannot represent
-// Known diffs that only apply to routeToRegExp (router handles these correctly)
+// Known diffs that only apply to routeToRegExp (the router skips relative inputs)
 const REGEXP_ONLY_KNOWN_DIFFS = new Set([
-  // Non-`/`-prefixed input — router prepends `/` for lookup
-  "/foo/bar → foo/bar [match]",
+  // Relative input — rou3's regex is anchored at `/` (a `:name*` regex makes
+  // its leading `/` optional, so `:name* → foobar` agrees)
   ":name+ → foobar [match]",
-]);
-
-// Patterns that cannot be tested via the router (no leading `/`, unsupported syntax, etc.)
-const ROUTER_SKIP_PATTERNS = new Set([
-  // Patterns without leading `/` — router requires `/`-prefixed paths
-  ":name",
-  ":name*",
-  ":name+",
-  "(foo)(.*)",
-  "{(foo)bar}(.*)",
-  "(foo)?(.*)",
-  "{:foo}(.*)",
-  "{:foo}(barbaz)",
-  "{:foo}{(.*)}",
-  "{:foo}{bar(.*)}",
-  "{:foo}:bar(.*)",
-  "{:foo}?(.*)",
-  "{:foo\\bar}",
-  "{:foo\\.bar}",
-  "{:foo(foo)bar}",
-  "{:foo}bar",
-  ":foo\\bar",
-  ":foo{}(.*)",
-  ":foo{}bar",
-  ":foo{}?bar",
-  "*{}**?",
-  ":foo(baz)(.*)",
-  ":foo(baz)bar",
-  ":foo./",
-  ":foo../",
-  "*/*",
-  "*\\/*",
-  "*/{*}",
-  "*//*",
 ]);
 
 // Additional known diffs specific to router-based matching.
@@ -234,12 +314,34 @@ const ROUTER_KNOWN_DIFFS = new Set([
   // but the segment-scoped tree stops at one segment.
   "/foo/(.*) → /foo/bar/baz [match]",
   "/foo/:bar(.*) → /foo/bar/baz [match]",
+  // `**` over zero segments — the router reports its capture as `""` (under
+  // `_`), URLPattern and routeToRegExp leave it unset
+  "/foo/** → /foo [match]",
 ]);
+
+// Patterns URLPattern rejects (`expected_obj: "error"`) but rou3 accepts.
+// Every other rejected pattern must throw a `rou3:` error.
+const ACCEPTED_INVALID_PATTERNS = new Set([
+  // URLPattern allows only ASCII in a regexp group; rou3 hands it to RegExp
+  "(café)",
+  // URLPattern compiles groups with the `u` / `v` flag, where `\m` is an
+  // invalid escape; rou3 compiles without it, so `\m` is `m`
+  "/(\\m)",
+]);
+
+const DIFF_SETS = {
+  KNOWN_DIFFS,
+  REGEXP_ONLY_KNOWN_DIFFS,
+  ROUTER_KNOWN_DIFFS,
+  RESERVED_PATTERNS,
+  ACCEPTED_INVALID_PATTERNS,
+};
 
 type MatchStrategy = {
   name: string;
+  /** Tree lookups take an absolute path: relative inputs are skipped */
+  router?: boolean;
   match: (pattern: string, input: string) => { matched: boolean; params: Record<string, string> };
-  shouldSkip?: (pattern: string) => boolean;
 };
 
 const strategies: MatchStrategy[] = [
@@ -254,7 +356,7 @@ const strategies: MatchStrategy[] = [
   },
   {
     name: "addRoute + findRoute",
-    shouldSkip: (pattern) => ROUTER_SKIP_PATTERNS.has(pattern),
+    router: true,
     match(pattern, input) {
       const router = createRouter<{ path: string }>();
       addRoute(router, "GET", pattern, { path: pattern });
@@ -265,7 +367,7 @@ const strategies: MatchStrategy[] = [
   },
   {
     name: "addRoute + compileRouter",
-    shouldSkip: (pattern) => ROUTER_SKIP_PATTERNS.has(pattern),
+    router: true,
     match(pattern, input) {
       const router = createRouter<{ path: string }>();
       addRoute(router, "GET", pattern, { path: pattern });
@@ -277,78 +379,110 @@ const strategies: MatchStrategy[] = [
   },
 ];
 
+type Plan =
+  | { kind: "skipped"; reason: string }
+  | { kind: "throws" | "accepts" | "rejected" | "run" }
+  | { kind: "known diff"; set: string };
+
+/** How `strategy` checks `test`; records which diff-set entries are reached */
+function planTest(strategy: MatchStrategy, test: PathnameTest, reached: Set<string>): Plan {
+  if (test.skip) return { kind: "skipped", reason: test.skip };
+  const reach = (set: keyof typeof DIFF_SETS, key: string) =>
+    DIFF_SETS[set].has(key) && !!reached.add(`${set}: ${key}`);
+  if (test.input === undefined) {
+    return { kind: reach("ACCEPTED_INVALID_PATTERNS", test.pattern) ? "accepts" : "throws" };
+  }
+  if (reach("RESERVED_PATTERNS", test.pattern)) return { kind: "rejected" };
+  if (strategy.router && !test.input.startsWith("/")) {
+    return { kind: "skipped", reason: "relative input: tree lookups take an absolute path" };
+  }
+  for (const set of strategy.router
+    ? (["KNOWN_DIFFS", "ROUTER_KNOWN_DIFFS"] as const)
+    : (["KNOWN_DIFFS", "REGEXP_ONLY_KNOWN_DIFFS"] as const)) {
+    if (reach(set, test.label)) return { kind: "known diff", set };
+  }
+  return { kind: "run" };
+}
+
 describe("wpt urlpattern compatibility", () => {
-  const tests = getPathnameTests();
+  const { tests, outOfScope } = readPathnameTests();
+  const reached = new Set<string>();
+  const counts: Record<string, Record<string, number>> = {};
 
   for (const strategy of strategies) {
+    const count = (counts[strategy.name] = {} as Record<string, number>);
     describe(`${strategy.name}`, () => {
       describe("pathname matching", () => {
-        const labelCounts = new Map<string, number>();
         for (const test of tests) {
-          const baseLabel = `${test.pattern} ${test.isError ? "(expected error)" : `→ ${test.input ?? "(no input)"} [${test.expectedMatch ? "match" : "no match"}]`}`;
-          const count = labelCounts.get(baseLabel) ?? 0;
-          labelCounts.set(baseLabel, count + 1);
-          const label = count > 0 ? `${baseLabel} #${count + 1}` : baseLabel;
-
-          if (SKIP_PATTERNS.has(test.pattern) || strategy.shouldSkip?.(test.pattern)) {
-            it.skip(label, () => {});
-            continue;
-          }
-
-          if (test.isError) {
-            it(label, () => {
-              try {
-                strategy.match(test.pattern, "/");
-              } catch {
-                // Expected — pattern is invalid
-              }
-            });
-            continue;
-          }
-
-          if (test.input === undefined) continue;
-
-          if (RESERVED_PATTERNS.has(test.pattern)) {
-            it(`${label} (rejected)`, () => {
-              expect(() => strategy.match(test.pattern, test.input!)).toThrow(/^rou3: /);
-            });
-            continue;
-          }
-
-          const isRegexp = strategy.name === "routeToRegExp";
-          const isKnownDiff =
-            KNOWN_DIFFS.has(label) ||
-            (isRegexp && REGEXP_ONLY_KNOWN_DIFFS.has(label)) ||
-            (!isRegexp && ROUTER_KNOWN_DIFFS.has(label));
-          const testFn = isKnownDiff ? it.fails : it;
-
-          testFn(label, () => {
-            const { matched, params } = strategy.match(test.pattern, test.input!);
-
-            if (!test.expectedMatch) {
-              // rou3 ignores one trailing slash — acceptable difference (a
-              // second one is an empty last segment)
-              if (matched && test.input!.endsWith("/") && !test.input!.endsWith("//")) return;
-              expect(matched, `"${test.input}" should not match pattern "${test.pattern}"`).toBe(
-                false,
-              );
-              return;
+          const plan = planTest(strategy, test, reached);
+          const key = plan.kind === "skipped" ? `skipped: ${plan.reason}` : plan.kind;
+          count[key] = (count[key] ?? 0) + 1;
+          const { label, pattern, input, groups } = test;
+          const match = () => {
+            const { matched, params } = strategy.match(pattern, input!);
+            return matched ? params : null;
+          };
+          switch (plan.kind) {
+            case "skipped": {
+              it.skip(`${label} (${plan.reason})`, () => {});
+              break;
             }
-
-            expect(matched, `"${test.input}" should match pattern "${test.pattern}"`).toBe(true);
-
-            for (const [key, value] of Object.entries(test.expectedGroups)) {
-              if (value === null) {
-                expect(params[key], `group "${key}" should be undefined/missing`).toBeUndefined();
-              } else {
-                expect(params[key], `group "${key}"`).toBe(value);
-              }
+            case "throws": {
+              it(label, () => {
+                expect(() => strategy.match(pattern, "/")).toThrow(/^rou3: /);
+              });
+              break;
             }
-          });
+            case "accepts": {
+              it(`${label} (accepted)`, () => {
+                expect(() => strategy.match(pattern, "/")).not.toThrow();
+              });
+              break;
+            }
+            case "rejected": {
+              it(`${label} (rejected)`, () => {
+                expect(() => strategy.match(pattern, input!)).toThrow(/^rou3: /);
+              });
+              break;
+            }
+            case "known diff": {
+              it(`${label} (${plan.set})`, () => {
+                expect(match(), "listed as a known diff but agrees with URLPattern").not.toEqual(
+                  groups,
+                );
+              });
+              break;
+            }
+            default: {
+              it(label, () => {
+                // `toEqual` treats an unset group like a missing one
+                expect(match(), `"${input}" on "${pattern}"`).toEqual(groups);
+              });
+            }
+          }
         }
       });
     });
   }
+
+  it("lists only entries that are in the data", () => {
+    const stale = Object.entries(DIFF_SETS).flatMap(([set, entries]) =>
+      [...entries].map((entry) => `${set}: ${entry}`).filter((key) => !reached.has(key)),
+    );
+    expect(stale).toEqual([]);
+  });
+
+  it("reads every entry", () => {
+    const skipped = [...outOfScope.values()].reduce((a, b) => a + b, 0);
+    expect(tests.length + skipped).toBe(testData.length);
+    const lines = [`${testData.length} entries, ${tests.length} pathname cases`];
+    for (const [reason, n] of outOfScope) lines.push(`  out of scope: ${n} ${reason}`);
+    for (const [name, count] of Object.entries(counts)) {
+      lines.push(`${name}:`);
+      for (const [kind, n] of Object.entries(count).sort()) lines.push(`  ${n} ${kind}`);
+    }
+    console.info(lines.join("\n"));
+  });
 });
 
 // Not in the WPT data: a `:name` / `:name+` needs a value, as in URLPattern
