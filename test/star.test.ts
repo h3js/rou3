@@ -10,6 +10,7 @@ import {
   routeToRegExp,
 } from "../src/index.ts";
 import { compileRouter, compileRouterToString } from "../src/compiler.ts";
+import { needsDuplicateNames } from "./_regexp-cases.ts";
 
 // URLPattern's `*` is a greedy `(.*)` with a required `/` before it: it takes
 // the rest of the path (`/foo/*` on `/foo/a/b` is `a/b`), nothing after the
@@ -107,6 +108,13 @@ const CASES: [
   // the route with an optional one wins
   ["/*/:x?", "/x/y", { 0: "x", x: "y" }, true],
   ["/a/*{/b}?", "/a/x/b", { 0: "x" }, true],
+  // The regex inlines static segments after a `*` with a lazy `*`, only with
+  // nothing optional before it
+  ["/x-*{/b}?", "/x-a/b", { 0: "a" }, true],
+  ["/x-*{/b}?", "/x-a/b/b", { 0: "a/b" }, true],
+  ["/x-*{/b}?", "/x-a/c", { 0: "a/c" }],
+  ["/x-*{/b}?", "/x-/b", { 0: "" }, true],
+  ["/:x?/*/{b}?", "/a/b", { 0: "a" }],
 ];
 
 describe("greedy `*` (URLPattern)", () => {
@@ -126,7 +134,9 @@ describe("greedy `*` (URLPattern)", () => {
       expect(compileRouter(router, { matchAll: true })("GET", path)).toEqual(all);
       const aot = new Function(`return ${compileRouterToString(router)}`)();
       expect(result(aot("GET", path))).toEqual(expected);
-      // The regex matches what the router matches, with its captures
+      // The regex matches what the router matches, with its captures (on an
+      // engine without duplicate named groups, where it has them, it throws)
+      if (needsDuplicateNames(route)) return;
       const match = path.match(routeToRegExp(route));
       expect(match ? definedGroups(match.groups) : null).toEqual(params);
     });

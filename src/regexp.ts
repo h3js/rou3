@@ -192,7 +192,17 @@ function lazyStarGroup(
     unnamed,
   );
   const base = joinSegments(segments, ownSeparator);
-  if (openTail === STAR_TAIL && base.endsWith(`${ANY})`)) {
+  const last = segments[segments.length - 1];
+  // Nothing optional before the `*` (`/:x?/*{/b}?`): the regex would take it
+  // first where the router ranks the route with the group higher
+  if (
+    openTail === STAR_TAIL &&
+    base.endsWith(`${ANY})`) &&
+    segments
+      .slice(0, -1)
+      .concat(last.slice(0, last.lastIndexOf("(?<")))
+      .every((segment) => isFixedSegment(segment))
+  ) {
     return new RegExp(`^${base.slice(0, -1)}?)(?:/${keys.join("/")})?/?$`);
   }
 }
@@ -210,14 +220,6 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
     return;
   }
   const [pre, body, suf, mod] = group;
-  // Static segments after a route ending in a `*` (`/a/*{/b}?`, `/x-*/{b}?`)
-  const star =
-    mod === "?" && suf === "" && /(?<!\\)\*\/?$/.test(pre)
-      ? lazyStarGroup(pre, body, input, unnamed)
-      : undefined;
-  if (star) {
-    return star;
-  }
   if (
     mod !== "?" ||
     body === "" ||
@@ -226,15 +228,19 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
     scanFirstGroup(pre) ||
     scanFirstGroup(body) ||
     scanFirstGroup(suf) ||
-    // A group right after a catch-all (`/a/**{.json}?`, `/a/*{/:x}?`,
-    // `/a/x-*{.png}?`) adds an optional part after it, which the router ranks
-    // against the route without it: expand (see `lazyCatchAll`), unless it is
-    // static segments after a `*` (`lazyStarGroup`, above).
-    /(?<!\\)\*$/.test(pre) ||
     needsModifierExpansion(pre + suf) ||
     needsModifierExpansion(pre + body + suf)
   ) {
     return;
+  }
+  // Static segments after a route ending in a `*` (`/a/*{/b}?`, `/x-*/{b}?`)
+  const star =
+    suf === "" && /(?<!\\)\*\/?$/.test(pre) ? lazyStarGroup(pre, body, input, unnamed) : undefined;
+  // Any other group right after a catch-all (`/a/**{.json}?`, `/a/*{/:x}?`,
+  // `/a/x-*{.png}?`) adds an optional part after it, which the router ranks
+  // against the route without it: expand (see `lazyCatchAll`).
+  if (star || /(?<!\\)\*$/.test(pre)) {
+    return star;
   }
 
   // A catch-all before a trailing group is lazy or greedy with the group's
