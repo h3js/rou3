@@ -253,7 +253,7 @@ describe("regExpToRoute", () => {
     // A name is `[A-Za-z_]\w*`: a word char right after `:name` would read as
     // more of the name, and a non-ASCII one is rejected there. A `-` ends it.
     expect(regExpToRoute(/^\/a\/(?<x>[^/]+)abc\/?$/)).toBe("/a/:x\\abc");
-    expect(regExpToRoute(/^\/a\/(?<x>[^/]+)é\/?$/)).toBe("/a/:x\\é");
+    expect(regExpToRoute(/^\/a\/(?<x>[^/]+)%C3%A9\/?$/)).toBe("/a/:x%C3%A9");
     expect(regExpToRoute(/^\/a\/pre-(?<x>[^/]+)-suf\/?$/)).toBe("/a/pre-:x-suf");
     expect(regExpToRoute(/^\/a\/(?<x>[^/]+)-\/?$/)).toBe("/a/:x-");
     expect(regExpToRoute(/^\/a\/(?<x>[^/]+)-(?<y>[^/]+)\/?$/)).toBe("/a/:x-:y");
@@ -286,6 +286,39 @@ describe("regExpToRoute", () => {
     // dropped the constraint), so their old regexes have no route form.
     expect(() => regExpToRoute(/^\/path\/(?<id>\d+(?:\/\d+)*)\/?$/)).toThrow(/^rou3: /);
     expect(() => regExpToRoute(/^\/path(?:\/(?<id>\d+(?:\/\d+)*))?\/?$/)).toThrow(/^rou3: /);
+  });
+
+  it("keeps percent-encoded literals encoded", () => {
+    // A route's literal text is percent-encoded (`%` kept), so `%XX` comes
+    // back as written: decoding it would change the route (`%2F`, `%25`).
+    for (const [route, reversed] of [
+      ["/café/:id", "/caf%C3%A9/:id"],
+      ["/caf%c3%a9", "/caf%c3%a9"],
+      ["/a\\{b\\}/\\?/:x-é", "/a%7Bb%7D/%3F/:x-%C3%A9"],
+      ["/100%/a%2F", "/100%/a%2F"],
+    ]) {
+      expect(regExpToRoute(routeToRegExp(route)), route).toBe(reversed);
+      expect(routeToRegExp(reversed).source, route).toBe(routeToRegExp(route).source);
+    }
+  });
+
+  it("rejects a literal a route would percent-encode", () => {
+    // No route matches a raw `é`, space, `{`, `?`, ... (its text is encoded),
+    // so a regex holding one outside a constraint has no equivalent route.
+    for (const re of [
+      /^\/café\/?$/,
+      /^\/a\/(?<x>[^/]+)é\/?$/,
+      /^\/a b\/?$/,
+      /^\/a\{b\}\/?$/,
+      /^\/a\?\/?$/,
+      /^\/a\^\/?$/,
+      /^\/a#\/?$/,
+      /^\/😀\/?$/,
+    ]) {
+      expect(() => regExpToRoute(re), re.source).toThrow(/^rou3: /);
+    }
+    // Inside a constraint it is regex, kept as written
+    expect(regExpToRoute(/^\/a\/(?<x>é)\/?$/)).toBe("/a/:x(é)");
   });
 
   it("re-escapes literal route-syntax characters", () => {

@@ -146,12 +146,29 @@ Groups can't be nested or repeated (`{...}+` and `{...}*` throw).
 
 ### Escaping
 
-Escape `:`, `*`, `?`, `+`, `(`, `)`, `{` and `}` with a backslash to match them literally. Outside a regex constraint, any escaped character is a literal (`\\.` is `.`, `\\\\` is `\`), as in URLPattern. A `\` can't escape `/` or end a segment.
+Escape `:`, `*`, `?`, `+`, `(`, `)`, `{` and `}` with a backslash to match them literally (a literal `?`, `{` or `}` is then [percent-encoded](#percent-encoding), like other literal text). Outside a regex constraint, any escaped character is a literal (`\\.` is `.`, `\\\\` is `\`), as in URLPattern. A `\` can't escape `/` or end a segment.
 
 ```js
 addRoute(router, "GET", "/static\\:path/\\*\\*", {}); // matches only "/static:path/**"
 addRoute(router, "GET", "/files/\\(2024\\)", {}); // matches only "/files/(2024)"
 ```
+
+### Percent-encoding
+
+The literal text of a pattern is percent-encoded once, when the route is added, the same way URLPattern and `new URL()` encode a pathname. Lookup paths are not decoded or encoded, so pass the encoded pathname (`new URL(req.url).pathname`):
+
+```js
+addRoute(router, "GET", "/café/:id", {});
+findRoute(router, "GET", "/caf%C3%A9/1"); // { data: {}, params: { id: "1" } }
+findRoute(router, "GET", "/café/1"); // undefined
+```
+
+- Encoded: control characters (tab and newline too, which URLPattern drops), space, `"`, `#`, `<`, `>`, `?`, `^`, `` ` ``, `{`, `}`, and every non-ASCII character (as UTF-8, upper-case hex: `é` is `%C3%A9`). This covers escaped characters too: `\\?` matches `%3F`, `\\{` matches `%7B`.
+- Not encoded: `%`, so an existing `%xx` stays as written (`/caf%c3%a9` matches only `/caf%c3%a9`, not `/caf%C3%A9`), and other ASCII characters (`/a|b[c]` stays as is).
+- Regex constraints are regex and are not encoded: write `:x(%C3%A9)`, not `:x(é)`.
+- A lone surrogate is encoded as U+FFFD (`%EF%BF%BD`), as in URLPattern.
+
+`removeRoute`, `routeToRegExp`, `routeNodeKeys`, the overlap helpers, and the compiler see the encoded text too: `/café` and `/caf%C3%A9` are the same route.
 
 ### Invalid patterns
 
@@ -174,13 +191,13 @@ rou3 matches paths segment by segment in a tree, which leads to a few intentiona
 | Optional param after a greedy capture (`/*-:x?`, `/:a(\d+):b?`) | The greedy capture takes what it can (`/--`: `{ 0: "-" }`; `/12`: `{ a: "12" }`) | The route with the param wins (`/--`: `{ 0: "", x: "-" }`; `/12`: `{ a: "1", b: "2" }`) |
 | Param names                   | Unicode identifiers                | `[A-Za-z_]\w*`; a non-ASCII char or `$` right after one throws |
 | Empty segments in `:name*` / `:name+` | Every repeated segment needs a value (`/foo/:bar*` doesn't match `/foo//`) | A `:name*` may be empty (`/foo/:bar*` on `/foo//` is `{ bar: "" }`), a `:name+` needs a value as a whole (`/foo/:bar+` on `/foo//a` is `{ bar: "/a" }`) |
-| Percent-encoding              | Normalizes `%xx` sequences         | Input is not decoded                            |
+| Percent-encoding              | Encodes the pattern's literal text and the input | Encodes the pattern's literal text; the input must already be encoded (`new URL().pathname`) and is never decoded |
 
 ## Matching
 
 ### Methods and paths
 
-The paths you look up must start with `/` and the methods must be **UPPERCASE** (`"GET"`, not `"get"`). rou3 does not normalize lookup input, so do it before calling `findRoute`.
+The paths you look up must start with `/` and the methods must be **UPPERCASE** (`"GET"`, not `"get"`). rou3 does not normalize lookup input, so do it before calling `findRoute`. Paths must be percent-encoded, as `new URL().pathname` gives them: a route's literal text is encoded (see [percent-encoding](#percent-encoding)).
 
 ### Routes for any method
 
@@ -548,9 +565,9 @@ A param in a segment with other text is lazy (`[^/]+?`), like in the router, so 
 
 - The dialect `routeToRegExp` emits: `(?<name>...)` groups, `[^/]*` segments and `[^/]+?` params inside one, `[\s\S]*` catch-alls, `(?:/...)?` optional groups and the endings shown above. Unnamed groups such as `(\d+)` work too, and the regex inside a constraint is kept verbatim.
 - Looser forms, as older versions emitted: a plain `\/?` ending, `.*` / `.+` catch-alls and `[^/]+` params, read as `:name`. A `:name` inside a segment is lazy, so a hand-written greedy `(?<a>[^/]+)-(?<b>[^/]+)` comes back as `/:a-:b`, which splits `/x-y-z` as `x` and `y-z`. An old catch-all inside an optional group is the exception: 0.9.2's regex for `/a{/:w*}?` throws, and its regex for `/a{/:w+}?` comes back as `/a/:w(.+)?` (the current regexes come back as `/a/:w*` and `/a{/:w+}?`).
-- Routes that compile to the same regex come back in one spelling: `/base/**:path` becomes `/base/:path+`, `/**.md` becomes `/**/*.md`, `/a/pre-{:x}?` becomes `/a/pre-:x?`, and `/a/:x?/:y?` becomes `/a{/:x/:y?}?`.
+- Routes that compile to the same regex come back in one spelling: `/base/**:path` becomes `/base/:path+`, `/**.md` becomes `/**/*.md`, `/a/pre-{:x}?` becomes `/a/pre-:x?`, and `/a/:x?/:y?` becomes `/a{/:x/:y?}?`. Percent-encoded text stays encoded: the regex for `/café` comes back as `/caf%C3%A9` (the same route).
 
-It throws for: a regex not anchored with both `^` and `$`, look-arounds and backreferences, regex operators outside a constraint (`|`, `.`, `+`, `[…]`, …), the flags `i`, `m`, `s`, `u` and `v` (`g`, `y` and `d` are ignored), the duplicate-group alternations above, and constraints that can't be written as a route (for example one containing `/`).
+It throws for: a regex not anchored with both `^` and `$`, look-arounds and backreferences, regex operators outside a constraint (`|`, `.`, `+`, `[…]`, …), a literal character a route would [percent-encode](#percent-encoding) outside a constraint (`é`, a space, `\{`, `\?`, …: no route matches it), the flags `i`, `m`, `s`, `u` and `v` (`g`, `y` and `d` are ignored), the duplicate-group alternations above, and constraints that can't be written as a route (for example one containing `/`).
 
 </details>
 

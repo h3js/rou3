@@ -7,6 +7,7 @@ import {
   checkConstraints,
   decodeEscapes,
   encodeEscapes,
+  encodeLiteral,
   expandedRouteId,
   expandModifiers,
   invalidSyntax,
@@ -297,16 +298,23 @@ export function getParamRegexp(
     if (c === 40) _d++;
     else if (c === 41 && _d > 0) {
       if (--_d === 0) _e = j + 1;
-    } else if (c === 92 && _d === 0 && j + 1 < segment.length) {
-      // `\*` stays an escape so it is no wildcard (`\:` `\(` `\\` are encoded)
-      const n = segment[++j];
-      _s += n === "*" ? "\\*" : "\uFFFE" + n;
+    } else if (_d === 0 && c === 0xfffd && /[34]/.test(segment[j + 1])) {
+      // `encodeEscapes`' placeholders 3 and 4, an escaped `{` / `}`, are text;
+      // the others (`\:` `\(` `\)` `\\`) stay hidden until params and groups
+      // are named (`encodeLiteral` leaves U+FFFD alone)
+      _s += encodeLiteral("{}"[+segment[++j] - 3]);
       continue;
-    }
-    // Regex chars outside a (...) group are literals, as in a static segment
-    // (`:x.json`, `*$`); inside one they are regex (`:id(\d+\.\d+)`).
-    else if (_d === 0 && /[.^$|[\]){}]/.test(segment[j])) {
-      _s += "\\" + segment[j];
+    } else if (_d === 0 && /[\0- "#$).<>?[-^`{-}\x7F-\uFFFC]/.test(segment[j])) {
+      // Outside a (...) group, a `\x` is a literal `x` (U+FFFE-marked; `\*`
+      // stays an escape so it is no wildcard), and so are regex chars, as in
+      // a static segment (`:x.json`, `*$`; inside a group they are regex:
+      // `:id(\d+\.\d+)`). Literal text is percent-encoded like URLPattern
+      // (`encodeLiteral`, a surrogate pair at once; `%XX` is no syntax).
+      const esc = c === 92 && j + 1 < segment.length ? 1 : 0;
+      const ch = segment.slice(j + esc, j + esc + (segment.codePointAt(j + esc)! > 0xffff ? 2 : 1));
+      const encoded = encodeLiteral(ch);
+      j += esc + ch.length - 1;
+      _s += encoded !== ch ? encoded : esc && ch !== "*" ? "\uFFFE" + ch : "\\" + ch;
       continue;
     }
     _s += segment[j];

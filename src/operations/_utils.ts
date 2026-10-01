@@ -20,6 +20,7 @@ export function decodeEscapes(segment: string, prefix: string): string {
   return segment.replace(/\uFFFD([0-5])/g, (_, i) => prefix + ESCAPABLE[i]);
 }
 
+// `getParamRegexp` reads placeholders 3 / 4 as `{` / `}`
 const ESCAPABLE = ":(){}\\";
 
 /**
@@ -47,8 +48,27 @@ export function segmentKey(segment: string): string | 1 | 2 {
     return 1;
   }
   if (segment.includes("\\")) segment = segment.replace(/\\([\s\S])/g, "$1");
-  if (!segment.includes("\uFFFD")) return segment;
-  return decodeEscapes(segment, "");
+  if (segment.includes("\uFFFD")) segment = decodeEscapes(segment, "");
+  return encodeLiteral(segment);
+}
+
+/**
+ * Percent-encode literal pattern text like URLPattern canonicalizes a
+ * pathname pattern, so a route matches the encoded pathname `new URL()`
+ * gives (lookup paths are never decoded): the URL path percent-encode set
+ * (C0 controls, space, `"#<>?^\`{}`, U+007F and up) as UTF-8 `%XX`, a lone
+ * surrogate as U+FFFD. A `%` stays, so an existing `%XX` is kept as written.
+ * Only for text already read as literal (static keys, `getParamRegexp`): an
+ * escape or a `:name` must be parsed first. U+FFFD-U+FFFF are left alone:
+ * internal placeholders (`checkConstraints` rejects them in a route).
+ */
+export function encodeLiteral(text: string): string {
+  // A `test` bails early on plain text (a no-match `replace` costs more)
+  return /[\0- "#<>?^`{}\x7F-\uFFFC]/.test(text)
+    ? text.replace(/[\0- "#<>?^`{}\x7F-\uFFFC]+/g, (run) =>
+        encodeURIComponent(run.replace(/[\uD800-\uDFFF]/gu, "\uFFFD")),
+      )
+    : text;
 }
 
 /**

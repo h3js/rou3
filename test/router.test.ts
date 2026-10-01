@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { RouterContext } from "../src/types.ts";
 import { createRouter, formatTree } from "./_utils.ts";
 import { addRoute, findRoute, removeRoute } from "../src/index.ts";
-import { compileRouter } from "../src/compiler.ts";
+import { compileRouter, compileRouterToString } from "../src/compiler.ts";
 
 type TestRoute = {
   data: { path: string };
@@ -743,6 +743,123 @@ describe("Router lookup", function () {
   });
 });
 
+// Literal pattern text is percent-encoded once, at insert, like URLPattern
+// canonicalizes a pathname pattern (the URL path percent-encode set, `%`
+// kept), so a route matches the encoded pathname `new URL()` gives. Lookup
+// paths are not decoded. `[pattern, path, params]`, `null` for no match.
+const PERCENT_ENCODED_CASES: [string, string, Record<string, string> | null][] = [
+  ["/café", "/caf%C3%A9", {}],
+  ["/café", "/café", null],
+  ["/café", "/caf%c3%a9", null],
+  ["/caf\\é", "/caf%C3%A9", {}],
+  ["/café/:id", "/caf%C3%A9/1", { id: "1" }],
+  ["/café-:id", "/caf%C3%A9-1", { id: "1" }],
+  ["/:id-café", "/1-caf%C3%A9", { id: "1" }],
+  ["/:caf\\é", "/x%C3%A9", { caf: "x" }],
+  ["/x/:id{é}?", "/x/1%C3%A9", { id: "1" }],
+  ["/x/:id{é}?", "/x/1", { id: "1" }],
+  ["/caf{é}?", "/caf%C3%A9", {}],
+  ["/caf{é}?", "/caf", {}],
+  ["/a/*é", "/a/x%C3%A9", { "0": "x" }],
+  ["/**:p/é", "/a/b/%C3%A9", { p: "a/b" }],
+  ["/😀", "/%F0%9F%98%80", {}],
+  ["/x-:id-😀", "/x-1-%F0%9F%98%80", { id: "1" }],
+  // The encode set: C0 controls, space, `"#<>?^\`{}`, U+007F and up
+  ["/a b", "/a%20b", {}],
+  ['/a"b', "/a%22b", {}],
+  ["/a#b", "/a%23b", {}],
+  ["/a<b>", "/a%3Cb%3E", {}],
+  ["/a\\?b", "/a%3Fb", {}],
+  ["/a^b", "/a%5Eb", {}],
+  ["/a`b", "/a%60b", {}],
+  ["/a\\{b\\}", "/a%7Bb%7D", {}],
+  ["/a\x01\x7Fb", "/a%01%7Fb", {}],
+  ["/a\tb", "/a%09b", {}],
+  ["/x/^:id", "/x/%5E1", { id: "1" }],
+  ["/x/:id\\{\\}", "/x/1%7B%7D", { id: "1" }],
+  ["/x/:id\\?", "/x/1%3F", { id: "1" }],
+  ["/x/:id #", "/x/1%20%23", { id: "1" }],
+  // Not encoded: `%` (an existing `%XX` stays as written), other ASCII
+  ["/caf%c3%a9", "/caf%c3%a9", {}],
+  ["/caf%c3%a9", "/caf%C3%A9", null],
+  ["/100%", "/100%", {}],
+  ["/a%zz/:id", "/a%zz/1", { id: "1" }],
+  ["/a\\%b", "/a%b", {}],
+  ["/a|b[c]'!$&=@;,~+", "/a|b[c]'!$&=@;,~+", {}],
+  ["/x/:id|[c]'!&=@;,~", "/x/1|[c]'!&=@;,~", { id: "1" }],
+  // A lone surrogate is U+FFFD, as in URLPattern and `new URL()`
+  ["/a\uD800", "/a%EF%BF%BD", {}],
+  ["/a-:x-\uDC00", "/a-1-%EF%BF%BD", { x: "1" }],
+  // A constraint is regex, kept as written
+  ["/:x(é)", "/é", { x: "é" }],
+  ["/:x(é)", "/%C3%A9", null],
+  ["/:x(%C3%A9)", "/%C3%A9", { x: "%C3%A9" }],
+  ["/:x(a\\{1\\})", "/a{1}", { x: "a{1}" }],
+];
+
+describe("Router: percent-encoded literal text", () => {
+  for (const [pattern, path, params] of PERCENT_ENCODED_CASES) {
+    it(`${JSON.stringify(pattern)} on ${JSON.stringify(path)}`, () => {
+      const router = createRouter([pattern]);
+      const expected = params && {
+        data: { path: pattern },
+        ...(Object.keys(params).length > 0 ? { params } : {}),
+      };
+      const found = findRoute(router, "GET", path);
+      expect(
+        found ? { ...found, ...(found.params && { params: { ...found.params } }) } : null,
+      ).toEqual(expected);
+      expect(compileRouter(router)("GET", path) ?? null, "JIT").toEqual(expected);
+      // eslint-disable-next-line no-new-func
+      const aot = new Function(`return ${compileRouterToString(router)}`)();
+      expect(aot("GET", path) ?? null, "AOT").toEqual(expected);
+    });
+  }
+
+  it("keys the tree with the encoded text", () => {
+    const router = createRouter(["/café/:id", "/a\\{b\\}", "/x/**/é"]);
+    expect(formatTree(router.root)).toMatchInlineSnapshot(`
+      "<root>
+          ├── /caf%C3%A9
+          │       ├── /* ┈> [GET] /café/:id
+          ├── /a%7Bb%7D ┈> [GET] /a\\{b\\}
+          ├── /x
+          │       ├── /**
+          │       │       ├── <suffix>
+          │       │       │       ├── /%C3%A9 ┈> [GET] /x/**/é"
+    `);
+    expect(Object.keys(router.static)).toEqual(["/a%7Bb%7D"]);
+  });
+
+  it("still reads syntax before encoding", () => {
+    // A non-ASCII char right after a name is no literal that ends it
+    expect(() => addRoute(createRouter([]), "GET", "/:café")).toThrow(
+      'rou3: invalid param name "café" (/:café)',
+    );
+    // An unescaped `?` after text is still a misplaced modifier
+    expect(() => addRoute(createRouter([]), "GET", "/a?")).toThrow(/^rou3: misplaced/);
+  });
+
+  it("removes a route by any spelling of its encoded text", () => {
+    for (const [route, remove] of [
+      ["/café", "/café"],
+      ["/café", "/caf%C3%A9"],
+      ["/caf%C3%A9", "/café"],
+      ["/café/:id", "/café/:id"],
+      ["/café/:id?", "/café/:id?"],
+      ["/a\\{b\\}", "/a\\{b\\}"],
+      ["/a\\{b\\}", "/a%7Bb%7D"],
+      ["/x/**/é", "/x/**/é"],
+      ["/a\uD800", "/a\uD800"],
+    ]) {
+      const router = createRouter([route]);
+      removeRoute(router, "GET", remove);
+      expect(formatTree(router.root), `${route} - ${remove}`).toBe("<root>");
+      expect(router.static, `${route} - ${remove}`).toEqual({});
+    }
+  });
+});
+
 describe("Router insert", () => {
   it("should be able to insert nodes correctly into the tree", () => {
     const router = createRouter([
@@ -962,7 +1079,7 @@ describe("Router remove", function () {
       [String.raw`/\:a/\*`, "/:a/*"],
       [String.raw`/static\:path/\*\*`, "/static:path/**"],
       [String.raw`/a/\(x\)`, "/a/(x)"],
-      [String.raw`/a/\{x\}`, "/a/{x}"],
+      [String.raw`/a/\{x\}`, "/a/%7Bx%7D"],
     ] as const) {
       it(`${route} (matches ${path})`, function () {
         const router = createRouter([route]);

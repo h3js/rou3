@@ -87,6 +87,12 @@ describe("routesOverlap", () => {
     ["/a/\\:b", "/a/x", false, "escaped colon literal vs other literal"],
     ["/a/\\*", "/a/*", true, "escaped star is literal, matched by wildcard"],
     ["/a/\\*", "/a/x", false, "escaped star literal vs other literal"],
+
+    // literal text is percent-encoded (`%` kept)
+    ["/café", "/caf%C3%A9", true, "a literal and its encoded spelling"],
+    ["/café", "/caf%c3%a9", false, "lower-case hex is another literal"],
+    ["/a/:x(%C3%A9)", "/a/é", true, "constraint matches the encoded literal"],
+    ["/a/:x(é)", "/a/é", false, "a raw constraint misses the encoded literal"],
   ];
 
   for (const [a, b, expected, label] of cases) {
@@ -104,6 +110,7 @@ describe("compareRoutes", () => {
     // literal / literal
     ["/a/b", "/a/b", "equal", "identical literals"],
     ["/a/b", "/a/c", "disjoint", "disjoint literals"],
+    ["/café/:id", "/caf%C3%A9/:id", "equal", "a literal and its encoded spelling"],
     ["/a", "/a/b", "disjoint", "different literal depth"],
 
     // `**` zero-or-more segments

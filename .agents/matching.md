@@ -71,6 +71,7 @@ Segments after a `**` match from the **end** of the path; the `**` takes what is
   - Compiler: see [compiler.md](compiler.md#codegen-invariants). Pinned by the "empty segments (compiled parity, sweep)" in `find.test.ts`.
 - **Middle** empties are real static `""` segments: `/a//b` matches only the doubled-slash path. Never collapse them (normalization-mismatch bypass).
 - `normalizePath()` resolves `.` / `..` before matching (skipped when no `/.`); the compiler inlines the same logic.
+- **Percent-encoding:** lookup paths are the encoded pathname (`new URL().pathname`) and are never decoded; a route's literal text is encoded at insert instead (see [syntax.md](syntax.md#percent-encoding)). Do not add decoding to the hot path.
 
 ## Unnamed captures
 

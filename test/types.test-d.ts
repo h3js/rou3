@@ -180,6 +180,16 @@ describe("types", () => {
       expectTypeOf<InferRouteParams<"/:id\\$">>().toEqualTypeOf<{ id: string }>();
     });
 
+    // Literal text is percent-encoded at insert; it never changes the keys
+    it("should ignore literal text, encoded or not", () => {
+      expectTypeOf<InferRouteParams<"/café/:id">>().toEqualTypeOf<{ id: string }>();
+      expectTypeOf<InferRouteParams<"/café-:id">>().toEqualTypeOf<{ id: string }>();
+      expectTypeOf<InferRouteParams<"/:id-café">>().toEqualTypeOf<{ id: string }>();
+      expectTypeOf<InferRouteParams<"/:caf\\é">>().toEqualTypeOf<{ caf: string }>();
+      expectTypeOf<InferRouteParams<"/:id%C3%A9">>().toEqualTypeOf<{ id: string }>();
+      expectTypeOf<InferRouteParams<"/a b/\\{x\\}/:id">>().toEqualTypeOf<{ id: string }>();
+    });
+
     it("should infer mixed params", () => {
       type Params = InferRouteParams<"/test/:id/*/foo/:name/**">;
       type Expected = { id: string; "0": string; name: string; _: string };
