@@ -21,8 +21,6 @@ type WptEntry = {
   expected_obj?: "error" | Record<string, string>;
   // `null`: no match, `"error"`: test() / exec() throw on the inputs
   expected_match?: null | "error" | Record<string, WptResult>;
-  // Components that match exactly `""` (no default `*` capture)
-  exactly_empty_components?: string[];
 };
 
 type PathnameTest = {
@@ -68,10 +66,17 @@ function readEntry(entry: WptEntry): PathnameTest | string {
     return "constrains other components too (`baseURL`, `protocol`)";
   const pattern = init.pathname as string;
 
+  // The skips below check the exact shape their reason names; anything else
+  // fails loudly so a new kind of entry is read on purpose, not skipped
+  const unexpected = (what: string) =>
+    new Error(`wpt: unexpected ${what} for ${JSON.stringify(entry.pattern)}`);
+
   if (entry.expected_obj === "error") {
     const test: PathnameTest = { label: `${pattern} (expected error)`, pattern };
-    if (options !== undefined) {
+    if (typeof options === "string") {
       test.skip = "a base URL next to an init throws in the constructor, the pattern is fine";
+    } else if (options !== undefined) {
+      throw unexpected(`constructor options ${JSON.stringify(options)}`);
     }
     return test;
   }
@@ -79,30 +84,30 @@ function readEntry(entry: WptEntry): PathnameTest | string {
   const inputs = entry.inputs ?? [];
   const label = `${pattern} → ${inputs.length > 0 ? JSON.stringify(inputs) : "(no inputs)"}`;
   if (options !== undefined) {
-    const reason =
-      typeof options === "object" && options.ignoreCase
-        ? "`ignoreCase`: rou3 is always case-sensitive"
-        : `constructor options ${JSON.stringify(options)}`;
-    return { label, pattern, skip: reason };
+    if (JSON.stringify(options) !== '{"ignoreCase":true}') {
+      throw unexpected(`constructor options ${JSON.stringify(options)}`);
+    }
+    return { label, pattern, skip: "`ignoreCase`: rou3 is always case-sensitive" };
   }
   if (inputs.length === 0) {
     return { label, pattern, skip: "no inputs: checks the canonical pattern string only" };
   }
   if (entry.expected_match === "error") {
+    if (inputs.length !== 2 || typeof inputs[0] !== "object" || typeof inputs[1] !== "string") {
+      throw unexpected(`exec() error on ${JSON.stringify(inputs)}`);
+    }
     return { label, pattern, skip: "exec() throws on its arguments (a base URL next to an init)" };
   }
 
   const input = readInput(inputs);
   if (typeof input === "string") return { label, pattern, skip: input };
 
-  // WPT's runner: a missing component result is `""` with a `"0": ""` capture,
-  // unless the component is in `exactly_empty_components`
-  const result: WptResult | null = entry.expected_match
-    ? (entry.expected_match.pathname ?? {
-        input: "",
-        groups: entry.exactly_empty_components?.includes("pathname") ? {} : { "0": "" },
-      })
+  // WPT's runner defaults a missing component result (`""` with a `"0": ""`
+  // capture); no pathname case relies on it, so one that does fails here
+  const result: WptResult | null | undefined = entry.expected_match
+    ? entry.expected_match.pathname
     : null;
+  if (result === undefined) throw unexpected("`expected_match` without a pathname");
   if (result && input.from && result.input !== input.pathname) {
     throw new Error(`wpt: "${input.from}" resolves to "${input.pathname}", not "${result.input}"`);
   }
@@ -195,85 +200,96 @@ function encodePathname(path: string): string {
   return path.replace(/[\0- "#<>?^`{}\x7F-\u{10FFFF}]/gu, (c) => encodeURIComponent(c));
 }
 
-// Known diff labels: tests where rou3 intentionally behaves differently.
-// Asserted to differ (and not to throw) so we notice if rou3 gains compatibility.
-// Labels include `[match]` or `[no match]` to disambiguate duplicate patterns.
-const KNOWN_DIFFS = new Set([
-  // `(.*)` cross-segment — a regex group `(.*)` matches across `/` (URLPattern
-  // semantics), which routeToRegExp now reproduces, so single-segment inputs
-  // agree for every strategy. The tree is segment-scoped, so multi-segment
-  // and empty inputs stay router-only diffs (see ROUTER_KNOWN_DIFFS). Only inputs
-  // that still differ for *every* strategy remain here.
+/** rou3's result for a case: its groups (an unset one is `undefined`), `null` for no match */
+type Result = Record<string, string | undefined> | null;
 
+const SPLIT = Symbol("split");
+
+/** A known diff's results where `routeToRegExp` and the tree also differ from each other */
+type Split = { [SPLIT]: true; regexp: Result; router: Result };
+
+const split = (regexp: Result, router: Result): Split => ({ [SPLIT]: true, regexp, router });
+
+const diffs = <T>(entries: Record<string, T>) => new Map(Object.entries(entries));
+
+// Known diffs: tests where rou3 intentionally behaves differently, keyed by
+// label (`[match]` / `[no match]` is URLPattern's outcome) with rou3's exact
+// result. Each is asserted to differ from URLPattern and to equal the stored
+// result, so any change in what rou3 returns fails: update the entry, or drop
+// it once rou3 agrees with URLPattern.
+const KNOWN_DIFFS = diffs<Result | Split>({
   // `*` catch-all vs single-segment — URLPattern `*` = `(.*)`, rou3 `*` = `([^/]*)`
-  "/foo/* → /foo/bar/baz [match]",
+  "/foo/* → /foo/bar/baz [match]": null,
 
   // Trailing slash — rou3 ignores at most one trailing slash, so `/foo/` is
   // `/foo` (no empty last segment), and a trailing `*` is optional. URLPattern
   // matches `/foo/` with an empty capture and rejects `/foo` for `/foo/*`.
   // routeToRegExp reproduces the router here (#200).
-  "/foo/(.*) → /foo/ [match]",
-  "/foo/* → /foo/ [match]",
-  "/foo/* → /foo [no match]",
-  "/foo/:bar(.*) → /foo/ [match]",
+  "/foo/(.*) → /foo/ [match]": null,
+  "/foo/* → /foo/ [match]": { "0": undefined },
+  "/foo/* → /foo [no match]": { "0": undefined },
+  "/foo/:bar(.*) → /foo/ [match]": null,
 
   // `**` — URLPattern reads `**` as `*` with a `*` modifier and captures it as
-  // `"0"`; rou3 names the bare `**` capture `_`
-  "/foo/** → /foo/ [match]",
-  "/foo/** → /foo/bar [match]",
-  "/foo/** → /foo/bar/baz [match]",
+  // `"0"` (unset over zero segments); rou3 names the bare `**` capture `_`
+  // (left out of routeToRegExp's groups by `normalizeGroups`), and the tree
+  // reports it as `""` over zero segments
+  "/foo/** → /foo [match]": split({}, { _: "" }),
+  "/foo/** → /foo/ [match]": split({}, { _: "" }),
+  "/foo/** → /foo/bar [match]": split({}, { _: "bar" }),
+  "/foo/** → /foo/bar/baz [match]": split({}, { _: "bar/baz" }),
 
   // Relative inputs — rou3's regex is anchored at `/` (the router skips them)
-  "*/* → foo/bar [match]",
-  "*/{*} → foo/bar [match]",
+  "*/* → foo/bar [match]": null,
+  "*/{*} → foo/bar [match]": null,
 
   // Patterns without leading `/` — rou3 always prefixes `/` in regex
-  ":name → foobar [match]",
-  "(foo)(.*) → foobarbaz [match]",
-  "{(foo)bar}(.*) → foobarbaz [match]",
-  "{:foo}(.*) → foobarbaz [match]",
-  "{:foo}(barbaz) → foobarbaz [match]",
-  "{:foo}{(.*)} → foobarbaz [match]",
-  "{:foo}{bar(.*)} → foobarbaz [match]",
-  "{:foo}:bar(.*) → foobarbaz [match]",
-  "{:foo}?(.*) → foobarbaz [match]",
-  "{:foo\\bar} → foobar [match]",
-  "{:foo\\.bar} → foo.bar [match]",
-  "{:foo(foo)bar} → foobar [match]",
-  "{:foo}bar → foobar [match]",
-  ":foo\\bar → foobar [match]",
-  ":foo{}(.*) → foobar [match]",
-  ":foo{}bar → foobar [match]",
-  ":foo{}?bar → foobar [match]",
-  ":foo(baz)(.*) → bazbar [match]",
-  ":foo(baz)bar → bazbar [match]",
-  ":foo./ → bar./ [match]",
-  ":foo../ → bar../ [match]",
-  "./foo → ./foo [match]",
-  "../foo → ../foo [match]",
-  "var x = 1; → var x = 1; [match]",
+  ":name → foobar [match]": null,
+  "(foo)(.*) → foobarbaz [match]": null,
+  "{(foo)bar}(.*) → foobarbaz [match]": null,
+  "{:foo}(.*) → foobarbaz [match]": null,
+  "{:foo}(barbaz) → foobarbaz [match]": null,
+  "{:foo}{(.*)} → foobarbaz [match]": null,
+  "{:foo}{bar(.*)} → foobarbaz [match]": null,
+  "{:foo}:bar(.*) → foobarbaz [match]": null,
+  "{:foo}?(.*) → foobarbaz [match]": null,
+  "{:foo\\bar} → foobar [match]": null,
+  "{:foo\\.bar} → foo.bar [match]": null,
+  "{:foo(foo)bar} → foobar [match]": null,
+  "{:foo}bar → foobar [match]": null,
+  ":foo\\bar → foobar [match]": null,
+  ":foo{}(.*) → foobar [match]": null,
+  ":foo{}bar → foobar [match]": null,
+  ":foo{}?bar → foobar [match]": null,
+  ":foo(baz)(.*) → bazbar [match]": null,
+  ":foo(baz)bar → bazbar [match]": null,
+  ":foo./ → bar./ [match]": null,
+  ":foo../ → bar../ [match]": null,
+  "./foo → ./foo [match]": null,
+  "../foo → ../foo [match]": null,
+  "var x = 1; → var x = 1; [match]": null,
 
   // A relative pattern never matches an absolute path in URLPattern; rou3
   // reads it as absolute
-  'foo/bar → /foo/bar (from "https://example.com/foo/bar") [no match]',
+  'foo/bar → /foo/bar (from "https://example.com/foo/bar") [no match]': {},
 
   // `.`/`..` in a pattern — URLPattern resolves them (`/foo/../bar` is
   // `/bar`); rou3 reads them as literal segments
-  "/foo/../bar → /bar [match]",
+  "/foo/../bar → /bar [match]": null,
 
   // `v`-flag set operations — rou3 compiles constraints without the `v` flag,
   // so `--` / `&&` are plain class chars
-  "/([[a-z]--a]) → /z [match]",
-  "/([\\d&&[0-1]]) → /0 [match]",
+  "/([[a-z]--a]) → /z [match]": null,
+  "/([\\d&&[0-1]]) → /0 [match]": null,
 
   // Trailing slash on a no-match case — rou3 ignores one trailing `/`, so
   // `/foo/bar/` is `/foo/bar` (a second one is an empty last segment)
-  "/foo/bar → /foo/bar/ [no match]",
-  "/foo/:bar → /foo/bar/ [no match]",
-  "/foo/:bar? → /foo/ [no match]",
-  "/foo/:bar* → /foo/ [no match]",
-  "/foo{/bar}? → /foo/ [no match]",
-]);
+  "/foo/bar → /foo/bar/ [no match]": {},
+  "/foo/:bar → /foo/bar/ [no match]": { bar: "bar" },
+  "/foo/:bar? → /foo/ [no match]": split({ bar: undefined }, {}),
+  "/foo/:bar* → /foo/ [no match]": split({ bar: undefined }, {}),
+  "/foo{/bar}? → /foo/ [no match]": {},
+});
 
 // Valid URLPattern syntax rou3 has no meaning for (yet): every strategy
 // throws a `rou3:` error for these patterns instead of matching with a
@@ -306,25 +322,23 @@ const RESERVED_PATTERNS = new Set([
   "test/:a𐑐b",
 ]);
 
-// Known diffs that only apply to routeToRegExp (the router skips relative inputs)
-const REGEXP_ONLY_KNOWN_DIFFS = new Set([
+// Known diffs that only apply to routeToRegExp (the router skips relative
+// inputs), with routeToRegExp's result
+const REGEXP_ONLY_KNOWN_DIFFS = diffs<Result>({
   // Relative input — rou3's regex is anchored at `/` (a root `:name*` is
   // `(?:/(?<name>…))?`, like `{/:name+}?`, so it needs the `/` too)
-  ":name+ → foobar [match]",
-  ":name* → foobar [match]",
-]);
+  ":name+ → foobar [match]": null,
+  ":name* → foobar [match]": null,
+});
 
-// Additional known diffs specific to router-based matching.
-// These are tests where the tree router behaves differently from routeToRegExp.
-const ROUTER_KNOWN_DIFFS = new Set([
+// Known diffs that only apply to the tree (routeToRegExp agrees with
+// URLPattern), with the tree's result
+const ROUTER_KNOWN_DIFFS = diffs<Result>({
   // `(.*)` cross-segment — routeToRegExp matches `bar/baz` (regex `.` spans `/`),
   // but the segment-scoped tree stops at one segment.
-  "/foo/(.*) → /foo/bar/baz [match]",
-  "/foo/:bar(.*) → /foo/bar/baz [match]",
-  // `**` over zero segments — the router reports its capture as `""` (under
-  // `_`), URLPattern and routeToRegExp leave it unset
-  "/foo/** → /foo [match]",
-]);
+  "/foo/(.*) → /foo/bar/baz [match]": null,
+  "/foo/:bar(.*) → /foo/bar/baz [match]": null,
+});
 
 // Patterns URLPattern rejects (`expected_obj: "error"`) but rou3 accepts.
 // Every other rejected pattern must throw a `rou3:` error.
@@ -348,7 +362,7 @@ type MatchStrategy = {
   name: string;
   /** Tree lookups take an absolute path: relative inputs are skipped */
   router?: boolean;
-  match: (pattern: string, input: string) => { matched: boolean; params: Record<string, string> };
+  match: (pattern: string, input: string) => { matched: boolean; params: NonNullable<Result> };
 };
 
 const strategies: MatchStrategy[] = [
@@ -369,7 +383,7 @@ const strategies: MatchStrategy[] = [
       addRoute(router, "GET", pattern, { path: pattern });
       const result = findRoute(router, "GET", input, { normalize: true });
       if (!result) return { matched: false, params: {} };
-      return { matched: true, params: result.params ?? {} };
+      return { matched: true, params: { ...result.params } };
     },
   },
   {
@@ -381,7 +395,7 @@ const strategies: MatchStrategy[] = [
       const lookup = compileRouter(router, { normalize: true });
       const result = lookup("GET", input);
       if (!result) return { matched: false, params: {} };
-      return { matched: true, params: result.params ?? {} };
+      return { matched: true, params: { ...result.params } };
     },
   },
 ];
@@ -389,7 +403,20 @@ const strategies: MatchStrategy[] = [
 type Plan =
   | { kind: "skipped"; reason: string }
   | { kind: "throws" | "accepts" | "rejected" | "run" }
-  | { kind: "known diff"; set: string };
+  | { kind: "known diff"; set: string; result: Result };
+
+/**
+ * URLPattern's groups as `strategy` reports them. The one representation
+ * rule modelled: the tree leaves an unset param out of `params` (`/foo/:bar?`
+ * on `/foo` is `{}`) where URLPattern and `routeToRegExp` report an unset
+ * group as `undefined`, so for the tree an unset URLPattern group ≡ an absent
+ * key. Nothing else is normalized (a tree param that is present but
+ * `undefined` still differs from an absent one).
+ */
+function expectedGroups(strategy: MatchStrategy, groups: Result): Result {
+  if (!groups || !strategy.router) return groups;
+  return Object.fromEntries(Object.entries(groups).filter(([, value]) => value !== undefined));
+}
 
 /** How `strategy` checks `test`; records which diff-set entries are reached */
 function planTest(strategy: MatchStrategy, test: PathnameTest, reached: Set<string>): Plan {
@@ -406,10 +433,16 @@ function planTest(strategy: MatchStrategy, test: PathnameTest, reached: Set<stri
   for (const set of strategy.router
     ? (["KNOWN_DIFFS", "ROUTER_KNOWN_DIFFS"] as const)
     : (["KNOWN_DIFFS", "REGEXP_ONLY_KNOWN_DIFFS"] as const)) {
-    if (reach(set, test.label)) return { kind: "known diff", set };
+    if (!reach(set, test.label)) continue;
+    const stored = DIFF_SETS[set].get(test.label)!;
+    const result =
+      stored && SPLIT in stored ? stored[strategy.router ? "router" : "regexp"] : stored;
+    return { kind: "known diff", set, result };
   }
   return { kind: "run" };
 }
+
+const URLPatternCtor = (globalThis as { URLPattern?: any }).URLPattern;
 
 describe("wpt urlpattern compatibility", () => {
   const { tests, outOfScope } = readPathnameTests();
@@ -454,16 +487,21 @@ describe("wpt urlpattern compatibility", () => {
             }
             case "known diff": {
               it(`${label} (${plan.set})`, () => {
-                expect(match(), "listed as a known diff but agrees with URLPattern").not.toEqual(
-                  groups,
+                const result = match();
+                expect(result, "agrees with URLPattern: drop the known diff").not.toStrictEqual(
+                  expectedGroups(strategy, groups!),
+                );
+                expect(result, `rou3's result changed: update ${plan.set}`).toStrictEqual(
+                  plan.result,
                 );
               });
               break;
             }
             default: {
               it(label, () => {
-                // `toEqual` treats an unset group like a missing one
-                expect(match(), `"${input}" on "${pattern}"`).toEqual(groups);
+                expect(match(), `"${input}" on "${pattern}"`).toStrictEqual(
+                  expectedGroups(strategy, groups!),
+                );
               });
             }
           }
@@ -474,7 +512,7 @@ describe("wpt urlpattern compatibility", () => {
 
   it("lists only entries that are in the data", () => {
     const stale = Object.entries(DIFF_SETS).flatMap(([set, entries]) =>
-      [...entries].map((entry) => `${set}: ${entry}`).filter((key) => !reached.has(key)),
+      [...entries.keys()].map((entry) => `${set}: ${entry}`).filter((key) => !reached.has(key)),
     );
     expect(stale).toEqual([]);
   });
@@ -490,18 +528,34 @@ describe("wpt urlpattern compatibility", () => {
     }
     console.info(lines.join("\n"));
   });
+
+  // The fixture expectations as this harness reads them (the resolved input,
+  // `null` read as `undefined`), checked against the runtime's own URLPattern
+  // where it has one
+  it.runIf(URLPatternCtor)("agrees with the runtime's URLPattern", () => {
+    for (const { label, pattern, input, groups, skip } of tests) {
+      if (skip) continue;
+      if (input === undefined) {
+        expect(() => new URLPatternCtor({ pathname: pattern }), label).toThrow(TypeError);
+        continue;
+      }
+      const result = new URLPatternCtor({ pathname: pattern }).exec({ pathname: input });
+      expect(result ? { ...result.pathname.groups } : null, label).toStrictEqual(groups);
+    }
+  });
 });
 
 // Not in the WPT data: a `:name` / `:name+` needs a value, as in URLPattern
-// (#229). `[pattern, input, groups]`, `null` for no match; checked against
-// the runtime's URLPattern where it has one.
-const EMPTY_SEGMENT_CASES: [string, string, Record<string, string> | null][] = [
+// (#229). `[pattern, input, groups]`, groups as URLPattern reports them (see
+// `expectedGroups`), `null` for no match; checked against the runtime's
+// URLPattern where it has one.
+const EMPTY_SEGMENT_CASES: [string, string, Result][] = [
   ["/foo/:bar", "/foo//", null],
   ["/foo/:bar+", "/foo//", null],
   ["/foo/:bar*", "/foo//", null],
   ["/foo/:bar*/baz", "/foo//baz", null],
-  ["/foo/:bar*", "/foo", {}],
-  ["/foo/:bar*/baz", "/foo/baz", {}],
+  ["/foo/:bar*", "/foo", { bar: undefined }],
+  ["/foo/:bar*/baz", "/foo/baz", { bar: undefined }],
   ["/foo/:bar?", "/foo//", null],
   ["/foo{/:bar}?", "/foo//", null],
   ["/foo/:bar/baz", "/foo//baz", null],
@@ -512,9 +566,9 @@ const EMPTY_SEGMENT_CASES: [string, string, Record<string, string> | null][] = [
 
 // Not in the WPT data: literal pattern text is percent-encoded like URLPattern
 // (the URL path percent-encode set as UTF-8, `%` kept, a lone surrogate as
-// U+FFFD). `[pattern, raw input, groups]`, `null` for no match; the input is
+// U+FFFD). `[pattern, raw input, groups]` (as for `EMPTY_SEGMENT_CASES`); the input is
 // encoded with `encodePathname`, checked against the runtime's URLPattern.
-const PERCENT_ENCODING_CASES: [string, string, Record<string, string> | null][] = [
+const PERCENT_ENCODING_CASES: [string, string, Result][] = [
   ["/café", "/café", {}],
   ["/caf\\é", "/café", {}],
   ["/café/:id", "/café/1", { id: "1" }],
@@ -539,29 +593,28 @@ const PERCENT_ENCODING_CASES: [string, string, Record<string, string> | null][] 
   ["/a\uD800", "/a�", {}],
   ["/:x(%C3%A9)", "/é", { x: "%C3%A9" }],
   // An encoded prefix before a `:name*`, which needs a value or no segment
-  ["/café/:x*", "/café", {}],
+  ["/café/:x*", "/café", { x: undefined }],
   ["/café/:x*", "/café/a/é", { x: "a/%C3%A9" }],
   ["/café/:x*", "/café//", null],
   // Encoded text around an optional param compiled in place after a capture
   // (its `?` is the modifier, never a literal `%3F`)
   ["/café-*-:x?", "/café-a-b", { "0": "a", x: "b" }],
-  ["/café-*-:x?", "/café-a-", { "0": "a" }],
-  ["/café-*-:x?", "/café---", { "0": "-" }],
+  ["/café-*-:x?", "/café-a-", { "0": "a", x: undefined }],
+  ["/café-*-:x?", "/café---", { "0": "-", x: undefined }],
   ["/*-é-:x?", "/a-é-b", { "0": "a", x: "b" }],
-  ["/*-é-:x?", "/a-é-", { "0": "a" }],
+  ["/*-é-:x?", "/a-é-", { "0": "a", x: undefined }],
   ["/a\\?*-:x?", "/a?b-c", { "0": "b", x: "c" }],
-  ["/a\\?*-:x?", "/a?b-", { "0": "b" }],
-  ["/:a(\\d+)é:b?", "/12é", { a: "12" }],
+  ["/a\\?*-:x?", "/a?b-", { "0": "b", x: undefined }],
+  ["/:a(\\d+)é:b?", "/12é", { a: "12", b: undefined }],
   ["/:a(\\d+)é:b?", "/12é3", { a: "12", b: "3" }],
 ];
 
 describe("wpt urlpattern compatibility: percent-encoding", () => {
-  const URLPatternCtor = (globalThis as { URLPattern?: any }).URLPattern;
   for (const strategy of strategies) {
     for (const [pattern, input, groups] of PERCENT_ENCODING_CASES) {
       it(`${strategy.name}: ${JSON.stringify(pattern)} → ${JSON.stringify(input)}`, () => {
         const { matched, params } = strategy.match(pattern, encodePathname(input));
-        expect(matched ? params : null).toEqual(groups);
+        expect(matched ? params : null).toStrictEqual(expectedGroups(strategy, groups));
       });
     }
   }
@@ -570,7 +623,9 @@ describe("wpt urlpattern compatibility: percent-encoding", () => {
     for (const [pattern, input, groups] of PERCENT_ENCODING_CASES) {
       const urlPattern = new URLPatternCtor({ pathname: pattern });
       const result = urlPattern.exec({ pathname: input });
-      expect(result ? result.pathname.groups : null, `${pattern} → ${input}`).toEqual(groups);
+      expect(result ? { ...result.pathname.groups } : null, `${pattern} → ${input}`).toStrictEqual(
+        groups,
+      );
       // `encodePathname` encodes the input like URLPattern and `new URL()`
       expect(
         new URLPatternCtor({ pathname: input.replace(/[\\:*(){}?+]/g, "\\$&") }).pathname,
@@ -593,18 +648,17 @@ const EMPTY_SEGMENT_DIFFS: [string, string, Record<string, string>][] = [
 ];
 
 describe("wpt urlpattern compatibility: empty segments", () => {
-  const URLPatternCtor = (globalThis as { URLPattern?: any }).URLPattern;
   for (const strategy of strategies) {
     for (const [pattern, input, groups] of EMPTY_SEGMENT_CASES) {
       it(`${strategy.name}: ${pattern} → ${input}`, () => {
         const { matched, params } = strategy.match(pattern, input);
-        expect(matched ? params : null).toEqual(groups);
+        expect(matched ? params : null).toStrictEqual(expectedGroups(strategy, groups));
       });
     }
     for (const [pattern, input, groups] of EMPTY_SEGMENT_DIFFS) {
       it(`${strategy.name}: ${pattern} → ${input} (rou3 only)`, () => {
         const { matched, params } = strategy.match(pattern, input);
-        expect(matched ? params : null).toEqual(groups);
+        expect(matched ? params : null).toStrictEqual(groups);
       });
     }
   }
@@ -612,7 +666,9 @@ describe("wpt urlpattern compatibility: empty segments", () => {
   it.runIf(URLPatternCtor)("agrees with URLPattern", () => {
     for (const [pattern, input, groups] of EMPTY_SEGMENT_CASES) {
       const result = new URLPatternCtor({ pathname: pattern }).exec({ pathname: input });
-      expect(result ? result.pathname.groups : null, `${pattern} → ${input}`).toEqual(groups);
+      expect(result ? { ...result.pathname.groups } : null, `${pattern} → ${input}`).toStrictEqual(
+        groups,
+      );
     }
     for (const [pattern, input] of EMPTY_SEGMENT_DIFFS) {
       const result = new URLPatternCtor({ pathname: pattern }).exec({ pathname: input });
