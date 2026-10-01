@@ -298,42 +298,48 @@ describe("matcher: ordering contract", () => {
         }
       }
     }
-    expect(checks).toBeGreaterThan(5000);
+    // 5,087 pairs x 2 registration orders
+    expect(checks).toBeGreaterThanOrEqual(10_000);
     expect(failures.slice(0, 20)).toEqual([]);
     // Stale guard: the documented carve-outs still show up as such
     for (const carveOut of KNOWN_CARVE_OUTS) expect(carveOuts).toContain(carveOut);
-    // Without a bare `*` every one is A1: the other registration order lists
-    // the broader pattern first (A2 / A3 need a `*`, pinned below)
-    const bothOrders = [...carveOuts].filter((carveOut) => {
-      const [routes, path] = carveOut.split(" @ ");
-      return carveOuts.has(`${routes.split(", ").reverse().join(", ")} @ ${path}`);
-    });
-    expect(bothOrders).toEqual([]);
   }, 60_000);
 
   it("bare `*` exceptions (known, stale-guarded)", () => {
     // A bare `*` takes one segment that may be empty, or none at the end of
-    // the path, which neither the traversal nor a weight sees: `/p/*/**`
-    // (under the param node) is broader than `/p/**:r` (on the parent's
-    // wildcard node, listed first), `/p/**/*` (suffix trie) than `/p/**:r`
-    // (listed first on the same wildcard node), and a mid-route `*` ties with
-    // a `:x` on one node (registration order decides). `findRoute` picks the
-    // broader one on those paths too.
-    for (const [routes, path] of BARE_STAR_EXCEPTIONS) {
+    // the path, which neither the traversal nor a weight sees. Different
+    // nodes, in both registration orders: `/p/*/**` (under the param node) is
+    // broader than `/p/**:rest` (on the parent's wildcard node, listed
+    // first), `/p/**/*` (suffix trie) than `/p/**:rest` (listed first on the
+    // same wildcard node). Same node, registration order decides: a `*` that
+    // isn't the last segment, or that follows a `**`, ties with a `:x` (only
+    // a last param is weighted, `collectSuffix` weighs regexes and `**:name`
+    // only, and `rankFromEnd` scores both 0). `findRoute` picks the broader
+    // one on those paths too (when registered first, on a tie).
+    const stale = "stale: remove from `BARE_STAR_EXCEPTIONS` and the README / matching.md bullets";
+    for (const [routes, path, orders] of BARE_STAR_EXCEPTIONS) {
       const [a, b] = routes;
-      expect(compareRoutes(a, b), routes.join(", ")).toBe("superset");
+      const at = `${routes.join(", ")} @ ${path}: ${stale}`;
+      let relation: string;
+      try {
+        relation = compareRoutes(a, b);
+      } catch (error) {
+        // Two catch-alls once `*` is one
+        expect.fail(`${at} (${(error as Error).message})`);
+      }
+      expect(relation, at).toBe("superset");
       const routers = [routes, [...routes].reverse()].map((order) => createRouter(order));
-      const at = `${routes.join(", ")} @ ${path}`;
+      const check = orders === "both" ? "every" : "some";
       expect(
-        routers.some((router) => {
+        routers[check]((router) => {
           const all = _findAllRoutes(router, "GET", path);
           return all.indexOf(a) > all.indexOf(b);
         }),
-        at,
+        `findAllRoutes ${at}`,
       ).toBe(true);
       expect(
-        routers.some((router) => findRoute(router, "GET", path)?.data.path === a),
-        at,
+        routers[check]((router) => findRoute(router, "GET", path)?.data.path === a),
+        `findRoute ${at}`,
       ).toBe(true);
     }
   });
@@ -414,16 +420,16 @@ const SWEEP_PATTERNS = (() => {
 // Up to four segments of `p`, `1` (a `\d+`) and `""` (an empty segment, which
 // a `:name` / `**:name` can't take), with and without a trailing slash
 const SWEEP_PATHS = (() => {
-  const paths = ["/", "//"];
+  const paths = new Set(["/", "//"]);
   const walk = (prefix: string, depth: number) => {
     for (const segment of ["p", "1", ""]) {
       const path = `${prefix}/${segment}`;
-      paths.push(path, `${path}/`);
+      paths.add(path).add(`${path}/`);
       if (depth > 1) walk(path, depth - 1);
     }
   };
   walk("", 4);
-  return paths;
+  return [...paths];
 })();
 
 /**
@@ -437,13 +443,17 @@ const KNOWN_CARVE_OUTS = [
 ];
 
 /**
- * Bare `*` exceptions (README, `.agents/matching.md`): `[broader, narrower]`
- * and a path where the narrower can come first.
+ * Bare `*` exceptions (README, `.agents/matching.md`): `[broader, narrower]`,
+ * a path where the narrower comes first and `findRoute` picks the broader,
+ * and in which registration orders (`one`: the tie goes to the order).
  */
-const BARE_STAR_EXCEPTIONS: [[string, string], string][] = [
-  [["/p/*/**", "/p/**:rest"], "/p/b"],
-  [["/p/**/*", "/p/**:rest"], "/p/b"],
-  [["/p/*/x", "/p/:id/x"], "/p/b/x"],
+const BARE_STAR_EXCEPTIONS: [[string, string], string, "both" | "one"][] = [
+  // Different nodes
+  [["/p/*/**", "/p/**:rest"], "/p/b", "both"],
+  [["/p/**/*", "/p/**:rest"], "/p/b", "both"],
+  // Same node: a `*` that isn't last, or that follows a `**`
+  [["/p/*/x", "/p/:id/x"], "/p/b/x", "one"],
+  [["/p/**:r/*", "/p/**:r/:x"], "/p/a/b", "one"],
 ];
 
 /**
@@ -464,7 +474,7 @@ function orderMisses(
   const aot = new Function(`return ${compileRouterToString(router, { matchAll: true })}`)();
   // The paths each matched entry matches (on a miss only)
   let matched: Map<object, Set<number>> | undefined;
-  const broader = (x: object, y: object) => {
+  const pathsOfEntry = (entry: object) => {
     if (!matched) {
       matched = new Map();
       for (let p = 0; p < SWEEP_PATHS.length; p++) {
@@ -474,8 +484,15 @@ function orderMisses(
         }
       }
     }
-    const [setX, setY] = [matched.get(x)!, matched.get(y)!];
-    return setX.size > setY.size && [...setY].every((p) => setX.has(p));
+    return matched.get(entry)!;
+  };
+  // `x`'s match set strictly contains `y`'s (`same`: equals it)
+  const broader = (x: object, y: object, same?: boolean) => {
+    const [setX, setY] = [pathsOfEntry(x), pathsOfEntry(y)];
+    return (
+      (same ? setX.size === setY.size : setX.size > setY.size) &&
+      [...setY].every((p) => setX.has(p))
+    );
   };
   const optional = /[{*?]/.test(`${a} ${b}`.replace(/\*\*/g, "").replace(/:x\d+\+/g, ""));
   const carveOuts: string[] = [];
@@ -497,6 +514,13 @@ function orderMisses(
           (x, k) => x.data === b && list.slice(k + 1).some((y) => y.data === a && broader(y, x)),
         );
       if (!explained) return { failure: `${a} ⊋ ${b} listed after it: ${at}`, carveOuts };
+      // Without a bare `*` every carve-out is A1: an entry of `b` before one
+      // of `a` with the same match set (A2 / A3 need a `*`, pinned below)
+      const a1 = list.some(
+        (x, k) =>
+          x.data === b && list.slice(k + 1).some((y) => y.data === a && broader(y, x, true)),
+      );
+      if (!a1) return { failure: `carve-out other than A1: ${at}`, carveOuts };
       carveOuts.push(path);
     }
     // `findRoute` picks the last of `_findRanked(…, reverse)`: never an entry
