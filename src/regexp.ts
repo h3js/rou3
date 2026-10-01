@@ -19,8 +19,10 @@ import { ANY_TAIL, openOptionals, withTrailingSlash } from "./_trailing-slash.ts
 // U+2028 and U+2029, PCRE and RE2 by default only `\n`). `[\s\S]` is any char
 // in all of them.
 const ANY = "[\\s\\S]*";
-// A `**:name` / `:name+` / `:name*`, which needs a value (see `emptyParam`)
-const SOME = "[\\s\\S]+";
+// A `**:name` / `:name+` / `:name*`: a segment or more, each with a value, as
+// URLPattern's `:name+` (see `emptyParam`). It can't end in `/`, so a plain
+// `/?$` ends it exactly.
+const SOME = "[^/]+(?:/[^/]+)*";
 // `openTail` of a route ending in a `*`, or in a lazy one and optional
 // segments: it may take nothing after the stripped trailing slash, so the path
 // is the body plus `/?` (see `routeToRegExpSegments`, `ending`)
@@ -50,8 +52,9 @@ const STAR_SEGMENT = "*/";
  *
  * The regex matches exactly the paths `findRoute()` matches for a router holding
  * only `route` — including the router's tolerances: one optional trailing slash,
- * empty segments for `*` / `**` (a `:name` / `:name+` / `:name*` needs a
- * value), and a trailing `*` that takes nothing after the stripped slash
+ * empty segments for `*` / `**` (a `:name` needs a value, and so does each
+ * segment of a `:name+` / `:name*`: `[^/]+(?:/[^/]+)*`, as in URLPattern),
+ * and a trailing `*` that takes nothing after the stripped slash
  * (`/a/*` matches `/a/`, not `/a`) — so it can stand in for the router as a
  * guard or scope check. Not modeled: param
  * constraints that can match `/` (`(.*)`: the tree splits on `/` first, so
@@ -380,8 +383,12 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
         // A lone catch-all before more of the route (`{/:x+}?/b`) is a
         // mid-route `:x*`: lazy like it (see `pushCatchAll`), one regex per
         // route.
-        const lazy = suf !== "" && /^\/\(\?<\w+>\[\\s\\S\]\+\)$/.test(last.slice(k));
-        merged = `${prefix}(?:${last.slice(k)})?${lazy ? "?" : ""}`;
+        const added = last.slice(k);
+        const lazy =
+          suf !== "" &&
+          added.endsWith(`${SOME})`) &&
+          /^\/\(\?<\w+>$/.test(added.slice(0, -SOME.length - 1));
+        merged = `${prefix}(?:${added})?${lazy ? "?" : ""}`;
       }
     }
     if (!merged || ((suf !== "" || lookahead) && !fixedHead())) {
@@ -709,12 +716,12 @@ function routeToRegExpSegments(
   // match the same paths, and only the nested one leaves a single optional
   // group at the end (see `withTrailingSlash`). Both give a lone segment to
   // `x`, as the router does unless `/a/:y` wins it (a constrained `:y`). A
-  // `:x` needs a value, so one that can be empty (`**`) or start with an
-  // empty segment (`:y*`) doesn't nest in it (`/a/:x?/**` on `/a//` is
-  // `/a/**`), and follows it instead (`free`). A `:y*`, which can't be empty,
-  // leaves only the groups that need a value. `nest` counts the `)?` closers
-  // to insert before, `levels[i]` whether the group at depth `i` needs a
-  // value, `nestValue` the innermost one's.
+  // `:x` needs a value, so one that can be empty (`**`) doesn't nest in it
+  // (`/a/:x?/**` on `/a//` is `/a/**`), and follows it instead (`free`), as
+  // does a `:y*` (the router's `/a/**:y` without `x`). A `:y*`, which can't
+  // be empty, leaves only the groups that need a value. `nest` counts the
+  // `)?` closers to insert before, `levels[i]` whether the group at depth `i`
+  // needs a value, `nestValue` the innermost one's.
   let nest = 0;
   let nestValue = false;
   const levels: boolean[] = [];
@@ -751,12 +758,12 @@ function routeToRegExpSegments(
 
   // A `**` / `**:name` / `:name+` / `:name*` with segments after it: those
   // match the end of the path and the catch-all what is between, zero or more
-  // segments (one or more with a value for `**:name` / `:name+` / `:name*`),
-  // empty ones included. The separator stays with the prefix (`/a/**/b` must
-  // not match `/ab`); over zero segments the group is unset, as in the
-  // router. With optional segments after it, the router registers several
-  // routes; `lazyCatchAll` picks between them. `name`: the catch-all's group
-  // name.
+  // segments, empty ones included (one or more, each with a value, for
+  // `**:name` / `:name+` / `:name*`). The separator stays with the prefix
+  // (`/a/**/b` must not match `/ab`); over zero segments the group is unset,
+  // as in the router. With optional segments after it, the router registers
+  // several routes; `lazyCatchAll` picks between them. `name`: the
+  // catch-all's group name.
   const pushCatchAll = (
     name: string,
     required: boolean,
@@ -852,10 +859,10 @@ function routeToRegExpSegments(
     } else if (segment.startsWith("**")) {
       // The separator before a catch-all must stay anchored to the prefix: a
       // bare optional `/?` would let `/api/**` match `/apifoo`. `**` matches
-      // zero or more segments (`/api` too), `**:name` one or more, with a
-      // value: the separator plus `SOME` (`/api///` reaches `/api/**:p` with
-      // `p: "/"`, `/api//` doesn't). A bare `**` is an unnamed capture (`_N`,
-      // `"N"` in the router), unset over zero segments.
+      // zero or more segments (`/api` too), `**:name` one or more, each with
+      // a value: the separator plus `SOME` (`/api//` and `/api/a//b` don't
+      // reach `/api/**:p`). A bare `**` is an unnamed capture (`_N`, `"N"` in
+      // the router), unset over zero segments.
       oneCatchAll();
       const bare = segment === "**";
       const name = bare ? unnamedKey(idCtr++) : groupName(segment.slice(3));

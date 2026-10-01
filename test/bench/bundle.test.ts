@@ -204,8 +204,11 @@ describe("benchmark", () => {
     // +7B raw / +3B gzip: the `**` of a split `*` may capture `""` (`empty`).
     // +12B raw / +7B gzip: that `**` needs a segment before more of the
     // route too (a `pre*` route is listed once per path).
-    expect(bytes).toBeLessThanOrEqual(12422); // <12.43kb
-    expect(gzipSize).toBeLessThanOrEqual(5335); // <5.34kb
+    // +10B raw / +6B gzip: every segment of a `:name+` / `:name*` / `**:name`
+    // needs a value, as in URLPattern (`emptyParam` tests the value for an
+    // empty segment, not for `""` only; paths without one pay nothing new).
+    expect(bytes).toBeLessThanOrEqual(12432); // <12.44kb
+    expect(gzipSize).toBeLessThanOrEqual(5341); // <5.35kb
   });
 });
 

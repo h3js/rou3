@@ -275,17 +275,19 @@ export function oneCatchAll(input: string): never {
 
 /**
  * Whether matching `m` on `segments` gives a `:name` an empty segment, or a
- * `**:name` (`:name+`, `:name*`) an empty value: those need one, as in
- * URLPattern. A `*`, a `**` and a constraint (it decides: `:id(\d*)`) may be
- * empty. Callers check only paths with an empty segment.
+ * `**:name` (`:name+`, `:name*`) an empty one among those it takes: every
+ * segment needs a value, as in URLPattern (`[^/]+(?:/[^/]+)*`). A `*`, a `**`
+ * and a constraint (it decides: `:id(\d*)`) may be empty. Callers check only
+ * paths with an empty segment.
  */
 export function emptyParam(m: MethodData<unknown>, segments: string[]): boolean {
   const pMap = m.paramsMap;
   const params = pMap && getMatchParams(segments, pMap, m.suffix)!;
-  // A `*` is named by a digit and a constraint is a RegExp (`/^…$/`), both
-  // `< ":"`; a `**` is `optional`
+  // A `*` and a bare `**` are named by a digit and a constraint is a RegExp
+  // (`/^…$/`), all `< ":"`. A value holds an empty segment where it is `""`,
+  // or starts, ends or holds `//` (a `:name`'s has no `/`).
   return !!pMap?.some(
-    ([, name, optional]) => !optional && (name as string) > ":" && params![name as string] === "",
+    ([, name]) => (name as string) > ":" && /(^|\/)(\/|$)/.test(params![name as string]),
   );
 }
 

@@ -243,6 +243,18 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(source)).toBe(route);
   });
 
+  // 0.11 `**:x` / `:x+` / `:x*` forms, where a segment of the value could be
+  // empty (`[\s\S]+`, a `//` branch): back to the route they were emitted
+  // for, whose segments now each need a value.
+  it.each([
+    [String.raw`^\/base\/(?:\/\/|(?<path>(?:[\s\S]*[^/]|\/\/)\/*?)\/?)$`, "/base/:path+"],
+    [String.raw`^\/path(?:\/(?:(?:\/\/|(?<rest>(?:[\s\S]*[^/]|\/\/)\/*?)\/?))?)?$`, "/path/:rest*"],
+    [String.raw`^\/path\/(?<rest>[\s\S]+)\/suffix\/?$`, "/path/:rest+/suffix"],
+    [String.raw`^\/a\/(?<r>[\s\S]+?)(?:\/(?<y>[^/]+))?(?:(?<=\/)\/|(?<!\/)\/?)$`, "/a/:r+/:y?"],
+  ])("reverses the 0.11 value form %s", (source, route) => {
+    expect(regExpToRoute(source)).toBe(route);
+  });
+
   it("rejects the 0.11 `:x*` then `*` form (two catch-alls now)", () => {
     expect(() =>
       regExpToRoute(String.raw`^\/a(?:\/(?:(?:(?<x>[\s\S]*)\/)?(?:(?<_0>[^/]+)\/?|\/))?)?$`),

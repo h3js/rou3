@@ -49,9 +49,10 @@ export function shapeSubsumes(a: RouteShape, b: RouteShape): boolean {
  * Collapse shapes that differ only in tail length into one shape per fixed
  * prefix (union of contiguous total-length ranges). An optional-syntax pattern
  * expands into several entries (`/a/:x*` -> `/a` + `/a/**:x`) whose canonical
- * shapes are `["a"] [0,0]` and `["a"] [1,Infinity]` (a value: `some`);
- * merging yields `["a"] [0,Infinity]` with `some` — `/a/**` without the
- * empty segment of `/a//` — so containment checks see through the expansion.
+ * shapes are `["a"] [0,0]` and `["a"] [1,Infinity]` (each segment a value:
+ * `some`); merging yields `["a"] [0,Infinity]` with `some` — `/a/**` without
+ * the paths with an empty segment after `/a` (`/a//`, `/a//b`) — so
+ * containment checks see through the expansion.
  */
 export function mergeShapes(shapes: RouteShape[]): RouteShape[] {
   for (let i = 0; i < shapes.length; i++) {
@@ -65,7 +66,7 @@ export function mergeShapes(shapes: RouteShape[]): RouteShape[] {
         a.tailMin <= b.tailMax + 1 &&
         b.tailMin <= a.tailMax + 1
       ) {
-        // A one-segment tail needs a value if it does in both (or one has none)
+        // Tail segments need a value if they do in both (or one has none)
         a.some = _someTail(a) && _someTail(b) ? true : undefined;
         a.tailMin = Math.min(a.tailMin, b.tailMin);
         a.tailMax = Math.max(a.tailMax, b.tailMax);
@@ -89,39 +90,40 @@ export function maxLength(shape: RouteShape): number {
 
 /**
  * The matcher of `shape` at segment `i` of a path with `n` segments: a tail
- * segment is any value, unless it is the only one of a `**:name` (`some`).
+ * segment is any value, or any but `""` in a `**:name`'s (`some`).
  */
 export function matcherAt(shape: RouteShape, n: number, i: number): RouteShape["fixed"][number] {
   const f = shape.fixed.length;
   if (i < f) return shape.fixed[i];
   const s = shape.suffix?.length || 0;
   if (i >= n - s) return shape.suffix![i - n + s];
-  return shape.some && n - f - s === 1 ? NON_EMPTY : undefined;
+  return shape.some ? NON_EMPTY : undefined;
 }
 
 /**
  * A path length from which on the matchers of `a` and `b` stop moving
  * relative to each other (their fixed prefixes aligned to the start, suffixes
- * to the end, any-value in between, a `**:name` tail two segments or more),
- * so it stands for every longer length.
+ * to the end, tails in between: with a `**:name`'s, one segment that is in
+ * both tails, as every longer length adds more of it), so it stands for every
+ * longer length.
  */
 export function stableLength(a: RouteShape, b: RouteShape): number {
   return (
     Math.max(a.fixed.length, b.fixed.length) +
     Math.max(a.suffix?.length || 0, b.suffix?.length || 0) +
-    (a.some || b.some ? 2 : 0)
+    (a.some || b.some ? 1 : 0)
   );
 }
 
 /**
- * The matcher of a segment that needs a value (a `:name`, the only segment of
- * a `**:name`): any but `""`. Compared by identity (see `_segmentSubsumes`).
+ * The matcher of a segment that needs a value (a `:name`, each segment of a
+ * `**:name`): any but `""`. Compared by identity (see `_segmentSubsumes`).
  */
 export const NON_EMPTY: RegExp = /^[\s\S]/;
 
-/** Whether a one-segment tail of `shape` needs a value, or it has none. */
+/** Whether each tail segment of `shape` needs a value, or it has none. */
 function _someTail(shape: RouteShape): boolean {
-  return !!shape.some || shape.tailMin > 1 || shape.tailMax < 1;
+  return !!shape.some || shape.tailMax < 1;
 }
 
 function _sameFixed(a: RouteShape["fixed"], b: RouteShape["fixed"]): boolean {

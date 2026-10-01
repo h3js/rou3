@@ -37,8 +37,9 @@ export function findRoute<T = unknown>(
 
   // A route with segments after `**` matches from the end of the path: when
   // one does, every match is ranked from the end (see `rankFromEnd`). A
-  // `:name` can't take an empty segment: paths with one (rare) take this
-  // path too, so the tree walk never checks for it.
+  // `:name` can't take an empty segment, nor can a `**:name` (`:name+`,
+  // `:name*`) take one: paths with one (rare) take this path too, so the tree
+  // walk never checks for it (see `emptyParam`).
   let match: MethodData<T> | undefined;
   if (
     segments.includes("") ||
