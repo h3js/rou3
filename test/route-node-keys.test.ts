@@ -30,7 +30,7 @@ describe("routeNodeKeys", () => {
       // A `*` inside a segment: a `**` and the segment's part around it (both
       // ways for text on both sides of the `*`)
       ["/users/*.png", ["/users/**/:_0"]],
-      ["/users/file-*", ["/users/:_0/**"]],
+      ["/users/file-*", ["/users/:_0", "/users/:_0/**"]],
       ["/users/file-*.png", ["/users/:_0", "/users/:_0/**/:_1"]],
       // Segments after `**` (its suffix trie): the `**` name is in the entry.
       ["/admin/**/anything", ["/admin/**/anything"]],

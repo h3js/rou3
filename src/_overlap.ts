@@ -205,9 +205,9 @@ function _computeShape(edges: Edge[], entry: MethodData): RouteShape {
       // with a value (see `emptyParam`), a `*` one segment, or none where it
       // ends the route (named by a digit, see `matchesZero`). Segments after
       // it are the suffix, aligned to the end of the path.
-      const [, name, optional, empty] = pMap!.find((e) => e[0] === -(d + 1))!;
+      const [, name, optional, empty, , join] = pMap!.find((e) => e[0] === -(d + 1))!;
       const last = d === edges.length - 1;
-      tailMin = optional || (last && (name as string) < ":") ? 0 : 1;
+      tailMin = optional || (last && (name as string) < ":" && !join) ? 0 : 1;
       tailMax = Number.POSITIVE_INFINITY;
       if (!optional && !empty) some = true;
       if (!last) suffix = [];

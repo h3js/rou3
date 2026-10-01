@@ -5,6 +5,7 @@ import {
   createRouter,
   findAllRoutes,
   findRoute,
+  removeRoute,
   routeNodeKeys,
   routesOverlap,
   routeToRegExp,
@@ -291,6 +292,38 @@ describe("`*` vs `**` priority and ordering", () => {
       expect(jitAll("GET", path).map((m: { data: string }) => m.data)).toEqual(all);
     });
   }
+
+  it("ranks a `pre*` segment above a `:name` on one segment (as `*post`)", () => {
+    for (const [routes, path, best, params] of [
+      [["/:slug", "/blog-*"], "/blog-post", "/blog-*", { 0: "post" }],
+      [["/:slug", "/blog-*"], "/blog-a/b", "/blog-*", { 0: "a/b" }],
+      [["/:slug", "/blog-*"], "/other", "/:slug", { slug: "other" }],
+      [["/x/:id", "/x/v*"], "/x/v1", "/x/v*", { 0: "1" }],
+      [["/x/:file", "/x/*.png"], "/x/a.png", "/x/*.png", { 0: "a" }],
+      // The route with the group wins (README)
+      [["/:a{-*}?"], "/a-b", "/:a{-*}?", { a: "a", 0: "b" }],
+    ] as const) {
+      for (const order of [[...routes], [...routes].reverse()]) {
+        const router = createRouter<string>();
+        for (const route of order) addRoute(router, "GET", route, route);
+        const aot = new Function(`return ${compileRouterToString(router)}`)();
+        for (const match of [
+          findRoute(router, "GET", path),
+          findAllRoutes(router, "GET", path).at(-1),
+          compileRouter(router)("GET", path),
+          compileRouter(router, { matchAll: true })("GET", path).at(-1),
+          aot("GET", path),
+        ]) {
+          expect({ data: match?.data, params: { ...match?.params } }, order.join(", ")).toEqual({
+            data: best,
+            params,
+          });
+        }
+        for (const route of order) removeRoute(router, "GET", route);
+        expect({ ...router.root, hasSuffix: undefined }).toEqual(createRouter().root);
+      }
+    }
+  });
 
   it("leaves a `**` with regex params and a `**:name` tied, as before (no `*`)", () => {
     // A regex param weighs what a required `**:name` does: registration order

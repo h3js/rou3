@@ -197,8 +197,10 @@ describe("benchmark", () => {
     // paths) by less than a regex param.
     // Merged with main at 11935B / 5064B: the greedy `*` above is +396B raw
     // / +225B gzip on top of it.
-    expect(bytes).toBeLessThanOrEqual(12331); // <12.34kb
-    expect(gzipSize).toBeLessThanOrEqual(5289); // <5.29kb
+    // +35B raw / +15B gzip: a `pre*` ending its segment also registers the
+    // segment as written (ranked on its node), its `**` needing a segment.
+    expect(bytes).toBeLessThanOrEqual(12366); // <12.37kb
+    expect(gzipSize).toBeLessThanOrEqual(5304); // <5.31kb
   });
 });
 

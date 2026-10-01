@@ -213,7 +213,9 @@ function _insert<T>(
             : empty
               ? String(unnamed(_unnamedParamIndex++))
               : addName(names, segment.slice(3), input),
-        segment.length === 2 /* optional */,
+        // optional, but not the `**` of a `pre*` ending its segment (its one
+        // segment case is the segment as written, see `splitStar`)
+        segment.length === 2 && !(i === join && i === segments.length - 1),
         empty,
         undefined,
         i === join,

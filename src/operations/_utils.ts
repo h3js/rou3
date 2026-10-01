@@ -258,7 +258,10 @@ export function splitStar(
     const head = segment.slice(0, at[0]);
     const tail = segment.slice(at[0] + 1);
     if (!head) return [[pre.concat("**", segment, post)], i, false];
-    if (!tail) return [[pre.concat(segment, "**", post)], i + 1, true];
+    // `pre*` ending its segment: the segment as written (one segment, ranked
+    // on its node like `pre*post`'s) and over more of them (a `**` that
+    // needs a segment, see `_insert`)
+    if (!tail) return [[pre.concat(segment, "**", post), segments], i + 1, true];
     return [[pre.concat(head + "*", "**", "*" + tail, post), segments], i + 1, true];
   }
 }
@@ -294,7 +297,7 @@ export function emptyParam(m: MethodData<unknown>, segments: string[]): boolean 
  */
 export function matchesZero(m: MethodData<unknown>): boolean {
   const last = m.paramsMap![m.paramsMap!.length - 1];
-  return last[2] || (last[1] as string) < ":";
+  return last[2] || ((last[1] as string) < ":" && !last[5]);
 }
 
 export function normalizePath(path: string): string {
