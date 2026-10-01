@@ -1401,6 +1401,8 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
   // A trailing `*` after one (in the route without the optional segment): it
   // takes zero segments where that segment isn't empty, without the slash.
   "/a/:x(\\d*)/*/:y?",
+  // A `:x*` in a group that can be empty, after a `:y?` (`levels`)
+  "/a{/([^\\x2f]*)/:y?/:x*}?",
   // Optional siblings where an earlier one can be empty and a later one can't
   // nest in it.
   "/a/:x(\\d*)?/:y?",
@@ -1647,6 +1649,10 @@ function allSweepPatterns(): string[] {
     "/a/:x/*/:z?",
     "/a/*/:y?/:z?",
     "/a/:x?/:y?/:z?",
+    // A `:x*` after a `:y?` nested in a group that can be empty: it leaves
+    // the `:y?` group (its value can start with an empty segment) but not
+    // the enclosing one (`levels`)
+    "/a{/([^\\x2f]*)/:y?/:x*}?",
     "/:x/:y?/**",
     "/a{/b/:x/:y?}?",
     "/a{/:x/:y?}?",
