@@ -263,13 +263,17 @@ export function matchesZero(m: MethodData<unknown>, slash?: boolean): boolean {
 export function normalizePath(path: string): string {
   if (!path.includes("/.")) return path;
   const r: string[] = [];
-  for (const s of path.split("/")) {
+  let s = "";
+  for (s of path.split("/")) {
     if (s === ".") continue;
     // r[0] is the leading "" — a ".." at the root is a no-op, never a literal
     else if (s === "..") {
       if (r.length > 1) r.pop();
     } else r.push(s);
   }
+  // A last `.` / `..` leaves a trailing slash, as in WHATWG (`/a/b/..` is
+  // `/a/`, which a `/a/*` matches)
+  if (s === "." || s === "..") r.push("");
   return r.join("/") || "/";
 }
 

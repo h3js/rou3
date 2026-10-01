@@ -256,6 +256,8 @@ findRoute(router, "GET", "/foo/bar/../baz", { normalize: true }); // matches "/f
 findAllRoutes(router, "GET", "/foo/./bar", { normalize: true }); // matches "/foo/bar"
 ```
 
+As in `new URL()`, a last `.` or `..` leaves a trailing slash: `/foo/bar/..` is `/foo/`, which `/foo/*` matches (`{ "0": "" }`).
+
 The [compiler](#compiler) accepts the same option: `compileRouter(router, { normalize: true })`.
 
 ### Skipping params

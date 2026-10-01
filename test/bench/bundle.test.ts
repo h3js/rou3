@@ -159,8 +159,10 @@ describe("benchmark", () => {
     // around a `**` and `getMatchParams` joining their captures, `**:name`
     // outweighing `*` on a shared node, and the one-catch-all error naming
     // `*`. `replaceSegmentWildcards` and `dynamicTerminal` are gone.
-    expect(bytes).toBeLessThanOrEqual(11666); // <11.67kb
-    expect(gzipSize).toBeLessThanOrEqual(4972); // <4.98kb
+    // +32B raw / +18B gzip: `normalizePath` keeps the trailing slash of a
+    // last `.` / `..` as WHATWG does (`/foo/bar/..` is `/foo/`, a `/foo/*`).
+    expect(bytes).toBeLessThanOrEqual(11698); // <11.7kb
+    expect(gzipSize).toBeLessThanOrEqual(4990); // <4.99kb
   });
 });
 

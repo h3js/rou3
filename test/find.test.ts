@@ -1050,6 +1050,27 @@ describe("path normalization above the root (normalize: true)", () => {
       });
     }
   });
+
+  it("keeps the trailing slash of a last `.` / `..` (WHATWG)", () => {
+    // `new URL("http://x/foo/bar/..").pathname` is `/foo/`, which a `/foo/*`
+    // matches (a trailing `*` takes nothing after a trailing slash)
+    expect(normalizePath("/foo/bar/..")).toBe("/foo/");
+    expect(normalizePath("/foo/.")).toBe("/foo/");
+    expect(normalizePath("/foo/..")).toBe("/");
+    expect(normalizePath("/..")).toBe("/");
+    expect(normalizePath("/foo/./bar")).toBe("/foo/bar");
+    const star = createEmptyRouter<string>();
+    addRoute(star, "GET", "/foo/*", "/foo/*");
+    const jit = compileRouter(star, { normalize: true });
+    const jitAll = compileRouter(star, { normalize: true, matchAll: true });
+    for (const path of ["/foo/bar/..", "/foo/."]) {
+      const expected = { data: "/foo/*", params: { "0": "" } };
+      expect(findRoute(star, "GET", path, { normalize: true }), path).toEqual(expected);
+      expect(findAllRoutes(star, "GET", path, { normalize: true }), path).toEqual([expected]);
+      expect(jit("GET", path), path).toEqual(expected);
+      expect(jitAll("GET", path), path).toEqual([expected]);
+    }
+  });
 });
 
 describe("same-node sibling selection (findRoute/compiled parity)", () => {

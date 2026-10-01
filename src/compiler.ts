@@ -253,7 +253,7 @@ function compileRouteMatch(ctx: CompilerContext): string {
     : "";
 
   const normalizePathHelper = ctx.opts?.normalize
-    ? `if(p.includes("/.")){let _r=[];for(let _v of p.split("/")){if(_v===".")continue;if(_v==="..")_r.length>1&&_r.pop();else _r.push(_v)}p=_r.join("/")||"/"}`
+    ? `if(p.includes("/.")){let _r=[],_v;for(_v of p.split("/")){if(_v===".")continue;if(_v==="..")_r.length>1&&_r.pop();else _r.push(_v)}if(_v==="."||_v==="..")_r.push("");p=_r.join("/")||"/"}`
     : "";
 
   // One trailing slash is stripped (#209); root "/" collapses to "" (0
@@ -539,7 +539,7 @@ function compileFinalMatch(
               ? `+${piece}`
               : `+"/"+${piece}`;
       }
-      paramsCode = paramsCode.replace("\0", value);
+      paramsCode = paramsCode.replace("\0", () => value);
     }
 
     // The `**` has a segment where it starts before the end of the path (of

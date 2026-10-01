@@ -79,7 +79,7 @@ Segments after a `**` (or a `*`) match from the **end** of the path; the catch-a
   - Interpreter: `findRoute` sends paths with an empty segment (`segments.includes("")`, rare) through `_findRanked` (`find-all.ts`: `findAllRoutes`' walk, filtered by `emptyParam`, ranked from the end when a suffix route is among them), whose last match is `_lookupTree`'s pick (same traversal, weights and ties), so `_lookupTree` / `_selectMatcher` / `collectSuffix` never check. Paths without one pay a single `includes("")`; paths with one take this slower path (~2× in `findRoute`: it collects every match, so its cost is bounded by the matches found).
   - Compiler: see [compiler.md](compiler.md#codegen-invariants). Pinned by the "empty segments (compiled parity, sweep)" in `find.test.ts`.
 - **Middle** empties are real static `""` segments: `/a//b` matches only the doubled-slash path. Never collapse them (normalization-mismatch bypass).
-- `normalizePath()` resolves `.` / `..` before matching (skipped when no `/.`); the compiler inlines the same logic.
+- `normalizePath()` resolves `.` / `..` before matching (skipped when no `/.`); the compiler inlines the same logic. A last `.` / `..` leaves a trailing slash, as in WHATWG (`/foo/bar/..` → `/foo/`): it is what a trailing `*` reads (`slash`).
 - **Percent-encoding:** lookup paths are the encoded pathname (`new URL().pathname`) and are never decoded; a route's literal text is encoded at insert instead (see [syntax.md](syntax.md#percent-encoding)). Do not add decoding to the hot path.
 
 ## Unnamed captures
