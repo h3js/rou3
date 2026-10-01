@@ -42,6 +42,13 @@ Least → most specific; interpreter and compiled matchAll agree exactly (`toEqu
 
 A3 can't be fixed by weights; a real fix is a global re-sort against `compareRoutes` (major design change).
 
+Swept by "lists a containing route before a contained one (sweep)" in `find-all.test.ts` (patterns without a bare `*`, both registration orders, compiled JIT/AOT and `findRoute` too): a pattern-level miss passes only as a carve-out where no matched entry of the broader pattern is itself strictly broader than one of the narrower listed before it, and every carve-out there is A1 (the other registration order is right). A2 / A3 need a bare `*`.
+
+**Bare `*` exceptions (known, README):** a `*` takes one segment that may be `""`, or none at the end of the path, and neither the traversal nor a weight sees it. Classes, pinned (stale-guarded) by "bare `*` exceptions" in `find-all.test.ts`; `findRoute` picks the broader route there too:
+
+- **Different nodes:** a `*` next to a catch-all (`/p/*/**` ⊋ `/p/**:r`, the parent's wildcard is walked first; `/p/**/*` ⊋ `/p/**:r`, bare-`**` entries before the suffix trie). Both registration orders.
+- **Same node:** a mid-route `*` vs a `:x` (`/p/*/p` ⊋ `/p/:x/p`): only a last param is weighted, so registration order decides.
+
 ## Segments after `**`
 
 Segments after a `**` match from the **end** of the path; the `**` takes what is between (≥ 0 segments, ≥ 1 with a value for `**:name`). Mid-route `:x+` / `:x*` become `**:x` and keep the segments after them.

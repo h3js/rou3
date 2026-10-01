@@ -284,7 +284,8 @@ In short: static segments beat params, and params beat wildcards. Among routes t
 
 - **Across the tree:** at each level, wildcard (`**`) matches come first, then single-segment params (`*`, `:name`), then static segments. Broader and shallower routes come before more static and deeper ones.
 - **Routes on the same tree node** (for example `/foo/*` and `/foo/:id(\d+)`, see [Route node keys](#route-node-keys)): optional and unconstrained routes come before required and regex-constrained ones. Ties keep registration order. Method-agnostic routes are sorted together with the method's own routes, and on a tie the method-agnostic one comes first (so `findRoute` picks the method's own).
-- **Consistent with containment:** when no pattern uses optional syntax and each pattern contains the next (a `"superset"` per [`compareRoutes`](#pattern-overlap)), the result order is broadest first.
+- **Consistent with containment:** when no pattern uses optional syntax or a bare `*` segment and each pattern contains the next (a `"superset"` per [`compareRoutes`](#pattern-overlap)), the result order is broadest first.
+- **Exception — bare `*` segment:** a `*` segment may match an empty segment, or no segment at the end of the path, and the order does not account for that. `/p/*/**` contains `/p/**:rest` but comes after it, and `/p/*/x` (which also matches `/p//x`) ties with `/p/:id/x`, so registration order decides. `findRoute` can pick the broader route in these cases too.
 - **Carve-out — optional syntax:** a pattern with `:name?`, `:name*` or `{...}?` registers one entry per variant, and results are ordered by the variant that matched, not by the whole pattern. A broader pattern can therefore come **last**:
 
   ```js
