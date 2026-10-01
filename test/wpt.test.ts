@@ -4,6 +4,7 @@ import { compileRouter } from "../src/compiler.ts";
 import { fromGroupName } from "../src/_group-names.ts";
 import { normalizePath } from "../src/operations/_utils.ts";
 import { withoutAlias } from "./_utils.ts";
+import { DUPLICATE_NAMED_GROUPS, needsDuplicateNames } from "./_regexp-cases.ts";
 
 // Vendored verbatim from web-platform-tests (wpt master 5cd8e3fa0a6c, 2026-10-01;
 // the file last changed in 23aac9278460):
@@ -692,7 +693,12 @@ const UNNAMED_CAPTURE_CASES: [string, string, Result][] = [
 describe("wpt urlpattern compatibility: unnamed captures", () => {
   for (const strategy of strategies) {
     for (const [pattern, input, groups] of UNNAMED_CAPTURE_CASES) {
-      it(`${strategy.name}: ${pattern} → ${input}`, () => {
+      // Without duplicate named groups (Node 22) an alternation regex throws
+      const skip =
+        strategy.name === "routeToRegExp" &&
+        !DUPLICATE_NAMED_GROUPS &&
+        needsDuplicateNames(pattern);
+      it.skipIf(skip)(`${strategy.name}: ${pattern} → ${input}`, () => {
         const { matched, params } = strategy.match(pattern, input);
         expect(matched ? params : null).toStrictEqual(expectedGroups(strategy, groups));
       });

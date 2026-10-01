@@ -58,32 +58,94 @@ export type MatchedRoute<T = unknown> = {
   params?: Record<string, string>;
 };
 
-// `[key, unset over zero segments]` per unnamed capture (`*`, `**`, an
-// unnamed `(…)` group), keyed "0", "1", … left to right over the whole
-// pattern (segments may follow a `**`, matched from the end of the path).
-// Scanned char by char, tail-recursive (`Acc`) so long routes stay in TS's
-// recursion limit.
+// `[key, may be unset, is a bare `**`]` per unnamed capture (`*`, `**`, an unnamed `(…)`
+// group), keyed "0", "1", … left to right over the whole pattern (segments
+// may follow a `**`, matched from the end of the path). A `**` may be unset
+// (zero segments), and so may any capture in an optional `{…}?` group (`Opt`).
+// Tail-recursive (`Acc`), and plain text is skipped 8 chars at a time, so
+// long routes stay in TS's recursion limit.
 type ExtractWildcards<
   TPath extends string,
   Count extends readonly unknown[] = [],
   Acc = never,
+  Opt extends boolean = false,
+> = TPath extends `${infer A}${infer B}${infer C}${infer D}${infer E}${infer F}${infer G}${infer H}${infer Rest}`
+  ? `${A}${B}${C}${D}${E}${F}${G}${H}` extends `${string}${"\\" | "(" | "*" | "{" | "}"}${string}`
+    ? ScanWildcard<TPath, Count, Acc, Opt>
+    : ExtractWildcards<Rest, Count, Acc, Opt>
+  : ScanWildcard<TPath, Count, Acc, Opt>;
+
+// `ExtractWildcards` at one char
+type ScanWildcard<
+  TPath extends string,
+  Count extends readonly unknown[],
+  Acc,
+  Opt extends boolean,
 > = TPath extends `${infer C}${infer Rest}`
   ? C extends "\\" // An escaped char is a literal
-    ? ExtractWildcards<Rest extends `${string}${infer R}` ? R : Rest, Count, Acc>
+    ? ExtractWildcards<Rest extends `${string}${infer R}` ? R : Rest, Count, Acc, Opt>
     : C extends "(" // An unnamed group (a constraint is stripped with its param)
-      ? ExtractWildcards<SkipGroup<TPath>, [...Count, unknown], Acc | [`${Count["length"]}`, false]>
-      : C extends "*"
-        ? Rest extends `*:${infer Named}` // Named catch-all (**:name), a key of `ExtractParams`
-          ? ExtractWildcards<Named, Count, Acc>
-          : Rest extends `*${infer Tail}` // `**`, `**<rest>` is `**/*<rest>` (a `{` / `}` is a group's)
-            ? ExtractWildcards<
-                Tail extends "" | `${"/" | "{" | "}"}${string}` ? Tail : `*${Tail}`,
-                [...Count, unknown],
-                Acc | [`${Count["length"]}`, true]
-              >
-            : ExtractWildcards<Rest, [...Count, unknown], Acc | [`${Count["length"]}`, false]>
-        : ExtractWildcards<Rest, Count, Acc>
+      ? ExtractWildcards<
+          SkipGroup<TPath>,
+          [...Count, unknown],
+          Acc | [`${Count["length"]}`, Opt, false],
+          Opt
+        >
+      : C extends "{" // A group: optional when `}?` closes it (groups don't nest)
+        ? ExtractWildcards<
+            Rest,
+            Count,
+            Acc,
+            TPath extends `{${string}}?${string}` ? GroupOptional<TPath> : false
+          >
+        : C extends "}"
+          ? ExtractWildcards<Rest, Count, Acc, false>
+          : C extends "*"
+            ? Rest extends `*:${infer Named}` // Named catch-all (**:name), a key of `ExtractParams`
+              ? ExtractWildcards<Named, Count, Acc, Opt>
+              : Rest extends `*${infer Tail}` // `**`, `**<rest>` is `**/*<rest>`
+                ? Tail extends `{${infer Body}}${infer After}` // `**{.md}?` is `**` or `**/*.md`
+                  ? Body extends "" | `/${string}`
+                    ? ExtractWildcards<
+                        Tail,
+                        [...Count, unknown],
+                        Acc | [`${Count["length"]}`, true, true],
+                        Opt
+                      >
+                    : ExtractWildcards<
+                        Tail,
+                        [...Count, unknown, unknown],
+                        | Acc
+                        | [`${Count["length"]}`, true, true]
+                        | [
+                            `${[...Count, unknown]["length"]}`,
+                            After extends `?${string}` ? true : Opt,
+                            false,
+                          ],
+                        Opt
+                      >
+                  : ExtractWildcards<
+                      Tail extends "" | `${"/" | "}"}${string}` ? Tail : `*${Tail}`,
+                      [...Count, unknown],
+                      Acc | [`${Count["length"]}`, true, true],
+                      Opt
+                    >
+                : ExtractWildcards<
+                    Rest,
+                    [...Count, unknown],
+                    Acc | [`${Count["length"]}`, Opt, false],
+                    Opt
+                  >
+            : ExtractWildcards<Rest, Count, Acc, Opt>
   : Acc;
+
+// Whether the `{…}` group `TPath` starts with is optional (its first `}` is
+// followed by `?`)
+type GroupOptional<TPath extends string> = TPath extends `{${string}}${infer After}`
+  ? After extends `?${string}`
+    ? true
+    : false
+  : false;
 
 // A trailing bare `*` segment matches zero segments too, so its capture may be
 // undefined; not after a `**` (or a `:name+`, which is one), where it takes one
@@ -185,7 +247,7 @@ export type InferRouteParams<TPath extends string> = {
     : Wildcard[0] extends ExtractTrailingWildcard<StripParams<TPath>, TPath>
       ? string | undefined
       : string;
-} & (true extends ExtractWildcards<StripParams<TPath>>[1]
+} & (true extends ExtractWildcards<StripParams<TPath>>[2]
     ? DoubleStarAlias
     : unknown) extends infer Params
   ? { [K in keyof Params]: Params[K] }

@@ -12,6 +12,7 @@ import { compileRouter, compileRouterToString } from "../src/compiler.ts";
 import { normalizePath } from "../src/operations/_utils.ts";
 import { format } from "oxfmt";
 import { isDeepStrictEqual } from "node:util";
+import { DUPLICATE_NAMED_GROUPS, needsDuplicateNames } from "./_regexp-cases.ts";
 
 describe("route matching", () => {
   const router = createRouter([
@@ -1543,6 +1544,8 @@ describe("unnamed captures are numbered over the whole pattern", () => {
       );
       const aot = new Function(`return ${compileRouterToString(router)}`)();
       expect(aot("GET", path)).toEqual(expected);
+      // Without duplicate named groups (Node 22) an alternation regex throws
+      if (!DUPLICATE_NAMED_GROUPS && needsDuplicateNames(route)) return;
       const groups = definedGroups(path.match(routeToRegExp(route))?.groups);
       if (route.startsWith("/**/{")) {
         // Known (`KNOWN_CAPTURE_DIFFS` in regexp.test.ts): the regex's greedy

@@ -118,7 +118,7 @@ describe("routeToRegExp", () => {
       }
     }
     expect(mismatches).toEqual([]);
-  }, 20_000);
+  }, 10_000);
 
   // `sweepPatterns()` has no escapes and `sweepPaths()` no escaped chars: a
   // `\x` is a literal `x` in both, wherever it sits in the pattern (#227).
@@ -466,7 +466,7 @@ describe("routeToRegExp", () => {
       ),
     ).toEqual([]);
     expect(accepted).toBeGreaterThan(0);
-  }, 20_000);
+  }, 10_000);
 
   // The ending analysis tokenizes the emitted (JS) body: `[]` and `[^]` close
   // immediately there, unlike PCRE where a leading `]` is a literal.
@@ -578,8 +578,15 @@ describe("routeToRegExp", () => {
       if (hasLookahead(source)) lookahead.push(pattern);
       if (duplicateGroupNames(source).length > 0) duplicates.push(pattern);
     }
-    expect(lookbehind.sort()).toEqual([...SWEEP_LOOKBEHIND_PATTERNS].sort());
-    expect(lookahead.sort()).toEqual([...SWEEP_LOOKAHEAD_PATTERNS].sort());
+    // Without duplicate named groups (Node 22) `sweepPatterns()` leaves out
+    // the ones that need them, look-behind ones included
+    const swept = new Set(sweepPatterns());
+    expect(lookbehind.sort()).toEqual(
+      [...SWEEP_LOOKBEHIND_PATTERNS].filter((p) => swept.has(p)).sort(),
+    );
+    expect(lookahead.sort()).toEqual(
+      [...SWEEP_LOOKAHEAD_PATTERNS].filter((p) => swept.has(p)).sort(),
+    );
     // Without duplicate named groups, `sweepPatterns()` leaves exactly these out.
     expect((DUPLICATE_NAMED_GROUPS ? duplicates : unsupportedSweepPatterns()).sort()).toEqual(
       [...SWEEP_DUPLICATE_NAME_PATTERNS].sort(),

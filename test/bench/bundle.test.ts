@@ -149,8 +149,10 @@ describe("benchmark", () => {
     // +207B raw / +111B gzip: unnamed captures are numbered over the whole
     // pattern (URLPattern), so the route without a `{…}?` group keys them like
     // the one with it (`skipGroup`, counted by `_add` itself).
-    expect(bytes).toBeLessThanOrEqual(11240); // <11.24kb
-    expect(gzipSize).toBeLessThanOrEqual(4730); // <4.73kb
+    // +67B raw / +25B gzip: early bails keep `{…}?` groups without unnamed
+    // captures as fast as before (no `skipGroup` counting).
+    expect(bytes).toBeLessThanOrEqual(11305); // <11.31kb
+    expect(gzipSize).toBeLessThanOrEqual(4755); // <4.76kb
   });
 });
 

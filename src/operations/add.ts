@@ -82,7 +82,16 @@ function _add<T>(
     route ??= expandedRouteId(path);
     _add(ctx, method, groupExpanded[0], data, route, input, unnamed);
     if (groupExpanded[1] !== undefined) {
-      _add(ctx, method, groupExpanded[1], data, route, input, skipGroup(path, input, unnamed));
+      // A pattern without a `*` or `(` has no unnamed capture to renumber
+      _add(
+        ctx,
+        method,
+        groupExpanded[1],
+        data,
+        route,
+        input,
+        /[*(]/.test(path) ? skipGroup(path, input, unnamed) : unnamed,
+      );
     }
     return 0;
   }
@@ -255,6 +264,9 @@ const same: Unnamed = (index) => index;
  */
 export function skipGroup(path: string, input: string, unnamed: Unnamed = same): Unnamed {
   const [pre, body] = scanFirstGroup(path)!;
+  // A group without a `*` or `(` holds no unnamed capture (unless it extends
+  // a `**`: `**.md` is `**` and `*.md`), so most (`{-:title}?`) skip nothing
+  if (!/[*(]/.test(body) && !pre.endsWith("*")) return unnamed;
   const count = (p: string) => _add(createRouter(), "", p, undefined, undefined, input);
   const before = count(pre);
   const skip = count(pre + body) - before;
