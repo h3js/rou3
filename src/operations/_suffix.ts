@@ -38,7 +38,7 @@ export function collectSuffix<T>(
       const regexps = m.paramsRegexp;
       for (let i = 0; i < regexps.length && weight >= 0; i++) {
         if (regexps[i]) {
-          weight = regexps[i].test(segments[i > w ? i - w - 1 + end : i]) ? weight + 1 : -1;
+          weight = regexps[i].test(segments[i > w ? i - w - 1 + end : i]) ? weight + 2 : -1;
         }
       }
       if (weight >= 0) {

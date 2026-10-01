@@ -417,18 +417,24 @@ function compileFinalMatch(
   let ret = `{data:${serializeData(ctx, data)}`;
 
   const conditions: string[] = [];
-  // A `**:name` before the suffix must take a segment (weighs one point, as
-  // in `collectSuffix`)
-  if (suffixGuard && data.paramsMap!.some(([index, , optional]) => index < 0 && !optional)) {
-    conditions.push(suffixGuard);
-  }
   // Presence guards (segment-count checks) are not specificity constraints, so
   // they must not raise `weight` — otherwise an optional `**` tail ties with a
   // required `**:name` and the weight-sorted emit order flips (#186).
   let guardConditions = 0;
-  // A trailing `*` weighs a point over a `**`, which matches the same paths,
+  // A `*` weighs a point over a `**` (a trailing one matches the same paths),
   // below a regex (each condition weighs two, see `_selectMatcher`)
   let starWeight = 0;
+  // A `**:name` / `*` before the suffix must take a segment (as in
+  // `collectSuffix`: a `**:name` weighs a condition, a `*` a point)
+  const catchAll =
+    suffixGuard && data.paramsMap!.find(([index, , optional]) => index < 0 && !optional);
+  if (catchAll) {
+    conditions.push(suffixGuard);
+    if (catchAll[3]) {
+      guardConditions++;
+      starWeight = 1;
+    }
+  }
 
   // Add param properties
   const { paramsMap } = data;
@@ -493,8 +499,7 @@ function compileFinalMatch(
         const guard = nonEmptyGuard(map, params[i], data.suffix);
         if (guard) {
           conditions.push(guard);
-          // A catch-all's weighs a point (a `**:name` outweighs a `*`)
-          if (map[0] >= 0) guardConditions++;
+          guardConditions++;
         }
         continue;
       }

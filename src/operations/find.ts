@@ -168,12 +168,12 @@ function _selectMatcher<T>(
       if (optionalOnly && !matchesZero(m)) {
         continue;
       }
-      // A regex param weighs two points, a required last param four (only a
-      // wildcard node's differ: a `**:name` four, a `**` none, a trailing `*`,
+      // A regex param weighs two points, a required last param two (only a
+      // wildcard node's differ: a `**:name` two, a `**` none, a trailing `*`,
       // which matches the same paths, one to break the tie below any regex);
       // a failed regex drops the entry below any candidate (bestWeight starts
       // at -1)
-      let weight = last && !last[2] ? (last[3] ? 1 : 4) : 0;
+      let weight = last && !last[2] ? (last[3] ? 1 : 2) : 0;
       const regexps = m.paramsRegexp;
       for (let i = 0; i < regexps.length; i++) {
         if (regexps[i]) {

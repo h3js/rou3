@@ -292,6 +292,25 @@ describe("`*` vs `**` priority and ordering", () => {
     });
   }
 
+  it("leaves a `**` with regex params and a `**:name` tied, as before (no `*`)", () => {
+    // A regex param weighs what a required `**:name` does: registration order
+    // decides, in every matcher
+    for (const [routes, path] of [
+      [["/api/:v(\\d+)/**", "/api/:v/**:rest"], "/api/1/x"],
+      [["/q/:a(\\d+)/:b(\\d+)/**", "/q/:c(\\d+)/:d/**:r"], "/q/1/2/x"],
+    ] as const) {
+      for (const order of [[...routes], [...routes].reverse()]) {
+        const router = createRouter<string>();
+        for (const route of order) addRoute(router, "GET", route, route);
+        const aot = new Function(`return ${compileRouterToString(router)}`)();
+        expect(findRoute(router, "GET", path)?.data, order.join(", ")).toBe(order[0]);
+        expect(compileRouter(router)("GET", path)?.data).toBe(order[0]);
+        expect(aot("GET", path)?.data).toBe(order[0]);
+        expect(findAllRoutes(router, "GET", path).map((m) => m.data)).toEqual(order);
+      }
+    }
+  });
+
   it("an optional segment before a static one (README differences)", () => {
     // The static `a` wins over `:x`, so the route without `:x` does; the
     // regex (and URLPattern) match left to right. Same paths, other captures.

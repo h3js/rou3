@@ -146,9 +146,9 @@ export function _findAll<T>(
  * before the method's own.
  *
  * Weight matches the compiler's model: two points per regex-constrained
- * param, plus four for a required last param. Siblings differ there only on
+ * param, plus two for a required last param. Siblings differ there only on
  * a wildcard node (`**` none, a trailing `*`, which matches the same paths,
- * one: below any regex, `**:name` four);
+ * one: below any regex, `**:name` two, as a regex);
  * elsewhere it adds the same to all, which the compiler leaves out.
  */
 function pushSorted<T>(matches: MethodData<T>[], match: MethodData<T>[]): void {
@@ -163,7 +163,7 @@ function pushSorted<T>(matches: MethodData<T>[], match: MethodData<T>[]): void {
         // A required last param, a trailing `*` (it matches what a `**` does)
         // one point only
         const last = pm?.[pm.length - 1];
-        if (last && !last[2]) w += last[3] ? 1 : 4;
+        if (last && !last[2]) w += last[3] ? 1 : 2;
         return [m, w];
       })
       .sort((a, b) => a[1] - b[1])
