@@ -21,20 +21,21 @@ export function findAllRoutes<T>(
   if (opts?.normalize) {
     path = normalizePath(path);
   }
-  // A trailing `*` takes the one ignored trailing slash (see `matchesZero`)
+  // A trailing `*` over zero segments takes the one ignored trailing slash
+  // (see `getMatchParams`)
   const slash = path.charCodeAt(path.length - 1) === 47; /* '/' */
   if (slash) {
     path = path.slice(0, -1);
   }
   const segments = splitPath(path);
-  const matches = _findRanked(ctx, method, segments, slash);
+  const matches = _findRanked(ctx, method, segments);
 
   // Fresh objects (the entries are internal); static routes and
   // `params: false` carry no `params` key, as in `findRoute` and compiled
   const params = opts?.params !== false;
   return matches.map((m) =>
     params && m.paramsMap
-      ? { data: m.data, params: getMatchParams(segments, m.paramsMap, m.suffix) }
+      ? { data: m.data, params: getMatchParams(segments, m.paramsMap, m.suffix, slash) }
       : { data: m.data },
   );
 }
@@ -42,17 +43,16 @@ export function findAllRoutes<T>(
 /**
  * Every route matching `segments`, least -> most specific: in tree order, or
  * ranked from the end of the path once a route with segments after `**` is
- * among them. `slash`: the path had a trailing slash (see `matchesZero`).
+ * among them.
  * `reverse`: see `_findAll`; the last match is then the one `findRoute` picks.
  */
 export function _findRanked<T>(
   ctx: RouterContext<T>,
   method: string,
   segments: string[],
-  slash: boolean,
   reverse?: boolean,
 ): MethodData<T>[] {
-  let matches = _findAll(ctx.root, method, segments, 0, slash, [], reverse);
+  let matches = _findAll(ctx.root, method, segments, 0, [], reverse);
   // A `:name` / `**:name` can't take an empty segment (see `emptyParam`)
   if (segments.includes("")) {
     matches = matches.filter((m) => !emptyParam(m, segments));
@@ -77,7 +77,6 @@ export function _findAll<T>(
   method: string,
   segments: string[],
   index: number,
-  slash: boolean,
   matches: MethodData<T>[] = [],
   reverse?: boolean,
 ): MethodData<T>[] {
@@ -87,12 +86,8 @@ export function _findAll<T>(
   if (node.wildcard) {
     const match = node.wildcard.methods && methodEntries(node.wildcard.methods, method, reverse);
     if (match) {
-      // Zero segments remain: a `**`, or a `*` after a trailing slash
-      // (mirrors findRoute)
-      pushSorted(
-        matches,
-        index < segments.length ? match : match.filter((m) => matchesZero(m, slash)),
-      );
+      // Zero segments remain: a `**` or a `*` (mirrors findRoute)
+      pushSorted(matches, index < segments.length ? match : match.filter((m) => matchesZero(m)));
     }
     // Routes with segments after the `**` (narrower than a bare one)
     if (node.wildcard.suffix) {
@@ -113,7 +108,7 @@ export function _findAll<T>(
     // Consume this segment as the param, then validate regex constraints on
     // the newly collected matches (mirrors `_lookupTree` in find.ts).
     const start = matches.length;
-    _findAll(node.param, method, segments, index + 1, slash, matches, reverse);
+    _findAll(node.param, method, segments, index + 1, matches, reverse);
     if (node.param.hasRegexParam) {
       for (let r = matches.length - 1; r >= start; r--) {
         if (matches[r].paramsRegexp[index]?.test(segment) === false) matches.splice(r, 1);
@@ -127,7 +122,7 @@ export function _findAll<T>(
   if (index < segments.length) {
     const staticChild = node.static?.[segment];
     if (staticChild) {
-      _findAll(staticChild, method, segments, index + 1, slash, matches, reverse);
+      _findAll(staticChild, method, segments, index + 1, matches, reverse);
     }
   }
 

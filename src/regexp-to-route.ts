@@ -60,6 +60,10 @@ export function regExpToRoute(regexp: RegExp | string): string {
   if (rootRepeat) {
     return `/:${paramName(rootRepeat[1])}*`;
   }
+  // A trailing `*` after a segment that can be empty (`/:x(\d*)/*`): its
+  // separator and the stripped slash, or nothing where that segment isn't
+  // empty, is the `*` and a plain `\/?`
+  src = src.replace(STAR_LOOKBEHIND, "\\/(?<$1>[\\s\\S]*)\\/?");
   // Endings with the rule built in back to the plain body and `\/?`.
   const closed = { dot: false };
   const plain = plainBody(src, closed);
@@ -67,9 +71,11 @@ export function regExpToRoute(regexp: RegExp | string): string {
   // A lazy `.*` ending is a `(.*)` constraint; older versions emitted `.*`
   // for catch-alls too, so elsewhere a whole `.*` still reads as one.
   const dotConstraint = closed.dot || TRAILING_DOT.test(src);
-  src = src
-    .replace(TRAILING_CATCH_ALL, "(?<$1>[\\s\\S]*)$2\\/?")
-    .replace(TRAILING_DOT, "(?<$1>.*)$2\\/?");
+  src = unwrapStar(
+    src
+      .replace(TRAILING_CATCH_ALL, "(?<$1>[\\s\\S]*)$2\\/?")
+      .replace(TRAILING_DOT, "(?<$1>.*)$2\\/?"),
+  );
   if (src.endsWith(TRAILING_SLASH)) src = src.slice(0, -TRAILING_SLASH.length);
   else if (src.endsWith(LEGACY_TRAILING_SLASHES)) {
     src = src.slice(0, -LEGACY_TRAILING_SLASHES.length);
@@ -106,6 +112,8 @@ export function regExpToRoute(regexp: RegExp | string): string {
 // 0.10 regexes (a `:x` / `:x+` could be empty there) end a `:x` in the `*`
 // forms and a catch-all in `(?:\/|(?<x>(?:[\s\S]*[^/]|\/)\/*?)\/?)`: read as
 // `:x` and `:x+`.
+const STAR_LOOKBEHIND =
+  /\(\?:\\\/\(\?<(_\d+)>\(\?:\[\\s\\S\]\*\[\^\/\]\)\?\\\/\*\?\)\\\/\?\|\(\?<!\\\/\)\)$/;
 const REQUIRED_PARAM = /\(\?:\(\?<(\w+)>\[\^\/\]\+\)\\\/\?\|\\\/\)$/;
 const REQUIRED_VALUE =
   /\(\?:\\\/\\\/\|\(\?<(\w+)>\(\?:\[\\s\\S\]\*\[\^\/\]\|\\\/\\\/\)\\\/\*\?\)\\\/\?\)$/;
@@ -649,6 +657,30 @@ function readGroup(src: string, start: number): number {
     else if (c === ")" && --depth === 0) return i + 1;
   }
   throw new Error(`rou3: unbalanced group in "${src}"`);
+}
+
+/**
+ * A whole-segment `*` that ends the route, or that only optional segments
+ * follow, is optional, as the route without it: `routeToRegExp` wraps it in a
+ * greedy `(?:\/(?<_N>…))?` (a `**` has a lazy one), with a lazy body where
+ * optional segments follow (`(?:\/(?<_0>[\s\S]*?)(?:\/(?<y>…))??)?`). Back
+ * to a plain `\/(?<_N>…)` segment, which reads as `*`.
+ */
+function unwrapStar(src: string): string {
+  const at = src.search(/\(\?:\\\/\(\?<_\d+>\[\\s\\S\]\*\??\)/);
+  if (at < 0) return src;
+  const end = readGroup(src, at);
+  const lazyBody = src[src.indexOf(")", at + 5) - 1] === "?";
+  // Greedy; a greedy body only where nothing but closers and `\/?` follow
+  // (`/a/**/b`'s and `/:x(\d*)/**`'s greedy groups are a `**`'s)
+  if (
+    src[end] !== "?" ||
+    src[end + 1] === "?" ||
+    (!lazyBody && !/^(?:\)\?\??)*\\\/\?$/.test(src.slice(end + 1)))
+  ) {
+    return src;
+  }
+  return src.slice(0, at) + src.slice(at + 3, end - 1) + src.slice(end + 1);
 }
 
 /** Index where the segment starting at `start` ends (top-level `/` or `(?:`). */

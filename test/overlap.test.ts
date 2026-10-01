@@ -135,7 +135,7 @@ describe("compareRoutes", () => {
     ["/a/*", "/a/:x", "superset", "a * takes an empty segment, and several"],
     ["/a/*/c", "/a/:x/c", "superset", "mid * takes an empty segment, and several"],
     ["/a/**", "/a/:x", "superset", "** vs :param"],
-    ["/a/**", "/a/*", "superset", "** also matches `/a`, * only `/a/`"],
+    ["/a/**", "/a/*", "equal", "a trailing * is optional, like **"],
     ["/a/*", "/a/**:rest", "superset", "a * may be empty, **:name not"],
     ["/a/*", "/a/:x+", "superset", "a * may be empty, :x+ not"],
     ["/a/*", "/a/b/:x/**", "superset", "a * vs deeper wildcard"],
@@ -147,7 +147,7 @@ describe("compareRoutes", () => {
     ["/a/**", "/*/b", "partial", "deep wildcard vs fixed-depth suffix"],
 
     // optional / repeat modifiers (multi-shape patterns)
-    ["/a/:x?", "/a/*", "partial", "a * doesn't match `/a`, takes several segments"],
+    ["/a/:x?", "/a/*", "subset", "a trailing * is optional and takes several segments"],
     ["/a/:x?", "/a{/:y}?", "equal", "optional param == optional group"],
     ["/a/:x?", "/a", "superset", "optional param matches without"],
     ["/a/:x*", "/a/**", "subset", "repeat* needs a value, ** takes an empty segment"],
@@ -158,7 +158,7 @@ describe("compareRoutes", () => {
 
     // non-capturing group delimiters `{...}?`
     ["/a{/b}?", "/a", "superset", "optional group matches without"],
-    ["/a{/b}?", "/a/*", "partial", "a * doesn't match `/a`"],
+    ["/a{/b}?", "/a/*", "subset", "a trailing * matches `/a` too"],
     ["/a{/*}?", "/a/**", "equal", "an optional * group is a **"],
     ["/a{/b}?", "/a/c", "disjoint", "optional group rejects other suffix"],
 

@@ -111,6 +111,7 @@ describe("matcher: complex", () => {
     expect(_findAllRoutes(router, "GET", "/foo")).to.toMatchInlineSnapshot(`
       [
         "/foo/**",
+        "/foo/*",
         "/foo",
       ]
     `);
@@ -208,6 +209,7 @@ describe("matcher: order", () => {
     expect(matches).to.toMatchInlineSnapshot(`
       [
         "/hello/**",
+        "/hello/*",
         "/hello",
       ]
     `);
@@ -371,8 +373,9 @@ describe("matcher: ordering contract: optional-syntax carve-out", () => {
   it("A3: matched entries in different nodes, traversal order decides (both orders)", () => {
     // `/p/:id{/**}?` matches `/p/a/` twice: through `/p/:id/**` (a child,
     // first) and `/p/:id` (the node itself, after the `*` child of
-    // `/p/:id/*`, which takes nothing after the trailing slash).
-    expect(compareRoutes("/p/:id{/**}?", "/p/:id/*")).toBe("superset");
+    // `/p/:id/*`, which takes nothing after the trailing slash). The two
+    // match the same paths (a trailing `*` is optional).
+    expect(compareRoutes("/p/:id{/**}?", "/p/:id/*")).toBe("equal");
     for (const routes of [
       ["/p/:id{/**}?", "/p/:id/*"],
       ["/p/:id/*", "/p/:id{/**}?"],
@@ -536,15 +539,15 @@ describe("matcher: regression #184", () => {
     expect(_findAllRoutes(router, "GET", "/42/x")).toEqual(["/(\\d+)/**"]);
   });
 
-  it("a `*` and required params on `/foo` take a segment, the `*` none after a slash", () => {
+  it("a trailing `*` matches `/foo` and `/foo/`, required params don't", () => {
     // A `*` is a catch-all on the wildcard node, a `:id` a param node: at the
-    // end of the path only the `*` can match (after the trailing slash).
+    // end of the path only the `*` can match (it is optional there).
     for (const routes of [
       ["/foo/*", "/foo/:id"],
       ["/foo/:id", "/foo/*"],
       ["/foo/*", "/foo/:id(\\d+)"],
     ]) {
-      expect(_findAllRoutes(createRouter(routes), "GET", "/foo")).toEqual([]);
+      expect(_findAllRoutes(createRouter(routes), "GET", "/foo")).toEqual(["/foo/*"]);
       expect(_findAllRoutes(createRouter(routes), "GET", "/foo/")).toEqual(["/foo/*"]);
     }
   });
@@ -605,7 +608,7 @@ describe("matcher: out-of-bounds segment vs literal 'undefined' key", () => {
     expect(_findAllRoutes(router, "GET", "/")).toEqual([]);
     expect(_findAllRoutes(router, "GET", "/w1")).toEqual(["/w1"]);
     // a real "undefined" segment still matches normally
-    expect(_findAllRoutes(router, "GET", "/undefined")).toEqual([]);
+    expect(_findAllRoutes(router, "GET", "/undefined")).toEqual(["/undefined/*"]);
     expect(_findAllRoutes(router, "GET", "/undefined/")).toEqual(["/undefined/*"]);
     expect(_findAllRoutes(router, "GET", "/w1/undefined")).toEqual(["/w1/undefined/**"]);
   });

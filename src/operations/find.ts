@@ -15,8 +15,8 @@ export function findRoute<T = unknown>(
   if (opts?.normalize) {
     path = normalizePath(path);
   }
-  // One trailing slash is ignored, except by a trailing `*`, which it gives
-  // an empty capture (see `matchesZero`)
+  // One trailing slash is ignored, except by a trailing `*` over zero
+  // segments, which it gives an empty capture (see `getMatchParams`)
   const slash = path.charCodeAt(path.length - 1) === 47; /* '/' */
   if (slash) {
     path = path.slice(0, -1);
@@ -44,10 +44,10 @@ export function findRoute<T = unknown>(
     segments.includes("") ||
     (ctx.root.hasSuffix && hasSuffixMatch(ctx.root, method, segments, 0))
   ) {
-    const matches = _findRanked(ctx, method, segments, slash, true);
+    const matches = _findRanked(ctx, method, segments, true);
     match = matches[matches.length - 1];
   } else {
-    match = _lookupTree<T>(ctx.root, method, segments, 0, slash);
+    match = _lookupTree<T>(ctx.root, method, segments, 0);
   }
 
   if (match === undefined) {
@@ -60,7 +60,9 @@ export function findRoute<T = unknown>(
 
   return {
     data: match.data,
-    params: match.paramsMap ? getMatchParams(segments, match.paramsMap, match.suffix) : undefined,
+    params: match.paramsMap
+      ? getMatchParams(segments, match.paramsMap, match.suffix, slash)
+      : undefined,
   };
 }
 
@@ -69,7 +71,6 @@ function _lookupTree<T>(
   method: string,
   segments: string[],
   index: number,
-  slash: boolean,
 ): MethodData<T> | undefined {
   // 0. End of path
   if (index === segments.length) {
@@ -82,7 +83,7 @@ function _lookupTree<T>(
     // A catch-all over zero segments (`/test` matches `/test/**`, `/test/`
     // also `/test/*`)
     return node.wildcard?.methods
-      ? _selectMatcher(node.wildcard.methods, method, segments, true, slash)
+      ? _selectMatcher(node.wildcard.methods, method, segments, true)
       : undefined;
   }
 
@@ -92,7 +93,7 @@ function _lookupTree<T>(
   if (node.static) {
     const staticChild = node.static[segment];
     if (staticChild) {
-      const match = _lookupTree(staticChild, method, segments, index + 1, slash);
+      const match = _lookupTree(staticChild, method, segments, index + 1);
       if (match) {
         return match;
       }
@@ -101,7 +102,7 @@ function _lookupTree<T>(
 
   // 2. Param
   if (node.param) {
-    const match = _lookupTree(node.param, method, segments, index + 1, slash);
+    const match = _lookupTree(node.param, method, segments, index + 1);
     if (match) {
       return match;
     }
@@ -132,16 +133,15 @@ function _lookupTree<T>(
  * weight the method-scoped entry wins.
  *
  * `optionalOnly` implements the end-of-path fallback: one wildcard node can
- * hold routes that need a segment (`**:name`, `*`) and ones that don't (`**`)
- * in any insertion order — only those match zero segments (a `*` after a
- * trailing slash, `slash`: see `matchesZero`).
+ * hold routes that need a segment (`**:name`) and ones that don't (`**`, a
+ * trailing `*`) in any insertion order — only those match zero segments
+ * (see `matchesZero`).
  */
 function _selectMatcher<T>(
   methods: Record<string, MethodData<T>[] | undefined>,
   method: string,
   segments: string[],
   optionalOnly?: boolean,
-  slash?: boolean,
 ): MethodData<T> | undefined {
   let any = methods[""];
   const match = methods[method] || any;
@@ -155,7 +155,7 @@ function _selectMatcher<T>(
   // Fast path: a single sibling with no regex constraints (the common case)
   const first = match[0];
   if (!any && match.length === 1 && first.paramsRegexp.length === 0) {
-    return !optionalOnly || matchesZero(first, slash) ? first : undefined;
+    return !optionalOnly || matchesZero(first) ? first : undefined;
   }
   let best: MethodData<T> | undefined;
   let bestWeight = -1;
@@ -165,7 +165,7 @@ function _selectMatcher<T>(
   for (; list; list = list === any ? undefined : any) {
     for (const m of list) {
       const last = m.paramsMap?.[m.paramsMap.length - 1];
-      if (optionalOnly && !matchesZero(m, slash)) {
+      if (optionalOnly && !matchesZero(m)) {
         continue;
       }
       // A required last param weighs one point, two unless it may be empty

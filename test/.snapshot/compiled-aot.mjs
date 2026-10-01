@@ -53,7 +53,9 @@ const findRoute = /* @__PURE__ */ (() => {
         if (l > 2) {
           if (s[2] === "foo") {
             if (m === "GET") {
-              if (l > 3 || (t && l === 3)) return { data: $7, params: { 0: p.slice(10) } };
+              return l > 3 || t
+                ? { data: $7, params: { 0: p.slice(10) } }
+                : { data: $7, params: {} };
               return l > 3
                 ? { data: $8, params: { 0: (_w = p.slice(10)), _: _w } }
                 : { data: $8, params: {} };

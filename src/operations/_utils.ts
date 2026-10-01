@@ -250,14 +250,14 @@ export function emptyParam(m: MethodData<unknown>, segments: string[]): boolean 
 }
 
 /**
- * Whether entry `m` of a wildcard node matches zero segments there: a bare
- * `**` always, a `*` (named by a digit, a `**:name` by a letter or `_`) only
- * after the lookup path's trailing slash (`slash`): `/foo/*` matches `/foo/`
- * with `""`, but not `/foo`, as in URLPattern.
+ * Whether entry `m` of a wildcard node (a route ending in its catch-all)
+ * matches zero segments there: a bare `**` and a `*` (named by a digit, a
+ * `**:name` by a letter or `_`). A trailing `*` is optional, as in 0.11:
+ * `/foo/*` matches `/foo` (no key, see `getMatchParams`) and `/foo/` (`""`).
  */
-export function matchesZero(m: MethodData<unknown>, slash?: boolean): boolean {
+export function matchesZero(m: MethodData<unknown>): boolean {
   const last = m.paramsMap![m.paramsMap!.length - 1];
-  return last[2] || (!!slash && (last[1] as string) < ":");
+  return last[2] || (last[1] as string) < ":";
 }
 
 export function normalizePath(path: string): string {
@@ -365,15 +365,16 @@ export function getMatchParams(
   segments: string[],
   paramsMap: ParamsIndexMap,
   suffix?: [number, number],
+  slash?: boolean,
 ): MatchedRoute["params"] {
   const params = new NullProtoObj();
   // Segments after a `**` are counted from the end of the path
   const end = suffix ? segments.length - suffix[1] : segments.length;
   for (const [index, name, optional, , join] of paramsMap) {
     // A bare `**` (`~index` is where it starts; negative for the other
-    // params) over zero segments is unset; a `*` there (after a trailing
-    // slash) is `""`
-    if (optional && ~index >= end) continue;
+    // params) over zero segments is unset; a trailing `*` there too, unless
+    // the lookup path had a trailing slash (`slash`): `""`
+    if (~index >= end && (optional || !slash)) continue;
     const segment =
       index < 0
         ? segments.slice(~index, end).join("/")

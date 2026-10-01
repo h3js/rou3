@@ -22,8 +22,8 @@ export type RouteComparison = "disjoint" | "equal" | "superset" | "subset" | "pa
  * and wildcard segment-count rules match `findRoute`/`findAllRoutes` exactly.
  *
  * Segment-count rules: bare `**` matches zero-or-more segments, `*` and
- * `**:name` one-or-more (a trailing `*` none after a trailing slash: `/a/*`
- * and `/a` overlap on `/a/`), and `:name` exactly one.
+ * `**:name` one-or-more (a trailing `*` zero-or-more, like `**`), and `:name`
+ * exactly one.
  *
  * Regex-constrained segments are handled precisely against static literals
  * (`/user/:id(\d+)` vs `/user/42`), but two dynamic segments where at least one

@@ -903,10 +903,10 @@ describe("routeToRegExp: engines without duplicate named groups", () => {
   it.each([
     ["/x-*/{b}?", String.raw`^\/x-(?<_0>[\s\S]*?)(?:\/b)?\/?$`],
     ["/a/x-*{/b}?", String.raw`^\/a\/x-(?<_0>[\s\S]*?)(?:\/b)?\/?$`],
-    ["/a/*{/b}?", String.raw`^\/a\/(?<_0>[\s\S]*?)(?:\/b)?\/?$`],
-    ["/a/*/{b}?", String.raw`^\/a\/(?<_0>[\s\S]*?)(?:\/b)?\/?$`],
-    ["/*/{b}?", String.raw`^\/(?<_0>[\s\S]*?)(?:\/b)?\/?$`],
-    ["/a/*{/b/c%}?", String.raw`^\/a\/(?<_0>[\s\S]*?)(?:\/b\/c%)?\/?$`],
+    ["/a/*{/b}?", String.raw`^\/a(?:\/(?<_0>[\s\S]*?))?(?:\/b)?\/?$`],
+    ["/a/*/{b}?", String.raw`^\/a(?:\/(?<_0>[\s\S]*?))?(?:\/b)?\/?$`],
+    ["/*/{b}?", String.raw`^(?:\/(?<_0>[\s\S]*?))?(?:\/b)?\/?$`],
+    ["/a/*{/b/c%}?", String.raw`^\/a(?:\/(?<_0>[\s\S]*?))?(?:\/b\/c%)?\/?$`],
   ])("%s inlines a lazy `*`", (route, source) => {
     expect(routeToRegExp(route).source).toBe(source);
   });

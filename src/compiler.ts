@@ -426,6 +426,9 @@ function compileFinalMatch(
   // they must not raise `weight` — otherwise an optional `**` tail ties with a
   // required `**:name` and the weight-sorted emit order flips (#186).
   let guardConditions = 0;
+  // A trailing `*` weighs a point over a `**` (see `_selectMatcher`) without
+  // a condition of its own
+  let starWeight = 0;
 
   // Add param properties
   const { paramsMap } = data;
@@ -433,15 +436,12 @@ function compileFinalMatch(
     // A catch-all ending the route (`currentIdx` is where it starts)
     const lastParam = paramsMap[paramsMap.length - 1];
     if (currentIdx !== -1) {
-      if (!lastParam[2]) {
-        // It needs a segment (a `**:name`), or, a `*`, takes none after a
-        // trailing slash (see `matchesZero`)
-        if ((lastParam[1] as string) < ":") {
-          ctx.slash = true;
-          conditions.push(`(l>${currentIdx}||t&&l===${currentIdx})`);
-        } else {
-          conditions.push(`l>${currentIdx}`);
-        }
+      // A trailing `*` matches zero segments like a `**` (see `matchesZero`)
+      const star = (lastParam[1] as string) < ":" && !lastParam[2];
+      if (star) starWeight = 1;
+      if (!lastParam[2] && !star) {
+        // It needs a segment (a `**:name`)
+        conditions.push(`l>${currentIdx}`);
       } else if (lastParam[0] < 0 && paramsMap.length > 1) {
         // Optional `**` tail, but the required leading param(s) must be present
         conditions.push(`l>${currentIdx - 1}`);
@@ -459,8 +459,10 @@ function compileFinalMatch(
     // every evaluation (ES2015+ semantics), measured ~2-6% per match.
     let paramsCode = "";
     // Where a bare `**`'s properties are in `paramsCode`: they are unset over
-    // zero segments (see `getMatchParams`)
+    // zero segments (see `getMatchParams`), a trailing `*`'s unless the path
+    // had a trailing slash (`t`)
     let starStar: [start: number, end: number] | undefined;
+    let present = "";
     // A `*` inside a segment is split around a `**` (see `splitStar`): its
     // pieces' values, joined by `/` into one property where the first one is
     // (`\0`), the `**`'s only where it has a segment
@@ -481,6 +483,11 @@ function compileFinalMatch(
           code = `${propKey(map[1])}:_w=${params[i]},_:_w,`;
           ctx.starStarTemp = true;
           starStar = [paramsCode.length, paramsCode.length + code.length];
+          present = suffixGuard || `l>${currentIdx}`;
+        } else if (map[0] < 0 && map[3] && !map[4] && currentIdx !== -1) {
+          starStar = [paramsCode.length, paramsCode.length + code.length];
+          ctx.slash = true;
+          present = `(l>${currentIdx}||t)`;
         }
         paramsCode += code;
         // A `:name` / `**:name` needs a value (see `emptyParam`)
@@ -545,7 +552,7 @@ function compileFinalMatch(
     // The `**` has a segment where it starts before the end of the path (of
     // its prefix, before a suffix: `suffixGuard`)
     ret = starStar
-      ? `${suffixGuard || `l>${currentIdx}`}?${ret},params:{${paramsCode}}}:${ret},params:{${paramsCode.slice(0, starStar[0])}${paramsCode.slice(starStar[1])}}`
+      ? `${present}?${ret},params:{${paramsCode}}}:${ret},params:{${paramsCode.slice(0, starStar[0])}${paramsCode.slice(starStar[1])}}`
       : `${ret},params:{${paramsCode}}`;
   }
   ret += "}";
@@ -557,7 +564,7 @@ function compileFinalMatch(
     (conditions.length > 0 ? `if(${conditions.join("&&")})` : "") +
     (ctx.opts?.matchAll ? push : `return ${ret};`);
 
-  return { code, weight: conditions.length - guardConditions };
+  return { code, weight: conditions.length - guardConditions + starWeight };
 }
 
 function compileNode(

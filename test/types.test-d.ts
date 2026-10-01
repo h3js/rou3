@@ -32,21 +32,28 @@ describe("types", () => {
     });
 
     it("should infer wildcard params", () => {
-      // A `*` always has a value (`""` at least: `/test/*` on `/test/`)
-      type Params = InferRouteParams<"/test/*">;
+      // A `*` has a value (`""` at least: `/test/*/foo` on `/test//foo`)...
       type Expected = { "0": string };
-      expectTypeOf<Params>().toEqualTypeOf<Expected>();
-      expectTypeOf<InferRouteParams<"/test/*/">>().toEqualTypeOf<Expected>();
       expectTypeOf<InferRouteParams<"/test/*/foo">>().toEqualTypeOf<Expected>();
       expectTypeOf<InferRouteParams<"/file-*.png">>().toEqualTypeOf<Expected>();
-      // ... unless an optional group ends right after it
+      expectTypeOf<InferRouteParams<"/file-*">>().toEqualTypeOf<Expected>();
+      // ... unless it is a whole segment ending the route, optional there
+      // (`/test/*` on `/test`), or in an optional group
+      type Optional = { "0": string | undefined };
+      expectTypeOf<InferRouteParams<"/test/*">>().toEqualTypeOf<Optional>();
+      expectTypeOf<InferRouteParams<"/test/*/">>().toEqualTypeOf<Optional>();
+      expectTypeOf<InferRouteParams<"/*">>().toEqualTypeOf<Optional>();
+      expectTypeOf<InferRouteParams<"/test/*{.png}?">>().toEqualTypeOf<Optional>();
       expectTypeOf<InferRouteParams<"/test{/*}?">>().toEqualTypeOf<{ "0": string | undefined }>();
       // the generic (non-inferred) params type stays narrow
       expectTypeOf<NonNullable<MatchedRoute["params"]>>().toEqualTypeOf<Record<string, string>>();
     });
 
     it("should infer wildcard params numbered with params around them", () => {
-      expectTypeOf<InferRouteParams<"/test/:id/*">>().toEqualTypeOf<{ id: string; "0": string }>();
+      expectTypeOf<InferRouteParams<"/test/:id/*">>().toEqualTypeOf<{
+        id: string;
+        "0": string | undefined;
+      }>();
       // A `*` in the param's segment is no modifier
       expectTypeOf<InferRouteParams<"/test/:id-*">>().toEqualTypeOf<{ id: string; "0": string }>();
       expectTypeOf<InferRouteParams<"/test/*-:id">>().toEqualTypeOf<{ "0": string; id: string }>();
@@ -82,7 +89,7 @@ describe("types", () => {
       expectTypeOf<InferRouteParams<"/test/:a/:b?/*">>().toEqualTypeOf<{
         a: string;
         b: string | undefined;
-        "0": string;
+        "0": string | undefined;
       }>();
     });
 
@@ -114,6 +121,10 @@ describe("types", () => {
         _?: string;
       }>();
       expectTypeOf<InferRouteParams<"/*/:file">>().toEqualTypeOf<{ "0": string; file: string }>();
+      expectTypeOf<InferRouteParams<"/*/:file?">>().toEqualTypeOf<{
+        "0": string;
+        file: string | undefined;
+      }>();
       expectTypeOf<InferRouteParams<"/**:p/:f(.*)">>().toEqualTypeOf<{ p: string; f: string }>();
       // `**<rest>` reads like `*<rest>`: one capture, no `_` alias
       expectTypeOf<InferRouteParams<"/**.md">>().toEqualTypeOf<{ "0": string }>();
@@ -122,7 +133,7 @@ describe("types", () => {
         "0": string;
       }>();
       // A static segment ending in `+` is no `:x+`
-      expectTypeOf<InferRouteParams<"/c++/*">>().toEqualTypeOf<{ "0": string }>();
+      expectTypeOf<InferRouteParams<"/c++/*">>().toEqualTypeOf<{ "0": string | undefined }>();
       // A `}` right after `**` closes a group: no `*` capture follows
       expectTypeOf<InferRouteParams<"/a{/**}?">>().toEqualTypeOf<{
         "0": string | undefined;
@@ -134,7 +145,7 @@ describe("types", () => {
       }>();
       // No `_` alias without a bare `**`
       expectTypeOf<InferRouteParams<"/a/**:_">>().toEqualTypeOf<{ _: string }>();
-      expectTypeOf<InferRouteParams<"/a/*">>().toEqualTypeOf<{ "0": string }>();
+      expectTypeOf<InferRouteParams<"/a/*">>().toEqualTypeOf<{ "0": string | undefined }>();
       expectTypeOf<InferRouteParams<"/a{/*}?">>().toEqualTypeOf<{ "0": string | undefined }>();
     });
 
@@ -215,7 +226,7 @@ describe("types", () => {
       // A capture in an optional group may be unset
       expectTypeOf<InferRouteParams<"/x{(\\d+)}?/*">>().toEqualTypeOf<{
         "0": string | undefined;
-        "1": string;
+        "1": string | undefined;
       }>();
       expectTypeOf<InferRouteParams<"/a{/(\\d+)}?/**">>().toEqualTypeOf<{
         "0": string | undefined;
@@ -245,25 +256,31 @@ describe("types", () => {
         keyof InferRouteParams<"/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa">
       >().toEqualTypeOf<never>();
       // A `*` inside a group is the group's, a `(?:` or an escaped `\(` is none
-      expectTypeOf<InferRouteParams<"/(a*)/*">>().toEqualTypeOf<{ "0": string; "1": string }>();
+      expectTypeOf<InferRouteParams<"/(a*)/*">>().toEqualTypeOf<{
+        "0": string;
+        "1": string | undefined;
+      }>();
       expectTypeOf<InferRouteParams<"/((?:a|b))/*">>().toEqualTypeOf<{
         "0": string;
-        "1": string;
+        "1": string | undefined;
       }>();
-      expectTypeOf<InferRouteParams<"/\\(x\\)/*">>().toEqualTypeOf<{ "0": string }>();
+      expectTypeOf<InferRouteParams<"/\\(x\\)/*">>().toEqualTypeOf<{ "0": string | undefined }>();
       // A constraint is its param's
-      expectTypeOf<InferRouteParams<"/:id(\\d+)/*">>().toEqualTypeOf<{ id: string; "0": string }>();
+      expectTypeOf<InferRouteParams<"/:id(\\d+)/*">>().toEqualTypeOf<{
+        id: string;
+        "0": string | undefined;
+      }>();
       // Numbered over the whole pattern, a left-out group's included
       expectTypeOf<InferRouteParams<"/a{/(\\d+)}?/*">>().toEqualTypeOf<{
         "0": string | undefined;
-        "1": string;
+        "1": string | undefined;
       }>();
       // A `*` inside a segment is numbered where it is (`(\d+)` first)
       expectTypeOf<InferRouteParams<"/(\\d+)-*">>().toEqualTypeOf<{ "0": string; "1": string }>();
       // Scanned char by char, also a long route
       expectTypeOf<
         InferRouteParams<"/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/:id/(\\d+)/*">
-      >().toEqualTypeOf<{ id: string; "0": string; "1": string }>();
+      >().toEqualTypeOf<{ id: string; "0": string; "1": string | undefined }>();
       // A `{` right after `**` starts a group: no `*` capture follows
       expectTypeOf<InferRouteParams<"/**{/b}?">>().toEqualTypeOf<{
         "0": string | undefined;

@@ -174,7 +174,8 @@ function normalizeGroups(groups: Record<string, string> | undefined): Record<str
  *
  * 1. Trailing slash: rou3 ignores at most one trailing `/`
  * 2. `*` semantics: a greedy catch-all `(.*)` in both; rou3 allows one
- *    catch-all per route (two `*` are reserved)
+ *    catch-all per route (two `*` are reserved), and a whole-segment `*`
+ *    ending the route is optional (`/foo/*` matches `/foo`, no key)
  * 3. `(.*)` semantics: URLPattern `(.*)` matches across `/`; so does
  *    `routeToRegExp`, while the tree's `(.*)` is segment-scoped
  * 4. `**` semantics: URLPattern parses `**` as `*` with a `*` modifier (a
@@ -233,6 +234,10 @@ const KNOWN_DIFFS = diffs<Result | Split>({
   // Trailing slash after `**`: `/foo/` is `/foo`, zero segments, where the
   // `**` is unset (URLPattern: an empty capture)
   "/foo/** → /foo/ [match]": split({ "0": undefined }, {}),
+
+  // A trailing `*` is optional, as in 0.11 (`use("/api/*")` scopes cover
+  // `/api`): no key (URLPattern: no match)
+  "/foo/* → /foo [no match]": split({ "0": undefined }, {}),
 
   // Patterns without leading `/` — rou3 always prefixes `/` in regex
   ":name → foobar [match]": null,

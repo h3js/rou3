@@ -126,7 +126,8 @@ describe("Router lookup", function () {
           },
         },
         // A `*` takes one segment or more, or none after a trailing slash
-        "/blog": undefined,
+        // A trailing `*` is optional: no key
+        "/blog": { data: { path: "/blog/*" }, params: {} },
         "/blog/": { data: { path: "/blog/*" }, params: { "0": "" } },
         "/blog/123": { data: { path: "/blog/*" }, params: { "0": "123" } },
         "/blog/1/2": { data: { path: "/blog/*" }, params: { "0": "1/2" } },
@@ -300,7 +301,7 @@ describe("Router lookup", function () {
           data: { path: "/wildcard/**" },
           params: { "0": "abc/def", _: "abc/def" },
         },
-        "/dynamic": undefined,
+        "/dynamic": { data: { path: "/dynamic/*" }, params: {} },
         "/dynamic/": {
           data: { path: "/dynamic/*" },
           params: { "0": "" },
@@ -347,9 +348,10 @@ describe("Router lookup", function () {
           data: { path: "/polymer/route/*" },
           params: { "0": "a/b" },
         },
+        // The trailing `*` is optional, and outweighs the `**`'s segment
         "/polymer/route": {
-          data: { path: "/polymer/**" },
-          params: { "0": "route", _: "route" },
+          data: { path: "/polymer/route/*" },
+          params: {},
         },
         "/polymer/constructor": {
           data: { path: "/polymer/**" },
@@ -990,7 +992,11 @@ describe("Router remove", function () {
     const router = createRouter(["/a/b", "/a/b/*"]);
 
     removeRoute(router, "GET", "/a/b");
-    expect(findRoute(router, "GET", "/a/b")).to.deep.equal(undefined);
+    // The trailing `*` is optional
+    expect(findRoute(router, "GET", "/a/b")).to.deep.equal({
+      data: { path: "/a/b/*" },
+      params: {},
+    });
     expect(findRoute(router, "GET", "/a/b/")).to.deep.equal({
       data: { path: "/a/b/*" },
       params: { "0": "" },

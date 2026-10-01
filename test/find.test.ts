@@ -882,9 +882,9 @@ describe("wildcard tail extraction (compiled parity)", () => {
         data: { path: "PRE" },
         params: { x: "v", rest: "a/b" },
       });
-      // a trailing `*` takes one segment or more, or none after the trailing
-      // slash (`""`)
-      expect(match("GET", "/segment")).toBeUndefined();
+      // a trailing `*` is optional (no key), takes nothing after the trailing
+      // slash (`""`), or one segment or more
+      expect(match("GET", "/segment")).toEqual({ data: { path: "SEGMENT" }, params: {} });
       expect(match("GET", "/segment/")).toEqual({ data: { path: "SEGMENT" }, params: { 0: "" } });
       expect(match("GET", "/segment//")).toEqual({ data: { path: "SEGMENT" }, params: { 0: "" } });
       expect(match("GET", "/segment/a/b")).toEqual({
@@ -1153,9 +1153,8 @@ describe("same-node sibling selection (findRoute/compiled parity)", () => {
 });
 
 describe("end-of-path optional fallback with mixed same-node siblings", () => {
-  // One wildcard node can hold routes that need a segment (`**:name`, `*`)
-  // and ones that don't (`**`; a `*` after a trailing slash) for the same
-  // method. The end-of-path fallback must scan all entries, not just the
+  // One wildcard node can hold routes that need a segment (`**:name`) and
+  // ones that don't (`**`, a trailing `*`) for the same method. The end-of-path fallback must scan all entries, not just the
   // first-inserted one.
   const router = createEmptyRouter<{ path: string }>();
   addRoute(router, "GET", "/p/:id", { path: "P-REQUIRED" });
@@ -1173,13 +1172,13 @@ describe("end-of-path optional fallback with mixed same-node siblings", () => {
 
   for (const { name, match } of lookups) {
     it(`optional sibling matches even when a required one was inserted first (${name})`, () => {
-      expect(match("GET", "/p")).toBeUndefined();
+      expect(match("GET", "/p")).toMatchObject({ data: { path: "P-OPTIONAL" }, params: {} });
       expect(match("GET", "/p/")).toMatchObject({ data: { path: "P-OPTIONAL" } });
       expect(match("GET", "/w")).toMatchObject({ data: { path: "W-OPTIONAL" } });
       expect(match("GET", "/p/1")).toMatchObject({ data: { path: "P-REQUIRED" } });
       expect(match("GET", "/p/1/2")).toMatchObject({ data: { path: "P-OPTIONAL" } });
       expect(match("GET", "/w/1")).toMatchObject({ data: { path: "W-REQUIRED" } });
-      expect(match("GET", "/v")).toBeUndefined();
+      expect(match("GET", "/v")).toMatchObject({ data: { path: "V-OPTIONAL" }, params: {} });
       expect(match("GET", "/v/")).toMatchObject({ data: { path: "V-OPTIONAL" } });
       expect(match("GET", "/v//")).toMatchObject({ data: { path: "V-OPTIONAL" } });
       expect(match("GET", "/v/1")).toMatchObject({ data: { path: "V-REQUIRED" } });

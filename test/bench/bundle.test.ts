@@ -161,8 +161,11 @@ describe("benchmark", () => {
     // `*`. `replaceSegmentWildcards` and `dynamicTerminal` are gone.
     // +32B raw / +18B gzip: `normalizePath` keeps the trailing slash of a
     // last `.` / `..` as WHATWG does (`/foo/bar/..` is `/foo/`, a `/foo/*`).
-    expect(bytes).toBeLessThanOrEqual(11698); // <11.7kb
-    expect(gzipSize).toBeLessThanOrEqual(4990); // <4.99kb
+    // -27B raw / -17B gzip: a trailing `*` is optional again (as in 0.11),
+    // so the walks no longer thread the trailing-slash flag (`matchesZero`
+    // ignores it; only `getMatchParams` reads it, for the `""` capture).
+    expect(bytes).toBeLessThanOrEqual(11671); // <11.68kb
+    expect(gzipSize).toBeLessThanOrEqual(4973); // <4.98kb
   });
 });
 

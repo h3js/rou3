@@ -15,7 +15,9 @@ import { needsDuplicateNames } from "./_regexp-cases.ts";
 // URLPattern's `*` is a greedy `(.*)` with a required `/` before it: it takes
 // the rest of the path (`/foo/*` on `/foo/a/b` is `a/b`), nothing after the
 // slash (`/foo/` gives `""`), but not `/foo`. rou3 follows it, except where it
-// ignores one trailing slash of the path (`/foo/a/` is `/foo/a`, `differs`).
+// ignores one trailing slash of the path (`/foo/a/` is `/foo/a`) and where a
+// whole-segment `*` ends the route: it is optional there, as in 0.11, so
+// `/foo/*` matches `/foo` too (no key, like a `**`). Those cases `differs`.
 // `null`: no match.
 const CASES: [
   route: string,
@@ -24,7 +26,7 @@ const CASES: [
   differs?: true,
 ][] = [
   // Trailing `*`
-  ["/foo/*", "/foo", null],
+  ["/foo/*", "/foo", {}, true],
   ["/foo/*", "/foo/", { 0: "" }],
   ["/foo/*", "/foo/bar", { 0: "bar" }],
   ["/foo/*", "/foo/bar/baz", { 0: "bar/baz" }],
@@ -38,10 +40,10 @@ const CASES: [
   ["/*", "/a/b", { 0: "a/b" }],
   ["/*", "//", { 0: "" }, true],
   ["/*", "//a", { 0: "/a" }],
-  ["/:x/*", "/a", null],
+  ["/:x/*", "/a", { x: "a" }, true],
   ["/:x/*", "/a/", { x: "a", 0: "" }],
   ["/:x/*", "/a/b/c", { x: "a", 0: "b/c" }],
-  ["/a/:x?/*", "/a/b", { 0: "b" }],
+  ["/a/:x?/*", "/a/b", { x: "b" }, true],
   ["/a/:x?/*", "/a/b/c", { x: "b", 0: "c" }],
   ["/a/:x?/*", "/a/", { 0: "" }],
   // Whole-segment `*` before more of the route
@@ -198,8 +200,16 @@ describe("greedy `*` (URLPattern sweep)", () => {
       addRoute(router, "GET", route, route);
       for (const path of paths) {
         const stripped = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+        // A trailing whole-segment `*` is optional (the route without it),
+        // also before a trailing optional group (`/a/*{.png}?`)
+        const base = route.replace(/\{[^}]*\}\?$/, "");
+        const without = /[^\\]\/\*$/.test(base)
+          ? new URLPatternCtor({ pathname: base.slice(0, -2) })
+          : undefined;
         const expected =
-          pattern.test({ pathname: path }) || pattern.test({ pathname: stripped || "/" });
+          pattern.test({ pathname: path }) ||
+          pattern.test({ pathname: stripped || "/" }) ||
+          !!without?.test({ pathname: stripped });
         const actual = findRoute(router, "GET", path) !== undefined;
         if (actual !== expected) failures.push(`${route} on ${path}: ${actual}`);
       }
@@ -263,7 +273,8 @@ describe("`*` vs `**` priority and ordering", () => {
   const aot = new Function(`return ${compileRouterToString(router)}`)();
 
   const cases: [path: string, best: string, all: string[]][] = [
-    ["/foo", "/foo/**", ["/**", "/foo/**"]],
+    // Both match `/foo` (`*` without its key): `*` outweighs `**`
+    ["/foo", "/foo/*", ["/**", "/foo/**", "/foo/*"]],
     ["/foo/", "/foo/*", ["/**", "/foo/**", "/foo/*"]],
     ["/foo/bar", "/foo/bar", ["/**", "/foo/**", "/foo/*", "/foo/:x", "/foo/bar"]],
     ["/foo/x", "/foo/:x", ["/**", "/foo/**", "/foo/*", "/foo/:x"]],
@@ -295,14 +306,51 @@ describe("`*` vs `**` priority and ordering", () => {
   });
 });
 
+describe("trailing `*` is optional", () => {
+  // `/foo/*` matches `/foo` without its key (like `**`), `/foo/` with `""`
+  const cases: [route: string, path: string, params: Record<string, string> | null][] = [
+    ["/foo/*", "/foo", {}],
+    ["/foo/*", "/foo/", { 0: "" }],
+    ["/foo/*", "/foo/a/b", { 0: "a/b" }],
+    ["/*", "/", { 0: "" }],
+    ["/*", "/a/b", { 0: "a/b" }],
+    ["/:x/*", "/a", { x: "a" }],
+    ["/a{/b/*}?", "/a/b", {}],
+    // Only where it ends the route, and only a whole segment
+    ["/foo/*/x", "/foo/x", null],
+    ["/foo-*", "/foo", null],
+    ["/foo/*.png", "/foo", null],
+  ];
+  for (const [route, path, params] of cases) {
+    it(`${route} on ${path}`, () => {
+      const router = createRouter<string>();
+      addRoute(router, "GET", route, route);
+      const aot = new Function(`return ${compileRouterToString(router)}`)();
+      for (const match of [
+        findRoute(router, "GET", path),
+        findAllRoutes(router, "GET", path).at(-1),
+        compileRouter(router)("GET", path),
+        compileRouter(router, { matchAll: true })("GET", path).at(-1),
+        aot("GET", path),
+      ]) {
+        // No `0: undefined` and no `_` alias
+        expect(match && { ...match.params }).toStrictEqual(params ?? undefined);
+      }
+      const groups = routeToRegExp(route).exec(path)?.groups;
+      expect(groups ? definedGroups(groups) : null).toEqual(params);
+    });
+  }
+});
+
 describe("`*` in pattern relations", () => {
   it("compareRoutes", () => {
-    expect(compareRoutes("/foo/**", "/foo/*")).toBe("superset");
+    // A trailing `*` matches what a trailing `**` does
+    expect(compareRoutes("/foo/**", "/foo/*")).toBe("equal");
     expect(compareRoutes("/foo/*", "/foo/:x")).toBe("superset");
     expect(compareRoutes("/foo/*", "/foo/**:x")).toBe("superset");
     expect(compareRoutes("/foo/*", "/foo/:x+")).toBe("superset");
-    // `/foo/` matches both
-    expect(compareRoutes("/foo/*", "/foo")).toBe("partial");
+    expect(compareRoutes("/foo/*", "/foo")).toBe("superset");
+    expect(compareRoutes("/foo/*/x", "/foo/x")).toBe("disjoint");
     expect(compareRoutes("/foo/*", "/foo/*")).toBe("equal");
     expect(compareRoutes("/*/x", "/a/x")).toBe("superset");
     expect(compareRoutes("/*/x", "/a/b/x")).toBe("superset");

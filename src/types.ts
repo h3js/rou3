@@ -67,19 +67,21 @@ export type MatchedRoute<T = unknown> = {
 // `[key, may be unset, is a bare `**`]` per unnamed capture (`*`, `**`, an unnamed `(…)`
 // group), keyed "0", "1", … left to right over the whole pattern (segments
 // may follow a `**`, matched from the end of the path). A `**` may be unset
-// (zero segments), and so may any capture in an optional `{…}?` group (`Opt`).
-// Tail-recursive (`Acc`), and plain text is skipped 8 chars at a time, so
-// long routes stay in TS's recursion limit.
+// (zero segments), and so may a whole-segment `*` ending the route (optional
+// there) and any capture in an optional `{…}?` group (`Opt`). `S`: the
+// previous char is a `/`. Tail-recursive (`Acc`), and plain text is skipped 8
+// chars at a time, so long routes stay in TS's recursion limit.
 type ExtractWildcards<
   TPath extends string,
   Count extends readonly unknown[] = [],
   Acc = never,
   Opt extends boolean = false,
+  S extends boolean = false,
 > = TPath extends `${infer A}${infer B}${infer C}${infer D}${infer E}${infer F}${infer G}${infer H}${infer Rest}`
   ? `${A}${B}${C}${D}${E}${F}${G}${H}` extends `${string}${"\\" | "(" | "*" | "{" | "}"}${string}`
-    ? ScanWildcard<TPath, Count, Acc, Opt>
-    : ExtractWildcards<Rest, Count, Acc, Opt>
-  : ScanWildcard<TPath, Count, Acc, Opt>;
+    ? ScanWildcard<TPath, Count, Acc, Opt, S>
+    : ExtractWildcards<Rest, Count, Acc, Opt, H extends "/" ? true : false>
+  : ScanWildcard<TPath, Count, Acc, Opt, S>;
 
 // `ExtractWildcards` at one char
 type ScanWildcard<
@@ -87,6 +89,7 @@ type ScanWildcard<
   Count extends readonly unknown[],
   Acc,
   Opt extends boolean,
+  S extends boolean,
 > = TPath extends `${infer C}${infer Rest}`
   ? C extends "\\" // An escaped char is a literal
     ? ExtractWildcards<Rest extends `${string}${infer R}` ? R : Rest, Count, Acc, Opt>
@@ -102,7 +105,8 @@ type ScanWildcard<
             Rest,
             Count,
             Acc,
-            TPath extends `{${string}}?${string}` ? GroupOptional<TPath> : false
+            TPath extends `{${string}}?${string}` ? GroupOptional<TPath> : false,
+            S
           >
         : C extends "}"
           ? ExtractWildcards<Rest, Count, Acc, false>
@@ -122,14 +126,24 @@ type ScanWildcard<
                         : [`${Count["length"]}`, Opt, false]),
                     Opt
                   >
-                : // A `*`: set (`""` at least), unless in an optional group
+                : // A `*`: set (`""` at least), unless in an optional group or a
+                  // whole segment ending the route (also before a last `{…}?`)
                   ExtractWildcards<
                     Rest,
                     [...Count, unknown],
-                    Acc | [`${Count["length"]}`, Opt, false],
+                    | Acc
+                    | [
+                        `${Count["length"]}`,
+                        S extends true
+                          ? Rest extends "" | "/" | `{${string}}?`
+                            ? true
+                            : Opt
+                          : Opt,
+                        false,
+                      ],
                     Opt
                   >
-            : ExtractWildcards<Rest, Count, Acc, Opt>
+            : ExtractWildcards<Rest, Count, Acc, Opt, C extends "/" ? true : false>
   : Acc;
 
 // Whether the `{…}` group `TPath` starts with is optional (its first `}` is
@@ -205,7 +219,8 @@ type StripParams<TPath extends string> = TPath extends `${infer Prefix}**:${infe
   : TPath extends `${infer Prefix}:${infer Rest}`
     ? Prefix extends `${string}${"\\" | "(?"}` // An escaped `\:` or a `(?:` group is no param
       ? `${Prefix}:${StripParams<Rest>}`
-      : `${Prefix}${StripParams<StripModifier<AfterConstraint<AfterName<Rest>>>>}`
+      : // A `:` stays, so a `*` before it isn't read as ending the route
+        `${Prefix}:${StripParams<StripModifier<AfterConstraint<AfterName<Rest>>>>}`
     : TPath;
 
 // `S` past the param name it starts with (see `NameRun`)

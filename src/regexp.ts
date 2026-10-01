@@ -25,9 +25,15 @@ const SOME = "[\\s\\S]+";
 // is the body plus `/?` (see `routeToRegExpSegments`, `ending`)
 const STAR_TAIL = "*";
 const STAR_OPEN = "*?";
+// `STAR_OPEN` where the route without the `*` wins its zero segments (a group
+// that starts with it, `/a{/*/:y?}?`: `/a/` is `/a`): lazy as a whole
+const STAR_OPEN_LAZY = "*??";
 // A `*` followed by optional segments only, where a plain `/?$` would not be
 // exact: the routes the tree registers are compiled one by one instead
 const STAR_BAIL = "*!";
+// A whole-segment `*` ending the route: optional like a `**` (`/a/*` matches
+// `/a`, unset), but `""` after the stripped trailing slash (`/a/`)
+const STAR_SEGMENT = "*/";
 
 /**
  * Convert a rou3 route pattern into an anchored {@link RegExp}.
@@ -193,17 +199,26 @@ function lazyStarGroup(
   );
   const base = joinSegments(segments, ownSeparator);
   const last = segments[segments.length - 1];
+  // A `*` inside a segment ends in its group, a whole-segment one in its
+  // optional group (`(?:/(?<_0>…))?`)
+  const end = openTail === STAR_TAIL ? `${ANY})` : `${ANY}))?`;
+  const head = last.slice(0, last.lastIndexOf("(?<")).replace(/\(\?:\/$/, "");
   // Nothing optional before the `*` (`/:x?/*{/b}?`): the regex would take it
-  // first where the router ranks the route with the group higher
+  // first where the router ranks the route with the group higher. A
+  // whole-segment `*` after a segment that can be empty (`//*{/b}?`) has
+  // another ending (see `starSegmentEnding`).
   if (
-    openTail === STAR_TAIL &&
-    base.endsWith(`${ANY})`) &&
+    (openTail === STAR_TAIL ||
+      (openTail === STAR_SEGMENT && (ownSeparator || !canBeEmpty(head)))) &&
+    base.endsWith(end) &&
     segments
       .slice(0, -1)
-      .concat(last.slice(0, last.lastIndexOf("(?<")))
+      .concat(head)
       .every((segment) => isFixedSegment(segment))
   ) {
-    return new RegExp(`^${base.slice(0, -1)}?)(?:/${keys.join("/")})?/?$`);
+    return new RegExp(
+      `^${base.slice(0, -end.length)}${ANY}?${end.slice(ANY.length)}(?:/${keys.join("/")})?/?$`,
+    );
   }
 }
 
@@ -288,7 +303,20 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
   // With more of the route after the group, its ending is the shared tail's,
   // as in the router's expansions (a lazy catch-all there, see `ending`).
   // A trailing group whose route ends in a `*` keeps its ending.
-  const tailEnding = suf === "" ? starEnding(openTail) && openTail : openTail;
+  // A group that starts with a trailing `*` (`/a{/*}?`, `/a/{*}?`,
+  // `/a{/*/:y?}?`): where it takes zero segments, the route without it wins
+  // (`/a/` is `{}`), as for a `**`. Not after an empty segment (`/a//{*}?`):
+  // the route without it drops that segment (`/a//` is the `*`'s `""`).
+  const at = pre.endsWith("/") ? pre.length - 1 : pre.length;
+  const starFirst =
+    /^\/\*(?:\/|$)/.test((pre + body).slice(at)) && pre.charCodeAt(at - 1) !== 47; /* '/' */
+  const tailEnding =
+    suf === ""
+      ? starEnding(openTail) &&
+        (starFirst && openTail === STAR_OPEN
+          ? STAR_OPEN_LAZY
+          : (openTail !== STAR_SEGMENT || !starFirst) && openTail)
+      : openTail;
 
   // Segments shared by base and full: a head of `shared` and a tail of `tail`.
   let shared = 0;
@@ -499,6 +527,52 @@ function _routeToRegExp(route: string, input: string, unnamed?: Unnamed): RegExp
 }
 
 /**
+ * `body`, ending in a whole-segment `*`'s optional group, with a `**`'s
+ * ending (`withTrailingSlash`), except that the `*` is `""` over zero
+ * segments after the stripped trailing slash (`/a/*` on `/a/`), not unset.
+ * An optional group can't capture `""` (an empty iteration doesn't count in
+ * JS), so it takes its separator, or isn't optional where the separator is
+ * outside (an empty segment before it: `/a//*`). Any other shape keeps the
+ * `**`'s ending, unset there.
+ */
+function starSegmentEnding(body: string): string {
+  const out = withTrailingSlash(body);
+  const at = out.lastIndexOf(ANY_TAIL);
+  if (at < 0) {
+    // The look-behind ending (a segment before it that can be empty,
+    // `/:x(\d*)/*`): the `*` with its separator and the stripped slash, or
+    // zero segments where that segment isn't empty
+    return body.endsWith(`${ANY}))?`)
+      ? `${body.slice(0, -`${ANY}))?`.length)}${ANY_TAIL})/?|(?<!/))$`
+      : out;
+  }
+  const end = at + ANY_TAIL.length;
+  if (out.endsWith(")/?)??$")) {
+    // `/a//` + `(?:(?<_0>…)/?)??$`: always taken
+    const start = out.lastIndexOf("(?:", at - 1);
+    return `${out.slice(0, start)}${out.slice(start + 3, end)})/?$`;
+  }
+  return out.slice(0, end) + out.slice(end).replace("))??", "))?");
+}
+
+// A lazy `*`'s optional group (see `pushCatchAll`)
+const STAR_GROUP = /\(\?:\/\(\?<\w+>\[\\s\\S\]\*\?\)/;
+
+/** The index of the `)` closing the group that opens at `at` (`-1`: none). */
+function closingParen(source: string, at: number): number {
+  if (at < 0) return -1;
+  let depth = 0;
+  for (let i = at; i < source.length; i++) {
+    const c = source[i];
+    if (c === "\\") i++;
+    else if (c === "[") i = source.indexOf("]", i + 1);
+    else if (c === "(") depth++;
+    else if (c === ")" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
  * `body` with the trailing-slash rule (see `withTrailingSlash`). After a lazy
  * catch-all followed by optional segments only (`openTail`), a plain `/?$`
  * is exact, and the optional segments after it that can be empty are made
@@ -510,15 +584,23 @@ function ending(body: string, openTail: string | boolean): string {
   if (!openTail) {
     return withTrailingSlash(body);
   }
+  if (openTail === STAR_SEGMENT) {
+    return starSegmentEnding(body);
+  }
   if (openTail === STAR_TAIL) {
     // The trailing `*`'s capture leaves out the stripped slash (it may end an
     // optional group: `/a{/b/*}?`, lazy, as the router prefers the route
     // without it where both match: `/a/` is `/a` for `/a{/*}?`)
     return `${body.replace(/\[\\s\\S\]\*\)((?:\)\??)*)$/, (_, closers: string) => `${ANY_TAIL})${closers.replaceAll(")?", ")??")}`)}/?$`;
   }
-  if (openTail === STAR_OPEN) {
-    // Lazy too (where `$` leaves one choice, the inner ones don't matter)
-    return `${body.replace(/(?:\)\?\??)+$/, (closers) => closers.replace(/\)\?\??/g, ")??"))}/?$`;
+  if (openTail === STAR_OPEN || openTail === STAR_OPEN_LAZY) {
+    // Lazy too (where `$` leaves one choice, the inner ones don't matter),
+    // except for the `*`'s own optional group (see `pushCatchAll`): without
+    // the optional segments the `*` ends the route, where it is optional but
+    // takes the stripped slash's `""` (see `STAR_SEGMENT`)
+    const lazy = body.replace(/(?:\)\?\??)+$/, (closers) => closers.replace(/\)\?\??/g, ")??"));
+    const end = openTail === STAR_OPEN ? closingParen(lazy, lazy.search(STAR_GROUP)) : -1;
+    return `${end < 0 ? lazy : lazy.slice(0, end + 2) + lazy.slice(end + 3)}/?$`;
   }
   if (typeof openTail === "string") {
     const at = body.lastIndexOf(openTail) + openTail.length;
@@ -661,7 +743,11 @@ function routeToRegExpSegments(
     } else if (star && tail.every((s) => paramModifier(s) === "?")) {
       openTail = STAR_BAIL;
     }
-    if (required) {
+    if (star && open) {
+      // The route without the optional segments ends in the `*`, which is
+      // optional there: the optional segments nest in its group
+      pushOptional(group, true, false, false);
+    } else if (required) {
       reSegments.push(reSegments.length > 0 ? `${reSegments.pop()}/${group}` : group);
       nest = 0;
     } else {
@@ -714,8 +800,9 @@ function routeToRegExpSegments(
         pushCatchAll(name, true, i, false, true);
         continue;
       }
-      reSegments.push(`(?<${name}>${ANY})`);
-      openTail = STAR_TAIL;
+      // Last, it is optional, as the route without it (see `STAR_SEGMENT`)
+      pushOptional(`(?<${name}>${ANY})`, false);
+      openTail = STAR_SEGMENT;
       break;
     } else if (segment.startsWith("**")) {
       // The separator before a catch-all must stay anchored to the prefix: a
