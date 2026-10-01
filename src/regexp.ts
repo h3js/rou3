@@ -290,6 +290,25 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
   // A `*` that may end a route: the base's ending must be the full one's, or
   // a plain `/?$` where only the group has it
   const starEnding = (tail: string | boolean) => typeof tail === "string" && tail[0] === "*";
+  // A group that starts with a trailing `*` (`/a{/*}?`, `/a/{*}?`,
+  // `/a{/*/:y?}?`): where it takes zero segments, the route without it wins
+  // (`/a/` is `{}`), as for a `**`. Not after an empty segment (`/a//{*}?`):
+  // the route without it drops that segment (`/a//` is the `*`'s `""`).
+  const at = pre.endsWith("/") ? pre.length - 1 : pre.length;
+  const starFirst =
+    /^\/\*(?:\/|$)/.test((pre + body).slice(at)) && pre.charCodeAt(at - 1) !== 47; /* '/' */
+  const tailEnding =
+    suf === ""
+      ? starEnding(openTail) &&
+        (starFirst && openTail === STAR_OPEN
+          ? STAR_OPEN_LAZY
+          : (openTail !== STAR_SEGMENT || !starFirst) && openTail)
+      : openTail;
+  // A leading group that is the trailing `*` (`{/*}?`, `{/*/:y?}?`): the
+  // root `/` wins its zero segments, as for a `**` (the `*`'s ending, lazy)
+  if (baseLen === 0 && suf === "" && starFirst) {
+    return new RegExp(`^${ending(joinSegments(fullSegs, fullOwnSep), tailEnding)}`);
+  }
   const baseBody = joinSegments(baseSegs, baseOwnSep);
   if (
     baseOpenTail === STAR_BAIL ||
@@ -312,20 +331,6 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
   // With more of the route after the group, its ending is the shared tail's,
   // as in the router's expansions (a lazy catch-all there, see `ending`).
   // A trailing group whose route ends in a `*` keeps its ending.
-  // A group that starts with a trailing `*` (`/a{/*}?`, `/a/{*}?`,
-  // `/a{/*/:y?}?`): where it takes zero segments, the route without it wins
-  // (`/a/` is `{}`), as for a `**`. Not after an empty segment (`/a//{*}?`):
-  // the route without it drops that segment (`/a//` is the `*`'s `""`).
-  const at = pre.endsWith("/") ? pre.length - 1 : pre.length;
-  const starFirst =
-    /^\/\*(?:\/|$)/.test((pre + body).slice(at)) && pre.charCodeAt(at - 1) !== 47; /* '/' */
-  const tailEnding =
-    suf === ""
-      ? starEnding(openTail) &&
-        (starFirst && openTail === STAR_OPEN
-          ? STAR_OPEN_LAZY
-          : (openTail !== STAR_SEGMENT || !starFirst) && openTail)
-      : openTail;
 
   // Segments shared by base and full: a head of `shared` and a tail of `tail`.
   let shared = 0;

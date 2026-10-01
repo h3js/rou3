@@ -335,6 +335,11 @@ describe("trailing `*` is optional", () => {
     ["/*", "/a/b", { 0: "a/b" }],
     ["/:x/*", "/a", { x: "a" }],
     ["/a{/b/*}?", "/a/b", {}],
+    // A group that is the `*`: the route without it wins its zero segments
+    ["/a{/*}?", "/a/", {}],
+    ["{/*}?", "/", {}],
+    ["{/*}?", "//", { 0: "" }],
+    ["{/*/:y?}?", "/", {}],
     // Only where it ends the route, and only a whole segment
     ["/foo/*/x", "/foo/x", null],
     ["/foo-*", "/foo", null],
