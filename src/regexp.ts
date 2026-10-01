@@ -205,19 +205,25 @@ function lazyStarGroup(
   const head = last.slice(0, last.lastIndexOf("(?<")).replace(/\(\?:\/$/, "");
   // Nothing optional before the `*` (`/:x?/*{/b}?`): the regex would take it
   // first where the router ranks the route with the group higher. A
-  // whole-segment `*` after a segment that can be empty (`//*{/b}?`) has
-  // another ending (see `starSegmentEnding`).
+  // whole-segment `*` right after an empty segment (`/a//*{/b}?`) isn't
+  // optional (the route without it would end in that segment, i.e. drop it):
+  // a required group. After another segment that can be empty
+  // (`/:x(\d*)/*`) it has a look-behind ending (see `starSegmentEnding`).
+  const empty = openTail === STAR_SEGMENT && !ownSeparator && head === "";
   if (
     (openTail === STAR_TAIL ||
-      (openTail === STAR_SEGMENT && (ownSeparator || !canBeEmpty(head)))) &&
+      (openTail === STAR_SEGMENT && (ownSeparator || empty || !canBeEmpty(head)))) &&
     base.endsWith(end) &&
     segments
       .slice(0, -1)
       .concat(head)
       .every((segment) => isFixedSegment(segment))
   ) {
+    const body = base.slice(0, -end.length);
     return new RegExp(
-      `^${base.slice(0, -end.length)}${ANY}?${end.slice(ANY.length)}(?:/${keys.join("/")})?/?$`,
+      empty
+        ? `^${body.slice(0, body.lastIndexOf("(?:/"))}/${body.slice(body.lastIndexOf("(?:/") + 4)}${ANY}?)(?:/${keys.join("/")})?/?$`
+        : `^${body}${ANY}?${end.slice(ANY.length)}(?:/${keys.join("/")})?/?$`,
     );
   }
 }

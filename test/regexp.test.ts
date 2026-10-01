@@ -907,6 +907,9 @@ describe("routeToRegExp: engines without duplicate named groups", () => {
     ["/a/*/{b}?", String.raw`^\/a(?:\/(?<_0>[\s\S]*?))?(?:\/b)?\/?$`],
     ["/*/{b}?", String.raw`^(?:\/(?<_0>[\s\S]*?))?(?:\/b)?\/?$`],
     ["/a/*{/b/c%}?", String.raw`^\/a(?:\/(?<_0>[\s\S]*?))?(?:\/b\/c%)?\/?$`],
+    // After an empty segment a `*` isn't optional: the separator is outside
+    ["/a//*{/b}?", String.raw`^\/a\/\/(?<_0>[\s\S]*?)(?:\/b)?\/?$`],
+    ["//*/{b}?", String.raw`^\/\/(?<_0>[\s\S]*?)(?:\/b)?\/?$`],
   ])("%s inlines a lazy `*`", (route, source) => {
     expect(routeToRegExp(route).source).toBe(source);
   });
