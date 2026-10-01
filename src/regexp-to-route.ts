@@ -28,7 +28,7 @@ const ROUTE_SPECIAL = new Set([":", "(", ")", "*", "\\", "+", "|", "$", "[", "]"
  * @example
  * regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
  * regExpToRoute(/^\/path\/(?<param>[^/]+)\/?$/); // "/path/:param"
- * regExpToRoute(/^\/path(?:\/(?<_>(?:[\s\S]*[^/])?\/*?))?\/?$/); // "/path/**"
+ * regExpToRoute(/^\/path(?:\/(?<_0>(?:[\s\S]*[^/])?\/*?))??\/?$/); // "/path/**"
  */
 export function regExpToRoute(regexp: RegExp | string): string {
   // Routes carry no flags, so a match-affecting flag would be silently dropped
@@ -208,7 +208,7 @@ function continues(src: string, i: number): boolean {
 /**
  * Parse a regex body (segments after `\/`, optional groups) into route
  * segments. `atEnd`: whether the body ends the route, where a trailing
- * `(?:\/(?<_>[\s\S]*))?` is `**`. `dot`: whether a whole `.*` is a catch-all
+ * `(?:\/(?<_0>[\s\S]*))?` is `**`. `dot`: whether a whole `.*` is a catch-all
  * (see `isCatchAll`). `inGroup`: whether the body is a `{…}?` group's.
  */
 function parseSegments(src: string, atEnd: boolean, dot: boolean, inGroup = false): string[] {
@@ -231,17 +231,19 @@ function parseSegments(src: string, atEnd: boolean, dot: boolean, inGroup = fals
       continue;
     }
 
-    // Catch-all unit at the end: `/?(?<_>[\s\S]*)`, emitted by `routeToRegExp`
-    // only for a root `/**`. Older versions used it after any prefix, with
-    // `.*` (`**`, or a root `:name*`) and `.+` (`**:name`), so those forms are
-    // still accepted as input.
+    // Catch-all unit at the end: `/?(?<x>[\s\S]*)`, emitted by older versions
+    // for a root `/**` (as `_`), and after any prefix, with `.*` (`**`, or a
+    // root `:name*`) and `.+` (`**:name`), so those forms are still accepted
+    // as input.
     if (src.startsWith("\\/?", i)) {
       const g = matchNamedGroup(src, i + 3);
       if (g && g.end === n && (g.body === ".+" || isCatchAll(g.body, dot))) {
-        segments.push(g.body === ".+" ? `**:${g.name}` : g.name === "_" ? "**" : `:${g.name}*`);
+        segments.push(
+          g.body === ".+" ? `**:${g.name}` : g.unnamed || g.name === "_" ? "**" : `:${g.name}*`,
+        );
         break;
       }
-      // A root `**` with segments after it (`/**\/_payload.json`).
+      // A 0.11 root `**` with segments after it (`/**\/_payload.json`).
       if (g && g.name === "_" && isCatchAll(g.body, dot) && src.startsWith("\\/", g.end)) {
         segments.push("**");
         i = g.end;
@@ -405,6 +407,12 @@ function applyOptional(
     }
     const g = matchNamedGroup(rest, 0);
     if (g && g.end === rest.length) {
+      // An unnamed catch-all is the bare `**`, greedy before segments that
+      // take the end of the path, lazy otherwise.
+      if (g.unnamed && isCatchAll(g.body, dot)) {
+        segments.push("**");
+        return;
+      }
       // An unnamed capture has no `:name?` form (`:_0(…)?` is a param named
       // `_0`): `{/(pat)}?` on the previous segment. A `*` is optional alone
       // only at the end of the route, `{/*}?` elsewhere. Inside a group that
@@ -418,8 +426,9 @@ function applyOptional(
         mergeGroup(segments, `/${paramToken(g.name, g.body, true)}`);
         return;
       }
-      // A greedy `(?:/(?<_>[\s\S]*))?` is the `**` catch-all, and so is a lazy
-      // group with a lazy body (optional segments after it take the end of the
+      // 0.11 and older emitted `**` as the group `_`. A greedy
+      // `(?:/(?<_>[\s\S]*))?` is the `**` catch-all, and so is a lazy group
+      // with a lazy body (optional segments after it take the end of the
       // path). A lazy group with a greedy body is `{/**}?`, which leaves `_`
       // unset on `/a/` where `**` reports `""` (a `:_*` in older versions, and
       // still where no group can be merged).

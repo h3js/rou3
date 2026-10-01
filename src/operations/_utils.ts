@@ -297,13 +297,18 @@ export function getMatchParams(
   const params = new NullProtoObj();
   // Segments after a `**` are counted from the end of the path
   const end = suffix ? segments.length - suffix[1] : segments.length;
-  for (const [index, name] of paramsMap) {
+  for (const [index, name, optional] of paramsMap) {
+    // A `**` (`~index` is where it starts; negative for the other params)
+    // over zero segments is unset: only a bare one matches there
+    if (~index >= end) continue;
     const segment =
       index < 0
-        ? segments.slice(-(index + 1), end).join("/")
+        ? segments.slice(~index, end).join("/")
         : segments[suffix && index > suffix[0] ? index - suffix[0] - 1 + end : index];
     if (typeof name === "string") {
       params[name] = segment;
+      // A bare `**` is also `_` (deprecated alias, 0.x compatibility)
+      if (index < 0 && optional) params._ = segment;
     } else {
       const match = segment.match(name);
       if (match) {

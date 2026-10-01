@@ -3,6 +3,8 @@ import { routeToRegExp, createRouter, addRoute, findRoute } from "../src/index.t
 import { compileRouter } from "../src/compiler.ts";
 import { fromGroupName } from "../src/_group-names.ts";
 import { normalizePath } from "../src/operations/_utils.ts";
+import { withoutAlias } from "./_utils.ts";
+import { DUPLICATE_NAMED_GROUPS, needsDuplicateNames } from "./_regexp-cases.ts";
 
 // Vendored verbatim from web-platform-tests (wpt master 5cd8e3fa0a6c, 2026-10-01;
 // the file last changed in 23aac9278460):
@@ -160,9 +162,9 @@ function normalizeGroups(groups: Record<string, string> | undefined): Record<str
   if (!groups) return {};
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(groups)) {
-    if (key === "_") continue;
-    const normalized = fromGroupName(key).replace(/^_(\d+)$/, "$1");
-    result[normalized] = value;
+    // The unnamed-capture rule applies to the raw group name: a param `:_0` is
+    // emitted escaped (`__rou3_esc___0`) and decodes to `_0`
+    result[/^_\d+$/.test(key) ? key.slice(1) : fromGroupName(key)] = value;
   }
   return result;
 }
@@ -176,7 +178,10 @@ function normalizeGroups(groups: Record<string, string> | undefined): Record<str
  * 3. `(.*)` semantics: URLPattern `(.*)` matches across `/`; so does
  *    `routeToRegExp`, while the tree's `(.*)` is segment-scoped
  * 4. `**` semantics: URLPattern parses `**` as `*` with a `*` modifier (a
- *    catch-all captured as `"0"`); rou3 `**` is a catch-all captured as `_`
+ *    catch-all across `/` captured as `"0"`, unset over zero segments); rou3
+ *    `**` is a catch-all over whole segments keyed the same way, one per
+ *    route (the tree also reports it as `_`, a deprecated alias that the
+ *    router strategies check and drop: `withoutAlias`)
  * 5. `{...}+`/`{...}*`, and modifiers on `*` or an unnamed group
  *    (`(.*)?`, `*+`): URLPattern supports them; rou3 rejects them (see
  *    `RESERVED_PATTERNS`)
@@ -230,14 +235,9 @@ const KNOWN_DIFFS = diffs<Result | Split>({
   "/foo/* → /foo [no match]": { "0": undefined },
   "/foo/:bar(.*) → /foo/ [match]": null,
 
-  // `**` — URLPattern reads `**` as `*` with a `*` modifier and captures it as
-  // `"0"` (unset over zero segments); rou3 names the bare `**` capture `_`
-  // (left out of routeToRegExp's groups by `normalizeGroups`), and the tree
-  // reports it as `""` over zero segments
-  "/foo/** → /foo [match]": split({}, { _: "" }),
-  "/foo/** → /foo/ [match]": split({}, { _: "" }),
-  "/foo/** → /foo/bar [match]": split({}, { _: "bar" }),
-  "/foo/** → /foo/bar/baz [match]": split({}, { _: "bar/baz" }),
+  // Trailing slash after `**`: `/foo/` is `/foo`, zero segments, where the
+  // `**` is unset (URLPattern: an empty capture)
+  "/foo/** → /foo/ [match]": split({ "0": undefined }, {}),
 
   // Relative inputs — rou3's regex is anchored at `/` (the router skips them)
   "*/* → foo/bar [match]": null,
@@ -383,7 +383,7 @@ const strategies: MatchStrategy[] = [
       addRoute(router, "GET", pattern, { path: pattern });
       const result = findRoute(router, "GET", input, { normalize: true });
       if (!result) return { matched: false, params: {} };
-      return { matched: true, params: { ...result.params } };
+      return { matched: true, params: withoutAlias(router, result.params) };
     },
   },
   {
@@ -395,7 +395,7 @@ const strategies: MatchStrategy[] = [
       const lookup = compileRouter(router, { normalize: true });
       const result = lookup("GET", input);
       if (!result) return { matched: false, params: {} };
-      return { matched: true, params: { ...result.params } };
+      return { matched: true, params: withoutAlias(router, result.params) };
     },
   },
 ];
@@ -673,6 +673,44 @@ describe("wpt urlpattern compatibility: empty segments", () => {
     for (const [pattern, input] of EMPTY_SEGMENT_DIFFS) {
       const result = new URLPatternCtor({ pathname: pattern }).exec({ pathname: input });
       expect(result, `${pattern} → ${input}`).toBeNull();
+    }
+  });
+});
+
+// Not in the WPT data: unnamed captures (`*`, `**`, unnamed groups) are
+// numbered over the whole pattern, a left-out optional group's included, and
+// a param named like one (`:_0`) stays a param. `[pattern, input, groups]`.
+const UNNAMED_CAPTURE_CASES: [string, string, Result][] = [
+  ["/:_0", "/x", { _0: "x" }],
+  ["/:_0/*", "/x/y", { _0: "x", "0": "y" }],
+  ["/a{/(\\d+)}?/**", "/a/x/y", { "0": undefined, "1": "x/y" }],
+  ["/a{/(\\d+)}?/**", "/a/1/y", { "0": "1", "1": "y" }],
+  ["/x{(\\d+)}?/*", "/x/b", { "0": undefined, "1": "b" }],
+  ["/a{/*}?/(\\d+)", "/a/1", { "0": undefined, "1": "1" }],
+  ["/(\\d+)/**", "/1/b/c", { "0": "1", "1": "b/c" }],
+];
+
+describe("wpt urlpattern compatibility: unnamed captures", () => {
+  for (const strategy of strategies) {
+    for (const [pattern, input, groups] of UNNAMED_CAPTURE_CASES) {
+      // Without duplicate named groups (Node 22) an alternation regex throws
+      const skip =
+        strategy.name === "routeToRegExp" &&
+        !DUPLICATE_NAMED_GROUPS &&
+        needsDuplicateNames(pattern);
+      it.skipIf(skip)(`${strategy.name}: ${pattern} → ${input}`, () => {
+        const { matched, params } = strategy.match(pattern, input);
+        expect(matched ? params : null).toStrictEqual(expectedGroups(strategy, groups));
+      });
+    }
+  }
+
+  it.runIf(URLPatternCtor)("agrees with URLPattern", () => {
+    for (const [pattern, input, groups] of UNNAMED_CAPTURE_CASES) {
+      const result = new URLPatternCtor({ pathname: pattern }).exec({ pathname: input });
+      expect(result ? { ...result.pathname.groups } : null, `${pattern} → ${input}`).toStrictEqual(
+        groups,
+      );
     }
   });
 });

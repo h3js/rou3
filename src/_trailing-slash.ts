@@ -47,8 +47,7 @@ function tails(body: string): readonly [any: string, some: string] {
  * without the slash, the group is skipped) and a trailing catch-all
  * that may be empty. A `:x` needs a value (`[^/]+`), so most routes end here.
  * Each group that can be empty is made lazy so captures agree with the
- * router (`/a/` leaves `0` unset, `/a//` gives `0: ""`), except a `**` one:
- * the router reports `**` as `""` on `/a/`.
+ * router (`/a/` leaves `0` unset, `/a//` gives `0: ""`).
  *
  * Closed endings (`closedEnding`) build the rule in. They cover a required
  * last segment that can be empty (a `*` after a `**`, or an empty segment:
@@ -101,21 +100,13 @@ function tails(body: string): readonly [any: string, some: string] {
  * - Optional groups side by side after a required last segment that can be
  *   empty (a `*` after `**`). A closed ending with a `(?:…(?:/|$))?` per
  *   group is possible there but not implemented.
- *
- * @param starStar Whether the route ends in a bare `**`. Its `_` group can't
- *   be told apart from a param named `_` (`:_*`) by the body alone.
  */
-export function withTrailingSlash(body: string, starStar = false): string {
-  // Root `/**`: every path matches.
-  const root = /^\/\?\(\?<(\w+)>\[\\s\\S\]\*\)$/.exec(body);
-  if (root) {
-    return `/?(?<${root[1]}>${ANY_TAIL})/?$`;
-  }
-  const open = openEnding(body, starStar);
+export function withTrailingSlash(body: string): string {
+  const open = openEnding(body);
   if (open !== undefined) {
     return `${open}/?$`;
   }
-  const closed = closedEnding(body, starStar);
+  const closed = closedEnding(body);
   return closed === undefined ? body + LOOKBEHIND_SUFFIX : `${closed}$`;
 }
 
@@ -125,7 +116,7 @@ export function withTrailingSlash(body: string, starStar = false): string {
  * For the optional segments after a lazy catch-all (see `routeToRegExp`).
  */
 export function openOptionals(fragment: string): string | undefined {
-  return openEnding(fragment, false);
+  return openEnding(fragment);
 }
 
 /**
@@ -135,7 +126,7 @@ export function openOptionals(fragment: string): string | undefined {
  * each lazy never shifts a value. A group that can't be empty has a single
  * parse and stays greedy.
  */
-function openEnding(level: string, starStar: boolean): string | undefined {
+function openEnding(level: string): string | undefined {
   const parsed = parseLevel(level);
   if (!parsed) return;
   const [prefix, last, groups] = parsed;
@@ -156,10 +147,10 @@ function openEnding(level: string, starStar: boolean): string | undefined {
     const tail = CATCH_ALL.exec(level);
     return tail ? `(?<${tail[1]}>${tails(tail[2])[0]})` : level;
   }
-  const out = openEnding(inner, starStar);
+  const out = openEnding(inner);
   if (out === undefined) return;
   const head = level.slice(0, level.length - inner.length - 6);
-  return `${head}(?:/${out})?${lazy(out, inner, starStar) ? "?" : ""}`;
+  return `${head}(?:/${out})?${canBeEmpty(out) ? "?" : ""}`;
 }
 
 /**
@@ -167,7 +158,7 @@ function openEnding(level: string, starStar: boolean): string | undefined {
  * segment is required: the top one, or a group's after a separator. Used
  * when `openEnding` can't be (see `withTrailingSlash`).
  */
-function closedEnding(level: string, starStar: boolean): string | undefined {
+function closedEnding(level: string): string | undefined {
   const parsed = parseLevel(level);
   if (!parsed || parsed[2].length > 1) return;
   const [prefix, last, [inner]] = parsed;
@@ -186,7 +177,7 @@ function closedEnding(level: string, starStar: boolean): string | undefined {
     if (some) return `${prefix}(?:${some}/?|/)`;
     return param ? `${prefix}(?:/|(?<${param[1]}>${tails(param[2])[1]})/?)` : undefined;
   }
-  const tail = optionalTail(inner, starStar);
+  const tail = optionalTail(inner);
   if (tail === undefined) return;
   // No head at the top (`/:x?/{b/:y}?`), or a non-empty last segment.
   if (!prefix || !canBeEmpty(last)) {
@@ -212,22 +203,16 @@ function nonEmpty(last: string): string | undefined {
  * the rule built in, or nothing: `inner` as an open ending followed by `/?`
  * (the whole optional, lazy where the group was), or a closed one.
  */
-function optionalTail(inner: string, starStar: boolean): string | undefined {
-  const out = openEnding(inner, starStar);
+function optionalTail(inner: string): string | undefined {
+  const out = openEnding(inner);
   if (out !== undefined) {
-    return `(?:${out}/?)?${lazy(out, inner, starStar) ? "?" : ""}`;
+    return `(?:${out}/?)?${canBeEmpty(out) ? "?" : ""}`;
   }
   // A closed ending starts with the group's first segment and a separator,
   // or with a first segment that can't be empty (a `**:x` / `:x+` / `:x*`
   // one, or `sub` in `{/sub/:x*}?`), so it can't be empty and the `?` has a
   // single parse.
   const parsed = parseLevel(inner);
-  const closed =
-    parsed && (parsed[0] || !canBeEmpty(parsed[1])) ? closedEnding(inner, starStar) : undefined;
+  const closed = parsed && (parsed[0] || !canBeEmpty(parsed[1])) ? closedEnding(inner) : undefined;
   return closed === undefined ? undefined : `(?:${closed})?`;
-}
-
-/** Whether the optional group around `out` (rebuilt `inner`) is lazy. */
-function lazy(out: string, inner: string, starStar: boolean): boolean {
-  return canBeEmpty(out) && !(starStar && inner === "(?<_>[\\s\\S]*)");
 }

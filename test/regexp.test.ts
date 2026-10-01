@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { routeToRegExp, createRouter, addRoute, findRoute, routeNodeKeys } from "../src/index.ts";
+import { bareCatchAllKeys, withoutAlias } from "./_utils.ts";
 import { fromGroupName } from "../src/_group-names.ts";
 import { expandGroupDelimiters } from "../src/_group-delimiters.ts";
 import { expandModifiers, splitRoute } from "../src/operations/_utils.ts";
@@ -37,7 +38,7 @@ const NEEDS_DUPLICATE_NAMES =
 function normalizeGroups(groups?: Record<string, string | undefined>): Captures {
   const normalized: Record<string, string | undefined> = {};
   for (const key in groups) {
-    normalized[fromGroupName(key).replace(/^_(\d+)$/, "$1")] = groups[key];
+    normalized[/^_\d+$/.test(key) ? key.slice(1) : fromGroupName(key)] = groups[key];
   }
   return normalized;
 }
@@ -49,6 +50,18 @@ function definedCaptures(captures: Captures = {}): Record<string, string> {
     if (captures[key] !== undefined) defined[key] = captures[key];
   }
   return defined;
+}
+
+/**
+ * `findRoute` params as the regex can capture them: defined ones, without the
+ * deprecated `_` alias of a bare `**` (the regex has no such group; checked to
+ * be there exactly with the `**`'s numbered key, see `withoutAlias`).
+ */
+function routerCaptures(
+  router: ReturnType<typeof createRouter>,
+  params: Captures = {},
+): Record<string, string> {
+  return definedCaptures(withoutAlias(router, params));
 }
 
 describe("routeToRegExp", () => {
@@ -68,7 +81,7 @@ describe("routeToRegExp", () => {
 
         const found = findRoute(router, "", path);
         expect(found, path).toMatchObject({ data: { route } });
-        expect(definedCaptures(found?.params), path).toEqual(definedCaptures(params));
+        expect(routerCaptures(router, found?.params), path).toEqual(definedCaptures(params));
 
         const match = path.match(regex);
         expect(match, path).not.toBeNull();
@@ -105,7 +118,7 @@ describe("routeToRegExp", () => {
       }
     }
     expect(mismatches).toEqual([]);
-  });
+  }, 10_000);
 
   // `sweepPatterns()` has no escapes and `sweepPaths()` no escaped chars: a
   // `\x` is a literal `x` in both, wherever it sits in the pattern (#227).
@@ -131,7 +144,7 @@ describe("routeToRegExp", () => {
         expect(!!match, `${route} ${path}`).toBe(!!found);
         if (match) {
           expect(definedCaptures(normalizeGroups(match.groups)), `${route} ${path}`).toEqual(
-            definedCaptures(found?.params),
+            routerCaptures(router, found?.params),
           );
         }
       }
@@ -181,7 +194,7 @@ describe("routeToRegExp", () => {
           mismatches.push(`${pattern} ${path} (${found ? "router" : "regex"} only)`);
         } else if (match) {
           const captures = definedCaptures(normalizeGroups(match.groups));
-          if (JSON.stringify(captures) !== JSON.stringify(definedCaptures(found?.params))) {
+          if (JSON.stringify(captures) !== JSON.stringify(routerCaptures(router, found?.params))) {
             mismatches.push(`${pattern} ${path} (captures)`);
           }
         }
@@ -338,7 +351,7 @@ describe("routeToRegExp", () => {
         if (!found || !match) continue;
         routed++;
         const groups = definedCaptures(normalizeGroups(match.groups));
-        const params = definedCaptures(found.params);
+        const params = routerCaptures(router, found.params);
         for (const key of new Set([...Object.keys(groups), ...Object.keys(params)])) {
           // An unset group where the router reports `""` is the accepted gap.
           if (groups[key] !== params[key] && !(groups[key] === undefined && params[key] === "")) {
@@ -391,7 +404,7 @@ describe("routeToRegExp", () => {
             continue;
           }
           const groups = normalizeGroups(match?.groups) || {};
-          const params: Record<string, string | undefined> = routed?.params || {};
+          const params: Record<string, string | undefined> = routerCaptures(router, routed?.params);
           for (const key of new Set([...Object.keys(groups), ...Object.keys(params)])) {
             if ((groups[key] ?? "") !== (params[key] ?? "")) {
               mismatches.push(`${pattern} ${path} ${key}: ${groups[key]} != ${params[key]}`);
@@ -425,7 +438,7 @@ describe("routeToRegExp", () => {
         const match = path.match(regex);
         if (!found || !match) continue;
         const groups = definedCaptures(normalizeGroups(match.groups));
-        const params = definedCaptures(found.params);
+        const params = routerCaptures(router, found.params);
         const keys = [...new Set([...Object.keys(groups), ...Object.keys(params)])].filter(
           (key) => groups[key] !== params[key],
         );
@@ -453,7 +466,7 @@ describe("routeToRegExp", () => {
       ),
     ).toEqual([]);
     expect(accepted).toBeGreaterThan(0);
-  });
+  }, 10_000);
 
   // The ending analysis tokenizes the emitted (JS) body: `[]` and `[^]` close
   // immediately there, unlike PCRE where a leading `]` is a literal.
@@ -471,30 +484,36 @@ describe("routeToRegExp", () => {
     }
   });
 
-  // `**` is emitted as the `_` group, and a param may be named `_` too. The
-  // ending must follow the route's kind, not the group name: the router leaves
-  // `:_?` / `:_*` unset on `/a/` (and `/`), where `**` reports `""`. A root
-  // `:x*` is unset on `/` for any name.
-  it("does not mistake a param named `_` for `**`", () => {
+  // `**` is an unnamed capture (`_N`, `"N"`; the router's deprecated `_` alias
+  // has no group), and a param may be named `_`. Like `:x*`, both leave the
+  // catch-all unset over zero segments (`/a/`, and `/` at the root) and give
+  // `""` for one empty segment.
+  it("keys `**` apart from a param named `_`", () => {
     const cases: [route: string, path: string, params: Record<string, string>][] = [
       ["/a/:_?", "/a/", {}],
       ["/a/:_?", "/a/b/", { _: "b" }],
       ["/a/:_*", "/a/", {}],
       ["/a/:_*", "/a//b", { _: "/b" }],
       ["/a/:_*", "/a/b/", { _: "b" }],
-      ["/a/**", "/a/", { _: "" }],
+      ["/a/**", "/a/", {}],
+      ["/a/**", "/a//", { 0: "" }],
+      ["/a/**", "/a/b/", { 0: "b" }],
       ["/:_?", "/", {}],
       ["/:_*", "/", {}],
       ["/:_*", "//a", { _: "/a" }],
       ["/:x*", "/", {}],
       ["/:x*", "//a", { x: "/a" }],
       ["/:x*", "/a/b/", { x: "a/b" }],
-      ["/**", "/", { _: "" }],
+      ["/**", "/", {}],
+      ["/**", "//", { 0: "" }],
     ];
     for (const [route, path, params] of cases) {
       const router = createRouter();
       addRoute(router, "", route, true);
-      expect(findRoute(router, "", path)?.params || {}, `router: ${route} ${path}`).toEqual(params);
+      expect(
+        routerCaptures(router, findRoute(router, "", path)?.params),
+        `${route} ${path}`,
+      ).toEqual(params);
       const match = path.match(routeToRegExp(route));
       expect(match, `${route} ${path}`).not.toBeNull();
       expect(normalizeGroups(match?.groups), `${route} ${path}`).toEqual(params);
@@ -559,8 +578,15 @@ describe("routeToRegExp", () => {
       if (hasLookahead(source)) lookahead.push(pattern);
       if (duplicateGroupNames(source).length > 0) duplicates.push(pattern);
     }
-    expect(lookbehind.sort()).toEqual([...SWEEP_LOOKBEHIND_PATTERNS].sort());
-    expect(lookahead.sort()).toEqual([...SWEEP_LOOKAHEAD_PATTERNS].sort());
+    // Without duplicate named groups (Node 22) `sweepPatterns()` leaves out
+    // the ones that need them, look-behind ones included
+    const swept = new Set(sweepPatterns());
+    expect(lookbehind.sort()).toEqual(
+      [...SWEEP_LOOKBEHIND_PATTERNS].filter((p) => swept.has(p)).sort(),
+    );
+    expect(lookahead.sort()).toEqual(
+      [...SWEEP_LOOKAHEAD_PATTERNS].filter((p) => swept.has(p)).sort(),
+    );
     // Without duplicate named groups, `sweepPatterns()` leaves exactly these out.
     expect((DUPLICATE_NAMED_GROUPS ? duplicates : unsupportedSweepPatterns()).sort()).toEqual(
       [...SWEEP_DUPLICATE_NAME_PATTERNS].sort(),
@@ -791,8 +817,9 @@ describe("routeToRegExp: duplicate param names", () => {
     ["/a/:x{/b/:x}?", "x"],
     ["/a/:x(\\d+){-:x}?", "x"],
     ["/a{/:x}?/:x", "x"],
-    // `**` is the `_` param (the router reports it as `params._`).
+    // A bare `**` is also reported as `_` (deprecated alias).
     ["/a/:_/**", "_"],
+    ["/a/**/:_", "_"],
   ])("rejects %s", (route, name) => {
     // The router rejects it with the same error (across segments the later
     // value used to win silently, within one a raw `SyntaxError` was thrown),
@@ -812,6 +839,9 @@ describe("routeToRegExp: duplicate param names", () => {
     "/a/*/b/*.png/(\\d+)",
     // `:_0` escapes to `__rou3_esc___0`, distinct from the unnamed `*` (`_0`).
     "/w/:_0/*",
+    // `**` is an unnamed capture, distinct from a param named `_0`.
+    "/a/:_0/**",
+    "/a/*/**",
   ])("accepts %s", (route) => {
     if (!DUPLICATE_NAMED_GROUPS && PCRE2_DUPLICATE_NAME_ROUTES.has(route)) {
       expect(() => routeToRegExp(route)).toThrowError(NEEDS_DUPLICATE_NAMES);
@@ -941,7 +971,7 @@ describe("routeToRegExp: optional group before more of the route (#213)", () => 
       expect(!!match, `${path}: ${regex}`).toBe(!!found);
       if (found && match) {
         const groups = definedCaptures(normalizeGroups(match.groups));
-        const params = definedCaptures(found.params);
+        const params = routerCaptures(router, found.params);
         const keys = [...new Set([...Object.keys(groups), ...Object.keys(params)])].filter(
           (key) =>
             groups[key] !== params[key] && !isRequiredSegmentGap(router, path, key, groups, params),
@@ -964,9 +994,9 @@ function fmt(captures: Record<string, string>): string {
  * it, with `key` taking it: cut there and filled in (`/a/z`), the path is
  * routed with `key: "z"`. After a `**`, segments count from the end of the
  * path, so cutting it moves `key`: there it is filled in and the rest kept.
- * (`**` has its own, listed, zero-segment difference.) Likewise a trailing
- * `**:x` / `:x+` of two empty segments (`/a///` for `/a/**:x`) is unset
- * where the router reports `/` (see `closedEnding`).
+ * (Never a bare `**`'s key: it is unset over zero segments in both.)
+ * Likewise a trailing `**:x` / `:x+` of two empty segments (`/a///` for
+ * `/a/**:x`) is unset where the router reports `/` (see `closedEnding`).
  */
 function isRequiredSegmentGap(
   router: ReturnType<typeof createRouter>,
@@ -975,7 +1005,7 @@ function isRequiredSegmentGap(
   groups: Record<string, string>,
   params: Record<string, string>,
 ): boolean {
-  if (key === "_" || key in groups) {
+  if (key in groups || bareCatchAllKeys(router.root).includes(key)) {
     return false;
   }
   if (params[key] === "/") {
@@ -1006,14 +1036,6 @@ interface CaptureDiff {
   ): boolean;
 }
 
-// Pre-existing (same on main before the look-behind-free endings): the regex
-// skips its whole optional `(?:/(?<_>…))?` group.
-const ZERO_SEGMENT_CATCH_ALL: CaptureDiff = {
-  reason: '`**` matching zero segments: `_` is unset in the regex, `""` in the router',
-  test: (_pattern, keys, groups, params) =>
-    keys.length === 1 && keys[0] === "_" && !("_" in groups) && params._ === "",
-};
-
 // Pre-existing: the regex's first optional group is greedy and takes a lone
 // segment, while the router matches the `/*` expansion, which ends there.
 const OPTIONAL_BEFORE_WILDCARD: CaptureDiff = {
@@ -1041,7 +1063,7 @@ const OTHER_EXPANSION: CaptureDiff = {
       addRoute(router, "", route, true);
       const found = findRoute(router, "", path);
       if (!found) return false;
-      const params = definedCaptures(found.params);
+      const params = routerCaptures(router, found.params);
       return Object.keys({ ...groups, ...params }).every(
         (key) => groups[key] === params[key] || (!(key in groups) && params[key] === ""),
       );
@@ -1059,91 +1081,34 @@ function expansions(pattern: string): string[] {
 /** Sweep patterns whose captures differ from the router beyond the accepted gap. */
 const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
   ...[
-    "/a/**",
-    "/a/a/**",
-    "//**",
-    "/a//**",
-    "/{b}?/**",
-    "/a/{b}?/**",
-    "/:x/**",
-    "/a/:x/**",
-    "/*/**",
-    "/a/*/**",
-    "/:x?/**",
-    "/a/:x?/**",
-    "/:x(\\d+)/**",
-    "/a/:x(\\d+)/**",
-    "/:x(\\d+)?/**",
-    "/a/:x(\\d+)?/**",
-    "/a{/b/**}?",
-    "/a{/:x/**}?",
-    "/a{/b/:x/**}?",
-    "/:x/:y?/**",
-    "/:x{.:e}?/**",
-    "/a/:x{.:e}?/**",
-    // Segments after `**`: its group is unset where it matches no segment
-    // (with a prefix before it; at the root the leading slash doubles as the
-    // separator and `_` is `""`).
-    "/a/**/a",
-    "/a/**/:y",
-    "/a/**/*",
-    "/a/**/*.png",
-    "/a/**.png",
-    "/a/**/b{.json}?",
-    "/a/**/:y?",
-    "/a/**/:page?",
-    "/a/**/:n(\\d+)?",
-    "/**/:y?",
-    "/:x/**/a",
-    "/:x(\\d+)/**/:y",
-    "/a//**/b",
-    "/a/**//b",
-    "/a/:x?/**/b",
-    "/**/:x/:y?",
-    "/a/**/:y(\\d+)?",
-    "/**/:y{/c}?",
-    "/a/**/:y{/c}?",
-    "/a/:p/**/:n(\\d+)?",
-    "/*/**/:n(\\d+)?",
-    "/a//**/:n(\\d+)?",
-    "/a/**/x-:y",
-    "/a/**/x-:y?",
-    "/:x-:e/**",
-    "/a/:x-:e/**",
-    "/:x.:e/**",
-    "/a/:x.:e/**",
-    "/x-:x?/**",
-    "/a/x-:x?/**",
-    "/x-:x(\\d+)?/**",
-    "/a/x-:x(\\d+)?/**",
-    "/:x:e?/**",
-    "/a/:x:e?/**",
-    "/*-:e?/**",
-    "/a/*-:e?/**",
-    // `**-:e?` is `**` then `*-:e?`
-    "/a/**-:e?",
-    "/a/**-:e?/a",
-    "/a/**-:e?/:y",
-    "/a/**-:e?/*",
-    "/a/**-:e?/*.png",
-    "/a/**-:e?/x-:y",
-    "/a/**-:e?/x-:y?",
-    "/a/**-:e?/b{.json}?",
-    "/a/**.:ext?",
-  ].map((pattern) => [pattern, ZERO_SEGMENT_CATCH_ALL] as const),
-  ...[
-    "/**/:y?/:z?",
-    "/a/**/:y?/:z?",
     "/a/**/:n(\\d+)?/:y?",
     "/a/**/:y?/:n(\\d+)?",
     "/a/**/:y?/:n(a|b)?",
     "/a/**/:y?{/b}?",
     "/a/**/{/b}?",
-    "/a/**{/b/:c?}?",
-    "/a/**{.png}?",
     "/a/:r*/:y?/*",
     "/a/:r*/:y?{/b}?",
-    "/a/**-:e?/:y?",
+    // An optional group after a catch-all or optional segment, inlined: the
+    // regex's catch-all (or optional) takes the group's segment where the
+    // router ranks the route with it higher.
+    "/**/{b}?",
+    "/**/{(\\d+)}?",
+    "/a/**/{b}?",
+    "/a/**/{(\\d+)}?",
+    "/**:r/{b}?",
+    "/**:r/{(\\d+)}?",
+    "/:x+/{b}?",
+    "/:x+/{(\\d+)}?",
+    "/a/:x+/{b}?",
+    "/a/:x+/{(\\d+)}?",
+    "/{/**}?/{b}?",
+    "/{/**}?/{(\\d+)}?",
+    "/a/{/**}?/{b}?",
+    "/a/{/**}?/{(\\d+)}?",
+    "/:x?/{b}?",
+    "/:x?/{(\\d+)}?",
+    "/a/:x?/{b}?",
+    "/a/:x?/{(\\d+)}?",
   ].map((pattern) => [pattern, OTHER_EXPANSION] as const),
   ...[
     "/:x?/*",

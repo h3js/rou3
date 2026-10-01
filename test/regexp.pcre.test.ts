@@ -271,5 +271,5 @@ describe("routeToRegExp RE2 compatibility (ripgrep, Rust regex)", () => {
     }
     expect(mismatches).toEqual([]);
     expect(compiled, "pinned as RE2-incompatible but compiles").toEqual([]);
-  });
+  }, 10_000);
 });

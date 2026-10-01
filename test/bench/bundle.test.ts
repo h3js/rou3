@@ -143,8 +143,16 @@ describe("benchmark", () => {
     // instead of expanding into two routes, so a greedy capture before it
     // takes what it can, as in URLPattern; an absent one has no key. Its `?`
     // is kept raw past the percent-encoder (it would be a literal `%3F`).
-    expect(bytes).toBeLessThanOrEqual(10975); // <10.98kb
-    expect(gzipSize).toBeLessThanOrEqual(4595); // <4.60kb
+    // +56B raw / +24B gzip: a bare `**` is an unnamed capture (`"0"`, `"1"`,
+    // …) as in URLPattern, unset over zero segments (`getMatchParams` skips
+    // it), also reported as the deprecated `_` alias.
+    // +207B raw / +111B gzip: unnamed captures are numbered over the whole
+    // pattern (URLPattern), so the route without a `{…}?` group keys them like
+    // the one with it (`skipGroup`, counted by `_add` itself).
+    // +67B raw / +25B gzip: early bails keep `{…}?` groups without unnamed
+    // captures as fast as before (no `skipGroup` counting).
+    expect(bytes).toBeLessThanOrEqual(11305); // <11.31kb
+    expect(gzipSize).toBeLessThanOrEqual(4755); // <4.76kb
   });
 });
 

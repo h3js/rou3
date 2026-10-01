@@ -118,7 +118,7 @@ export function parseLevel(
     end--;
   }
   // The last segment starts after a separator, or after an optional group
-  // that ends in one (`(?:(?<_>[\s\S]*)/)?`, a catch-all before it).
+  // that ends in one (`(?:(?<x>[\s\S]*)/)?`, a catch-all before it).
   let sep = end - 1;
   while (sep >= 0 && tokens[sep] !== "/" && !SEPARATOR_GROUP.test(tokens[sep])) sep--;
   const last = tokens.slice(sep + 1, end).join("");

@@ -62,15 +62,16 @@ function resolve(routes: string[], path: string): [string | undefined, string[]]
 describe("segments after `**`", () => {
   it("match from the end of the path", () => {
     const { find } = lookups(routerOf(["/**/_payload.json"]));
-    expect(find("/_payload.json")).toEqual({ data: "/**/_payload.json", params: { _: "" } });
-    expect(find("/a/_payload.json")?.params).toEqual({ _: "a" });
-    expect(find("/a/b/_payload.json")?.params).toEqual({ _: "a/b" });
+    // Over zero segments the `**` is unset, as in URLPattern
+    expect(find("/_payload.json")).toEqual({ data: "/**/_payload.json", params: {} });
+    expect(find("/a/_payload.json")?.params).toEqual({ 0: "a", _: "a" });
+    expect(find("/a/b/_payload.json")?.params).toEqual({ 0: "a/b", _: "a/b" });
     // One trailing slash is ignored (#209), a second is an empty last segment
-    expect(find("/a/b/_payload.json/")?.params).toEqual({ _: "a/b" });
+    expect(find("/a/b/_payload.json/")?.params).toEqual({ 0: "a/b", _: "a/b" });
     expect(find("/a/b/_payload.json//")).toBeUndefined();
     // Empty segments are part of the `**`
-    expect(find("/a//_payload.json")?.params).toEqual({ _: "a/" });
-    expect(find("//_payload.json")?.params).toEqual({ _: "" });
+    expect(find("/a//_payload.json")?.params).toEqual({ 0: "a/", _: "a/" });
+    expect(find("//_payload.json")?.params).toEqual({ 0: "", _: "" });
     for (const path of ["/", "/a", "/_payload.jsonx", "/x_payload.json", "/a/_payload.json/b"]) {
       expect(find(path), path).toBeUndefined();
     }
@@ -89,19 +90,20 @@ describe("segments after `**`", () => {
     expect(find("/_payload.json")).toBeUndefined();
     expect(find("/a/_payload.json")?.params).toEqual({ path: "a" });
     expect(find("/a/b/_payload.json")?.params).toEqual({ path: "a/b" });
-    expect(find("/a/b/x.png")?.params).toEqual({ _: "a/b", 0: "x" });
-    expect(find("/x.png")?.params).toEqual({ _: "", 0: "x" });
-    expect(find("/fr/a/og/b")?.params).toEqual({ lang: "fr", _: "a", file: "b" });
+    // Unnamed captures are numbered in pattern order, the `**` included
+    expect(find("/a/b/x.png")?.params).toEqual({ 0: "a/b", 1: "x", _: "a/b" });
+    expect(find("/x.png")?.params).toEqual({ 1: "x" });
+    expect(find("/fr/a/og/b")?.params).toEqual({ lang: "fr", 0: "a", _: "a", file: "b" });
     expect(find("/de/a/og/b")).toBeUndefined();
-    expect(find("/img/a/b/c.webp")?.params).toEqual({ _: "a/b", name: "c", ext: "webp" });
+    expect(find("/img/a/b/c.webp")?.params).toEqual({ 0: "a/b", _: "a/b", name: "c", ext: "webp" });
     expect(find("/img/c.gif")).toBeUndefined();
   });
 
   it("take the segment for a `*` after `**` (not optional there)", () => {
     const { find } = lookups(routerOf(["/a/**/*"]));
     expect(find("/a")).toBeUndefined();
-    expect(find("/a/x")?.params).toEqual({ _: "", 0: "x" });
-    expect(find("/a/x/y")?.params).toEqual({ _: "x", 0: "y" });
+    expect(find("/a/x")?.params).toEqual({ 1: "x" });
+    expect(find("/a/x/y")?.params).toEqual({ 0: "x", 1: "y", _: "x" });
   });
 
   it("make `:name+` / `:name*` before the last segment keep the segments after it", () => {
@@ -117,11 +119,15 @@ describe("segments after `**`", () => {
   it("`**<rest>` is `**/*<rest>` (`/**.md`: any path ending in a `.md` segment)", () => {
     const router = routerOf(["/**.md", "/blog/**.json"]);
     const { find, all } = lookups(router);
-    expect(find("/readme.md")).toEqual({ data: "/**.md", params: { _: "", 0: "readme" } });
-    expect(find("/docs/guide/intro.md")?.params).toEqual({ _: "docs/guide", 0: "intro" });
-    expect(find("/docs/intro.md/")?.params).toEqual({ _: "docs", 0: "intro" });
-    expect(find("/blog/a/post.json")?.params).toEqual({ _: "a", 0: "post" });
-    expect(find("/blog/post.json")?.params).toEqual({ _: "", 0: "post" });
+    expect(find("/readme.md")).toEqual({ data: "/**.md", params: { 1: "readme" } });
+    expect(find("/docs/guide/intro.md")?.params).toEqual({
+      0: "docs/guide",
+      1: "intro",
+      _: "docs/guide",
+    });
+    expect(find("/docs/intro.md/")?.params).toEqual({ 0: "docs", 1: "intro", _: "docs" });
+    expect(find("/blog/a/post.json")?.params).toEqual({ 0: "a", 1: "post", _: "a" });
+    expect(find("/blog/post.json")?.params).toEqual({ 1: "post" });
     for (const path of ["/", "/a", "/a.mdx", "/a.md/b", "/post.json"]) {
       expect(find(path), path).toBeUndefined();
     }

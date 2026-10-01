@@ -1,6 +1,7 @@
-import { expandGroupDelimiters } from "../_group-delimiters.ts";
+import { expandGroupDelimiters, scanFirstGroup } from "../_group-delimiters.ts";
 import { toGroupName, toUnnamedGroupKey } from "../_group-names.ts";
 import { replaceSegmentWildcards } from "../_segment-wildcards.ts";
+import { createRouter } from "../context.ts";
 import { NullProtoObj } from "../object.ts";
 import type { Node, RouterContext, ParamsIndexMap } from "../types.ts";
 import {
@@ -63,7 +64,9 @@ export function addRoute<T>(
  * segment join — the string `ctx.static` is keyed by (one `join` per entry,
  * no extra parsing) — so spellings the tree cannot tell apart (`\)` vs `)`,
  * `/a/` vs `/a`) share one identity. `input` is the pattern as written, quoted
- * in errors (an expansion is rewritten: `:x+` is `**:x`).
+ * in errors (an expansion is rewritten: `:x+` is `**:x`). `unnamed` maps the
+ * index of an unnamed capture in `path` to its key in `input` (see
+ * `skipGroup`). Returns how many unnamed captures `path` has.
  */
 function _add<T>(
   ctx: RouterContext<T>,
@@ -72,14 +75,25 @@ function _add<T>(
   data: T | undefined,
   route?: string,
   input: string = path,
-): void {
+  unnamed: Unnamed = same,
+): number {
   const groupExpanded = expandGroupDelimiters(path, input);
   if (groupExpanded) {
     route ??= expandedRouteId(path);
-    for (const expandedPath of groupExpanded) {
-      _add(ctx, method, expandedPath, data, route, input);
+    _add(ctx, method, groupExpanded[0], data, route, input, unnamed);
+    if (groupExpanded[1] !== undefined) {
+      // A pattern without a `*` or `(` has no unnamed capture to renumber
+      _add(
+        ctx,
+        method,
+        groupExpanded[1],
+        data,
+        route,
+        input,
+        /[*(]/.test(path) ? skipGroup(path, input, unnamed) : unnamed,
+      );
     }
-    return;
+    return 0;
   }
 
   path = encodeEscapes(path);
@@ -90,10 +104,11 @@ function _add<T>(
   const expanded = expandModifiers(segments, input);
   if (expanded) {
     route ??= expandedRouteId(path);
+    let count = 0;
     for (const p of expanded) {
-      _add(ctx, method, p, data, route, input);
+      count = _add(ctx, method, p, data, route, input, unnamed);
     }
-    return;
+    return count;
   }
 
   let node = ctx.root;
@@ -128,10 +143,16 @@ function _add<T>(
         node.wildcard = { key: "**" };
       }
       node = node.wildcard;
+      // A bare `**` is optional and an unnamed capture (`"0"`, `"1"`, ...,
+      // numbered with `*` and unnamed groups), as in URLPattern. Its value is
+      // also reported as `_` (deprecated, see `getMatchParams`), so that name
+      // is taken.
       paramsMap.push([
         -(i + 1),
-        addName(names, segment.length === 2 ? "_" : segment.slice(3), input),
-        segment.length === 2 /* no id */,
+        segment.length === 2
+          ? (addName(names, "_", input), String(unnamed(_unnamedParamIndex++)))
+          : addName(names, segment.slice(3), input),
+        segment.length === 2 /* optional */,
       ]);
       if (i === segments.length - 1) {
         break;
@@ -154,9 +175,11 @@ function _add<T>(
       }
       if (segment === "*") {
         // A trailing `*` may match no segment, but not after a `**`
-        paramsMap.push([i, String(_unnamedParamIndex++), !suffix /* optional */]);
+        paramsMap.push([i, String(unnamed(_unnamedParamIndex++)), !suffix /* optional */]);
       } else if (!/^:[A-Za-z_]\w*$/.test(segment)) {
-        const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex, names, input);
+        const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex, names, input, (n) =>
+          toUnnamedGroupKey(unnamed(n)),
+        );
         _unnamedParamIndex = nextIndex;
         paramsRegexp[i] = regexp;
         if (!suffix) {
@@ -224,6 +247,30 @@ function _add<T>(
   if (!hasParams) {
     ctx.static[segments.length > 0 ? key : ""] = node;
   }
+  return _unnamedParamIndex;
+}
+
+/** Maps the index of an unnamed capture in a route to its key in a pattern. */
+export type Unnamed = (index: number) => number;
+
+const same: Unnamed = (index) => index;
+
+/**
+ * The `unnamed` numbering of `path` without its first group (a `{…}?`), given
+ * `path`'s: unnamed captures are numbered over the whole pattern, as in
+ * URLPattern, so the ones in a left-out group use up their numbers (in
+ * `/a{/(\d+)}?/**`, the `**` is `1` on `/a/x/y` too). Counted by `_add`
+ * itself on the text before the group, with and without it.
+ */
+export function skipGroup(path: string, input: string, unnamed: Unnamed = same): Unnamed {
+  const [pre, body] = scanFirstGroup(path)!;
+  // A group without a `*` or `(` holds no unnamed capture (unless it extends
+  // a `**`: `**.md` is `**` and `*.md`), so most (`{-:title}?`) skip nothing
+  if (!/[*(]/.test(body) && !pre.endsWith("*")) return unnamed;
+  const count = (p: string) => _add(createRouter(), "", p, undefined, undefined, input);
+  const before = count(pre);
+  const skip = count(pre + body) - before;
+  return skip ? (index) => unnamed(index < before ? index : index + skip) : unnamed;
 }
 
 /**
