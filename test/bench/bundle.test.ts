@@ -164,7 +164,7 @@ describe("benchmark", () => {
     // -23B raw / -15B gzip: a trailing `*` is optional again (as in 0.11),
     // so the walks no longer thread the trailing-slash flag (`matchesZero`
     // ignores it; only `getMatchParams` reads it, for the `""` capture).
-    // Weights are doubled so that a trailing `*` outweighs a `**` (same
+    // Weights are doubled so that a `*` outweighs a `**` (a trailing one: same
     // paths) by less than a regex param.
     expect(bytes).toBeLessThanOrEqual(11675); // <11.68kb
     expect(gzipSize).toBeLessThanOrEqual(4975); // <4.98kb

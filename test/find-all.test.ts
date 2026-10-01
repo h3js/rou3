@@ -442,7 +442,8 @@ function orderMisses(
       [...setY].every((p) => setX.has(p))
     );
   };
-  const optional = /[{*?]/.test(`${a} ${b}`.replace(/\*\*/g, "").replace(/:x\d+\+/g, ""));
+  // Optional syntax: `{…}?`, `:x?`, `:x*` (a `*` is a catch-all, no modifier)
+  const optional = /[{?]|:x\d+\*/.test(`${a} ${b}`);
   const carveOuts: string[] = [];
   for (const p of both) {
     const path = SWEEP_PATHS[p];
