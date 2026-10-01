@@ -1,9 +1,10 @@
 // Inverse of `routeToRegExp()`: parse an anchored, PCRE-compatible RegExp back
 // into a rou3 route pattern. Targets the dialect emitted by `routeToRegExp()`
 // (named groups `(?<name>...)`, `[^/]+`/`[^/]+?` segment matchers, `[\s\S]*`
-// / `[\s\S]+` catch-alls (`.*`/`.+` in older versions), `(?:/...)?` optional
-// groups, the trailing-slash suffix). Hand-written regexes that follow the
-// same conventions convert too; constructs outside the dialect throw.
+// / `[^/]+(?:\/[^/]+)*` catch-alls (`[\s\S]+`, `.*`/`.+` in older
+// versions), `(?:/...)?` optional groups, the trailing-slash suffix).
+// Hand-written regexes that follow the same conventions convert too;
+// constructs outside the dialect throw.
 
 import { expandGroupDelimiters, scanFirstGroup } from "./_group-delimiters.ts";
 import { fromGroupName } from "./_group-names.ts";
@@ -54,6 +55,10 @@ export function regExpToRoute(regexp: RegExp | string): string {
   // Strip anchors and the trailing-slash suffix `routeToRegExp` appends (or the
   // plain optional slash older versions and hand-written regexes use).
   src = src.slice(1, -1);
+  // A catch-all that needs a value in each segment (`**:x`, `:x+`, `:x*`;
+  // lazy before optional segments) as the `[\s\S]+` older versions emitted:
+  // read the same way below
+  src = src.replace(VALUE_CATCH_ALL, "(?<$1>[\\s\\S]+$2)");
   // Look-behind-free endings (see `withTrailingSlash`) back to their plain
   // forms. Only these exact shapes are rewritten; anything else, a lazy
   // quantifier inside a constraint included, is parsed as written.
@@ -109,10 +114,13 @@ export function regExpToRoute(regexp: RegExp | string): string {
   return route;
 }
 
+// A `**:x` / `:x+` / `:x*` (`VALUE_CATCH_ALL`) is `(?<x>[^/]+(?:\/[^/]+)*)`,
+// lazy `(?<x>[^/]+(?:\/[^/]+)*?)`: it can't end in `/`, so it needs no ending.
 // The look-behind-free endings `withTrailingSlash` emits, as `RegExp#source`
 // spells them (`x` stands for any group name):
-// - a catch-all that needs a value (`**:x`, `:x+`, and `:x*` in an optional
-//   group): `(?:\/\/|(?<x>(?:[\s\S]*[^/]|\/\/)\/*?)\/?)`
+// - 0.11's catch-all that needs a value (`**:x`, `:x+`, and `:x*` in an
+//   optional group; a segment of it could be empty):
+//   `(?:\/\/|(?<x>(?:[\s\S]*[^/]|\/\/)\/*?)\/?)`, read as `:x+`
 // - a trailing catch-all, possibly inside optional groups: `(?<x>(?:[\s\S]*[^/])?\/*?)`
 // - 0.11's root `:x*` (it could be empty), whole: `(?:\/?(?<x>(?:[\s\S]*[^/])?\/*?))??\/?`
 // - a required `(.*)` constraint: `(?:\/|(?<x>.+?)\/?)`
@@ -123,6 +131,7 @@ export function regExpToRoute(regexp: RegExp | string): string {
 // 0.10 regexes (a `:x` / `:x+` could be empty there) end a `:x` in the `*`
 // forms and a catch-all in `(?:\/|(?<x>(?:[\s\S]*[^/]|\/)\/*?)\/?)`: read as
 // `:x` and `:x+`.
+const VALUE_CATCH_ALL = /\(\?<(\w+)>\[\^\/\]\+\(\?:\\\/\[\^\/\]\+\)\*(\??)\)/g;
 const STAR_LOOKBEHIND =
   /\(\?:\\\/\(\?<(_\d+)>\(\?:\[\\s\\S\]\*\[\^\/\]\)\?\\\/\*\?\)\\\/\?\|\(\?<!\\\/\)\)$/;
 const REQUIRED_PARAM = /\(\?:\(\?<(\w+)>\[\^\/\]\+\)\\\/\?\|\\\/\)$/;

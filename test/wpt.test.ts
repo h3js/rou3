@@ -551,9 +551,9 @@ describe("wpt urlpattern compatibility", () => {
 });
 
 // Not in the WPT data: a `:name` / `:name+` needs a value, as in URLPattern
-// (#229). `[pattern, input, groups]`, groups as URLPattern reports them (see
-// `expectedGroups`), `null` for no match; checked against the runtime's
-// URLPattern where it has one.
+// (#229), in each segment it takes. `[pattern, input, groups]`, groups as
+// URLPattern reports them (see `expectedGroups`), `null` for no match;
+// checked against the runtime's URLPattern where it has one.
 const EMPTY_SEGMENT_CASES: [string, string, Result][] = [
   ["/foo/:bar", "/foo//", null],
   ["/foo/:bar+", "/foo//", null],
@@ -567,6 +567,23 @@ const EMPTY_SEGMENT_CASES: [string, string, Result][] = [
   ["/foo/pre-:bar", "/foo/pre-", null],
   ["/foo/:bar", "/foo/a", { bar: "a" }],
   ["/foo/:bar+", "/foo/a/b", { bar: "a/b" }],
+  // Every segment a `:name+` / `:name*` takes needs a value (URLPattern's
+  // `[^/]+(?:/[^/]+)*`), also before more of the route
+  ["/foo/:bar+", "/foo////", null],
+  ["/foo/:bar+", "/foo//a", null],
+  ["/foo/:bar+", "/foo/a//b", null],
+  ["/foo/:bar+", "/foo/a//", null],
+  ["/foo/:bar*", "/foo//a", null],
+  ["/foo/:bar*", "/foo/a//", null],
+  ["/foo/:bar*", "/foo/a//b", null],
+  ["/foo/:bar*", "/foo/a/b", { bar: "a/b" }],
+  ["/foo/:bar+/baz", "/foo/a//b/baz", null],
+  ["/foo/:bar+/baz", "/foo//a/baz", null],
+  ["/foo/:bar+/baz", "/foo/a/b/baz", { bar: "a/b" }],
+  ["/foo/:bar*/baz", "/foo/a//baz", null],
+  ["/foo/:bar*/baz", "/foo/a/b/baz", { bar: "a/b" }],
+  ["/:bar+", "/a//b", null],
+  ["/:bar*", "//a", null],
 ];
 
 // Not in the WPT data: literal pattern text is percent-encoded like URLPattern
@@ -738,16 +755,6 @@ describe("wpt urlpattern compatibility: leading groups", () => {
   });
 });
 
-// Where rou3 still differs (see the README): `:name+` / `:name*` / `**` take
-// empty segments between others (URLPattern's `:name+` / `:name*` need a
-// value in each).
-const EMPTY_SEGMENT_DIFFS: [string, string, Record<string, string>][] = [
-  ["/foo/:bar+", "/foo////", { bar: "//" }],
-  ["/foo/:bar+", "/foo//a", { bar: "/a" }],
-  ["/foo/:bar*", "/foo//a", { bar: "/a" }],
-  ["/foo/:bar*", "/foo/a//", { bar: "a/" }],
-];
-
 // Not in the WPT data with a leading `/` (only the relative `{:foo}(.*)`
 // forms, see `KNOWN_DIFFS`): a regex group right after a `{…}` group that
 // ends in a param is an unnamed capture next to it, not its constraint.
@@ -821,12 +828,6 @@ describe("wpt urlpattern compatibility: empty segments", () => {
         expect(matched ? params : null).toStrictEqual(expectedGroups(strategy, groups));
       });
     }
-    for (const [pattern, input, groups] of EMPTY_SEGMENT_DIFFS) {
-      it(`${strategy.name}: ${pattern} → ${input} (rou3 only)`, () => {
-        const { matched, params } = strategy.match(pattern, input);
-        expect(matched ? params : null).toStrictEqual(groups);
-      });
-    }
   }
 
   it.runIf(URLPatternCtor)("agrees with URLPattern", () => {
@@ -835,10 +836,6 @@ describe("wpt urlpattern compatibility: empty segments", () => {
       expect(result ? { ...result.pathname.groups } : null, `${pattern} → ${input}`).toStrictEqual(
         groups,
       );
-    }
-    for (const [pattern, input] of EMPTY_SEGMENT_DIFFS) {
-      const result = new URLPatternCtor({ pathname: pattern }).exec({ pathname: input });
-      expect(result, `${pattern} → ${input}`).toBeNull();
     }
   });
 });

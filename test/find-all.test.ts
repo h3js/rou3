@@ -10,6 +10,7 @@ import {
 } from "../src/index.ts";
 import { compileRouter, compileRouterToString } from "../src/compiler.ts";
 import { _findRanked } from "../src/operations/find-all.ts";
+import type { MethodData } from "../src/types.ts";
 import { splitPath } from "../src/operations/_utils.ts";
 import { format } from "oxfmt";
 
@@ -275,8 +276,10 @@ describe("matcher: ordering contract", () => {
     // the entry (variant) that matched: a pattern-level miss is the documented
     // carve-out only when no matched entry of the broader pattern is itself
     // strictly broader (match sets over `SWEEP_PATHS`) than one of the
-    // narrower pattern listed before it. A `*` is a catch-all, ordered by its
-    // weight (between `**` and `**:name` on a shared node).
+    // narrower pattern listed before it, or as carve-out B (a `**:name` before
+    // a `:name` and a catch-all over its segments, see `orderMisses`). A `*`
+    // is a catch-all, ordered by its weight (between `**` and `**:name` on a
+    // shared node).
     const failures: string[] = [];
     const carveOuts = new Set<string>();
     let checks = 0;
@@ -395,13 +398,16 @@ const SWEEP_PATHS = (() => {
 })();
 
 /**
- * Documented optional-syntax carve-outs (README, `.agents/matching.md`), as
+ * Documented carve-outs (README, `.agents/matching.md`), as
  * `<registration order> @ <path>`: the broader pattern comes last.
  */
 const KNOWN_CARVE_OUTS = [
   // A1: identical matched entries, registration order decides
   "/p/:x0, /p/:x0{/p}? @ /p/p",
   "/p/:x0/**:r, /p/:x0/:x1* @ /p/p/p",
+  // B: a `**:name` before a `:name` and a catch-all over its segments
+  "/p/:x0/*, /p/:x0+ @ /p/p/p",
+  "/p/:x0+, /p/:x0/** @ /p/p",
 ];
 
 /**
@@ -442,6 +448,17 @@ function orderMisses(
       [...setY].every((p) => setX.has(p))
     );
   };
+  // B: `x` has a `**:name` (`:x+`, `:x*`, each segment a value) and `y` a
+  // `:name` from where it starts, and a `*` / `**` (`/p/:x0/*` ⊋ `/p/:x0+`):
+  // the tree lists wildcards before params
+  const catchAllFirst = (y: MethodData<unknown>, x: MethodData<unknown>) => {
+    const start = x.paramsMap?.find(([i, , optional, empty]) => i < 0 && !optional && !empty);
+    return (
+      !!start &&
+      !!y.paramsMap?.some(([i, name]) => i >= ~start[0] && typeof name === "string") &&
+      y.paramsMap.some(([i, , optional, empty]) => i < 0 && (optional || empty))
+    );
+  };
   // Optional syntax: `{…}?`, `:x?`, `:x*` (a `*` is a catch-all, no modifier)
   const optional = /[{?]|:x\d+\*/.test(`${a} ${b}`);
   const carveOuts: string[] = [];
@@ -456,28 +473,43 @@ function orderMisses(
     }
     const list = _findRanked(router, "", segmentsOf(path));
     if (data.indexOf(a) > data.indexOf(b)) {
-      // `b`'s entry before a strictly broader one of `a`: not a carve-out
-      const explained =
-        optional &&
-        !list.some(
-          (x, k) => x.data === b && list.slice(k + 1).some((y) => y.data === a && broader(y, x)),
-        );
-      if (!explained) return { failure: `${a} ⊋ ${b} listed after it: ${at}`, carveOuts };
-      // Every carve-out is A1: an entry of `b` before one of `a` with the
-      // same match set (A2 / A3 have no strict instance, see matching.md)
-      const a1 = list.some(
-        (x, k) =>
-          x.data === b && list.slice(k + 1).some((y) => y.data === a && broader(y, x, true)),
+      // `b`'s entry before a strictly broader one of `a`: not an optional-
+      // syntax carve-out, only B
+      const misses = list.flatMap((x, k) =>
+        x.data === b
+          ? list
+              .slice(k + 1)
+              .filter((y) => y.data === a && broader(y, x))
+              .map((y) => [y, x] as const)
+          : [],
       );
-      if (!a1) return { failure: `carve-out other than A1: ${at}`, carveOuts };
+      if (misses.length > 0) {
+        if (!misses.every(([y, x]) => catchAllFirst(y, x))) {
+          return { failure: `${a} ⊋ ${b} listed after it: ${at}`, carveOuts };
+        }
+      } else {
+        if (!optional) return { failure: `${a} ⊋ ${b} listed after it: ${at}`, carveOuts };
+        // Every optional-syntax carve-out is A1: an entry of `b` before one
+        // of `a` with the same match set (A2 / A3 have no strict instance,
+        // see matching.md)
+        const a1 = list.some(
+          (x, k) =>
+            x.data === b && list.slice(k + 1).some((y) => y.data === a && broader(y, x, true)),
+        );
+        if (!a1) return { failure: `carve-out other than A1: ${at}`, carveOuts };
+      }
       carveOuts.push(path);
     }
     // `findRoute` picks the last of `_findRanked(…, reverse)`: never an entry
-    // of `a` strictly broader than one of `b`
+    // of `a` strictly broader than one of `b` (but B)
     const found = findRoute(router, "", path)?.data;
     if (found === a) {
       const pick = _findRanked(router, "", segmentsOf(path), true).at(-1)!;
-      if (pick.data !== a || !optional || list.some((x) => x.data === b && broader(pick, x))) {
+      const narrower = list.filter((x) => x.data === b && broader(pick, x));
+      if (
+        pick.data !== a ||
+        (narrower.length === 0 ? !optional : !narrower.every((x) => catchAllFirst(pick, x)))
+      ) {
         return { failure: `findRoute picks ${a} over ${b}: ${at}`, carveOuts };
       }
     }
@@ -583,6 +615,32 @@ describe("matcher: ordering contract: optional-syntax carve-out", () => {
   });
 });
 
+describe("matcher: ordering contract: catch-all carve-out (B)", () => {
+  // Every segment of a `:x+` / `:x*` / `**:name` needs a value (URLPattern),
+  // so a route with a `:name` and a `*` / `**` over its segments contains it:
+  // it also takes the paths with an empty segment there. The tree lists a
+  // node's wildcard before its param child (and a suffix trie's shallower
+  // entry first), so the narrower route comes first and `findRoute` picks the
+  // broader one. Pinned so that it can't drift; not a statement that the
+  // order is desirable (a fix is a global re-sort, as for A3).
+  it.each([
+    ["/p/:x/**", "/p/:x+", "/p/a/b"],
+    ["/p/:x/*", "/p/:x+", "/p/a/b"],
+    ["/:a/**/p", "/**:n/p", "/b/c/p"],
+    ["/**/:y/p", "/**:n/p", "/b/c/p"],
+  ])("%s ⊋ %s, listed after it on %s (both orders)", (broader, narrower, path) => {
+    expect(compareRoutes(broader, narrower)).toBe("superset");
+    for (const routes of [
+      [broader, narrower],
+      [narrower, broader],
+    ]) {
+      const router = createRouter(routes);
+      expect(_findAllRoutes(router, "GET", path)).toEqual([narrower, broader]);
+      expect(findRoute(router, "GET", path)?.data).toEqual({ path: broader });
+    }
+  });
+});
+
 describe("matcher: named wildcard", () => {
   const router = createRouter(["/a/**:rest", "/z/**"]);
 
@@ -625,14 +683,11 @@ describe("matcher: required params need a value", () => {
       "/a/:x",
       "/a/:id(\\d*)",
     ]);
-    expect(_findAllRoutes(router, "GET", "/a//b")).toEqual([
-      "/**/:file",
-      "/a/**",
-      "/a/*",
-      "/a/**:rest",
-      "/a/:y*",
-    ]);
-    expect(_findAllRoutes(router, "GET", "/a///b")).toEqual([
+    // Nor on an empty segment inside a longer value (URLPattern)
+    expect(_findAllRoutes(router, "GET", "/a//b")).toEqual(["/**/:file", "/a/**", "/a/*"]);
+    expect(_findAllRoutes(router, "GET", "/a///b")).toEqual(["/**/:file", "/a/**", "/a/*"]);
+    expect(_findAllRoutes(router, "GET", "/a/x//b")).toEqual(["/**/:file", "/a/**", "/a/*"]);
+    expect(_findAllRoutes(router, "GET", "/a/x/b")).toEqual([
       "/**/:file",
       "/a/**",
       "/a/*",
@@ -640,14 +695,7 @@ describe("matcher: required params need a value", () => {
       "/a/:y*",
       "/a/:z+/b",
     ]);
-    expect(_findAllRoutes(router, "GET", "/a//c")).toEqual([
-      "/**/:file",
-      "/a/**",
-      "/a/*",
-      "/a/**:rest",
-      "/a/:y*",
-      "/**/c",
-    ]);
+    expect(_findAllRoutes(router, "GET", "/a//c")).toEqual(["/**/:file", "/a/**", "/a/*", "/**/c"]);
     expect(_findAllRoutes(router, "GET", "//")).toEqual([]);
   });
 });

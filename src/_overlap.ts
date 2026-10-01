@@ -17,8 +17,9 @@ import type { MethodData, Node } from "./types.ts";
  * catch-all: `*`, `**`, `**:name`) matches any segment values, so it only
  * constrains the total number of segments: `**` -> `[0, Infinity]`, `*` and
  * `**:name` -> `[1, Infinity]`, no variable tail -> `[0, 0]`. A `**:name`
- * needs a value (`some`): a one-segment tail can't be `""`. A trailing `*` is
- * optional (see `matchesZero`): its tail is a `**`'s, `[0, Infinity]`.
+ * needs a value in each segment (`some`): no tail segment can be `""`, as in
+ * URLPattern's `:name+`. A trailing `*` is optional (see `matchesZero`): its
+ * tail is a `**`'s, `[0, Infinity]`.
  *
  * Segments after a catch-all form the `suffix`: fixed matchers aligned to the
  * end of the path, after the tail (`/**\/_payload.json` -> `[] [0, Infinity]
@@ -202,9 +203,9 @@ function _computeShape(edges: Edge[], entry: MethodData): RouteShape {
       into.push(edge);
     } else if (edge === 1) {
       // `**` is optional, `**:name` (`:name+`, `:name*`) requires one segment
-      // with a value (see `emptyParam`), a `*` one segment, or none where it
-      // ends the route (named by a digit, see `matchesZero`). Segments after
-      // it are the suffix, aligned to the end of the path.
+      // or more, each with a value (see `emptyParam`), a `*` one segment, or
+      // none where it ends the route (named by a digit, see `matchesZero`).
+      // Segments after it are the suffix, aligned to the end of the path.
       const [, name, optional, empty, , join] = pMap!.find((e) => e[0] === -(d + 1))!;
       const last = d === edges.length - 1;
       tailMin = optional || (last && (name as string) < ":" && !join) ? 0 : 1;

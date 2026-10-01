@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { routeToRegExp, createRouter, addRoute, findRoute, routeNodeKeys } from "../src/index.ts";
-import { bareCatchAllKeys, withoutAlias } from "./_utils.ts";
+import { withoutAlias } from "./_utils.ts";
 import { fromGroupName } from "../src/_group-names.ts";
 import { expandGroupDelimiters } from "../src/_group-delimiters.ts";
 import { expandModifiers, splitRoute } from "../src/operations/_utils.ts";
@@ -425,18 +425,12 @@ describe("routeToRegExp", () => {
     expect(mismatches).toEqual([]);
   });
 
-  // Captures must agree too: consumers read params off the regex. The one
-  // accepted difference is the look-behind-free ending of a required
-  // segment that can be empty (a `*` after `**`, see `withTrailingSlash`):
-  // where that segment is empty, at the end of the path or before optional
-  // ones, it leaves the group unset where the router reports `""`, and a
-  // trailing `**:x` / `:x+` of two empty segments, where it reports `/`.
-  // Anything else must be listed in KNOWN_CAPTURE_DIFFS.
+  // Captures must agree too: consumers read params off the regex. Any
+  // difference must be listed in KNOWN_CAPTURE_DIFFS.
   it("captures what findRoute captures", () => {
     const paths = sweepPaths();
     const unexpected: string[] = [];
     const seen = new Set<string>();
-    let accepted = 0;
     for (const pattern of sweepPatterns()) {
       const router = createRouter();
       addRoute(router, "", pattern, true);
@@ -452,10 +446,7 @@ describe("routeToRegExp", () => {
           (key) => groups[key] !== params[key],
         );
         if (keys.length === 0) continue;
-        const rest = keys.filter((key) => !isRequiredSegmentGap(router, path, key, groups, params));
-        if (rest.length === 0) {
-          accepted++;
-        } else if (known?.test(pattern, rest, groups, params, path)) {
+        if (known?.test(pattern, keys, groups, params, path)) {
           seen.add(pattern);
         } else {
           unexpected.push(
@@ -474,7 +465,6 @@ describe("routeToRegExp", () => {
         (pattern) => !seen.has(pattern) && !unsupported.has(pattern),
       ),
     ).toEqual([]);
-    expect(accepted).toBeGreaterThan(0);
   }, 10_000);
 
   // The ending analysis tokenizes the emitted (JS) body: `[]` and `[^]` close
@@ -502,16 +492,16 @@ describe("routeToRegExp", () => {
       ["/a/:_?", "/a/", {}],
       ["/a/:_?", "/a/b/", { _: "b" }],
       ["/a/:_*", "/a/", {}],
-      ["/a/:_*", "/a//b", { _: "/b" }],
+      ["/a/:_*", "/a/c/b", { _: "c/b" }],
       ["/a/:_*", "/a/b/", { _: "b" }],
       ["/a/**", "/a/", {}],
       ["/a/**", "/a//", { 0: "" }],
       ["/a/**", "/a/b/", { 0: "b" }],
       ["/:_?", "/", {}],
       ["/:_*", "/", {}],
-      ["/:_*", "//a", { _: "/a" }],
+      ["/:_*", "/c/a", { _: "c/a" }],
       ["/:x*", "/", {}],
-      ["/:x*", "//a", { x: "/a" }],
+      ["/:x*", "/c/a", { x: "c/a" }],
       ["/:x*", "/a/b/", { x: "a/b" }],
       ["/**", "/", {}],
       ["/**", "//", { 0: "" }],
@@ -1000,8 +990,7 @@ describe("routeToRegExp: optional group before more of the route (#213)", () => 
         const groups = definedCaptures(normalizeGroups(match.groups));
         const params = routerCaptures(router, found.params);
         const keys = [...new Set([...Object.keys(groups), ...Object.keys(params)])].filter(
-          (key) =>
-            groups[key] !== params[key] && !isRequiredSegmentGap(router, path, key, groups, params),
+          (key) => groups[key] !== params[key],
         );
         expect(keys, `${path}: regex ${fmt(groups)}, router ${fmt(params)}`).toEqual([]);
       }
@@ -1011,44 +1000,6 @@ describe("routeToRegExp: optional group before more of the route (#213)", () => 
 
 function fmt(captures: Record<string, string>): string {
   return JSON.stringify(captures);
-}
-
-/**
- * The accepted trade-off of the look-behind-free endings for a required
- * segment that can be empty (a `*` after `**`): where it is empty (`/a//` for
- * `/a/**\/*`), its group is unset and the router reports `""`. `key` is that
- * group iff for some empty segment of `path`, the route can end right after
- * it, with `key` taking it: cut there and filled in (`/a/z`), the path is
- * routed with `key: "z"`. After a `**`, segments count from the end of the
- * path, so cutting it moves `key`: there it is filled in and the rest kept.
- * (Never a bare `**`'s key: it is unset over zero segments in both.)
- * Likewise a trailing `**:x` / `:x+` of two empty segments (`/a///` for
- * `/a/**:x`) is unset where the router reports `/` (see `closedEnding`).
- */
-function isRequiredSegmentGap(
-  router: ReturnType<typeof createRouter>,
-  path: string,
-  key: string,
-  groups: Record<string, string>,
-  params: Record<string, string>,
-): boolean {
-  if (key in groups || bareCatchAllKeys(router.root).includes(key)) {
-    return false;
-  }
-  if (params[key] === "/") {
-    return path.endsWith("///") && !path.endsWith("////");
-  }
-  if (params[key] !== "") {
-    return false;
-  }
-  const segments = path.split("/");
-  return segments.some(
-    (segment, i) =>
-      i > 0 &&
-      segment === "" &&
-      (findRoute(router, "", `${segments.slice(0, i).join("/")}/z`)?.params?.[key] === "z" ||
-        findRoute(router, "", segments.with(i, "z").join("/"))?.params?.[key] === "z"),
-  );
 }
 
 interface CaptureDiff {

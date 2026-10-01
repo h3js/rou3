@@ -1180,15 +1180,14 @@ describe("wildcard tail extraction (compiled parity)", () => {
         data: { path: "FILES" },
         params: { path: "a/b" },
       });
-      // doubled trailing slash: one is stripped, the other ends a real empty segment
-      expect(match("GET", "/files/a//")).toMatchObject({
-        data: { path: "FILES" },
-        params: { path: "a/" },
-      });
-      // doubled internal slash is preserved in the tail
-      expect(match("GET", "/files//a")).toMatchObject({
-        data: { path: "FILES" },
-        params: { path: "/a" },
+      // doubled trailing slash: one is stripped, the other ends a real empty
+      // segment, which a `**:name` can't take (nor one inside its value)
+      expect(match("GET", "/files/a//")).toBeUndefined();
+      expect(match("GET", "/files//a")).toBeUndefined();
+      // ... unlike a `**`
+      expect(match("GET", "/opt//a")).toEqual({
+        data: { path: "OPT" },
+        params: { 0: "/a", _: "/a" },
       });
       // required tail must not match empty
       expect(match("GET", "/files")).toBeUndefined();
@@ -1649,12 +1648,13 @@ describe("`:name*` never captures an empty value", () => {
   const aotAll = new Function(`return ${compileRouterToString(router, { matchAll: true })}`)();
   const cases: [string, { data: string; params?: Record<string, string> } | undefined][] = [
     ["/a", { data: "/a/:x*" }],
-    ["/a//", { data: "/:r*", params: { r: "a/" } }],
-    ["/a///", { data: "/a/:x*", params: { x: "/" } }],
+    // Nor an empty segment inside a longer value
+    ["/a//", undefined],
+    ["/a///", undefined],
     ["/a/b", { data: "/a/:x*", params: { x: "b" } }],
     ["/b/c", { data: "/b/:x*/c" }],
-    ["/b//c", { data: "/:r*", params: { r: "b//c" } }],
-    ["/b///c", { data: "/b/:x*/c", params: { x: "/" } }],
+    ["/b//c", undefined],
+    ["/b///c", undefined],
     ["/", { data: "/:r*" }],
     ["//", undefined],
     ["/d//", { data: "/d/*", params: { "0": "" } }],
@@ -1675,6 +1675,67 @@ describe("`:name*` never captures an empty value", () => {
       for (const m of findAllRoutes(router, "GET", path)) {
         expect(Object.values(m.params ?? {}).filter((v) => v === "")).toEqual(
           m.data === "/d/*" ? [""] : [],
+        );
+      }
+    });
+  }
+});
+
+// URLPattern compiles `:name+` as `[^/]+(?:/[^/]+)*`: every segment it takes
+// needs a value. So do `:name*` and `**:name` (the same catch-all), at the end
+// of a route and before more of it; a bare `**` and a `*` still take empty
+// segments, and lookup falls through to them. One trailing slash is still
+// ignored (`/a/b/` is `/a/b`).
+describe("`:name+` / `:name*` / `**:name` reject an empty segment in the value", () => {
+  const routes = ["/a/:x+", "/a/**", "/b/:x*", "/c/:x+/d", "/c/*", "/e/**:x", "/f/:x*/g"];
+  const router = createEmptyRouter<string>();
+  for (const route of routes) addRoute(router, "GET", route, route);
+  const jit = compileRouter(router);
+  const jitAll = compileRouter(router, { matchAll: true });
+  const aot = new Function(`return ${compileRouterToString(router)}`)();
+  const aotAll = new Function(`return ${compileRouterToString(router, { matchAll: true })}`)();
+  const cases: [string, { data: string; params?: Record<string, string> } | undefined][] = [
+    ["/a/b/c", { data: "/a/:x+", params: { x: "b/c" } }],
+    ["/a/b/", { data: "/a/:x+", params: { x: "b" } }],
+    ["/a//b", { data: "/a/**", params: { 0: "/b", _: "/b" } }],
+    ["/a/b//", { data: "/a/**", params: { 0: "b/", _: "b/" } }],
+    ["/a/b//c", { data: "/a/**", params: { 0: "b//c", _: "b//c" } }],
+    ["/b", { data: "/b/:x*" }],
+    ["/b/x/y", { data: "/b/:x*", params: { x: "x/y" } }],
+    ["/b//x", undefined],
+    ["/b/x//", undefined],
+    ["/b/x//y", undefined],
+    ["/c/x/y/d", { data: "/c/:x+/d", params: { x: "x/y" } }],
+    ["/c/x//d", { data: "/c/*", params: { 0: "x//d" } }],
+    ["/c//x/d", { data: "/c/*", params: { 0: "/x/d" } }],
+    ["/c/x///d", { data: "/c/*", params: { 0: "x///d" } }],
+    ["/e/a/b", { data: "/e/**:x", params: { x: "a/b" } }],
+    ["/e/a//b", undefined],
+    ["/e//a", undefined],
+    ["/e/a//", undefined],
+    ["/f/g", { data: "/f/:x*/g" }],
+    ["/f/a/b/g", { data: "/f/:x*/g", params: { x: "a/b" } }],
+    ["/f/a//b/g", undefined],
+    ["/f//g", undefined],
+  ];
+  for (const [path, expected] of cases) {
+    it(`${path} -> ${JSON.stringify(expected)}`, () => {
+      const found = findRoute(router, "GET", path);
+      expect(found && { data: found.data, params: found.params && { ...found.params } }).toEqual(
+        expected,
+      );
+      const plain = JSON.parse(JSON.stringify(found ?? null));
+      expect(jit("GET", path) ?? null).toEqual(plain);
+      expect(aot("GET", path) ?? null).toEqual(plain);
+      const all = findAllRoutes(router, "GET", path).map((m) => m.data);
+      expect(jitAll("GET", path).map((m: { data: string }) => m.data)).toEqual(all);
+      expect(aotAll("GET", path).map((m: { data: string }) => m.data)).toEqual(all);
+      // regex ≡ router, route by route
+      for (const route of routes) {
+        const single = createEmptyRouter<string>();
+        addRoute(single, "GET", route, route);
+        expect(routeToRegExp(route).test(path), `${route} on ${path}`).toBe(
+          findRoute(single, "GET", path) !== undefined,
         );
       }
     });

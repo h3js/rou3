@@ -316,9 +316,23 @@ describe("segments after `**`: priority", () => {
       }),
     );
     const suffixRoutes = new Set(corpus.filter((route) => routerOf([route]).root.hasSuffix));
+    // Carve-out B (see find-all.test.ts): `b` has a `**:name` (each segment a
+    // value) and `a` a `:name` from where it starts, and a `**`: `a` is
+    // broader by the paths with an empty segment there, but comes after `b`
+    // (`/**:n/p` before `/:a/**/p` and `/**/:y/p`)
+    const catchAllFirst = (a: string, b: string) => {
+      const start = b.split("/").findIndex((segment) => segment.startsWith("**:"));
+      return (
+        start > 0 &&
+        a.split("/").some((segment, i) => i >= start && /^:\w+$/.test(segment)) &&
+        a.split("/").includes("**")
+      );
+    };
     const broader = (a: string, b: string) => {
       const [setA, setB] = [matchSets.get(a)!, matchSets.get(b)!];
-      return setA.size > setB.size && [...setB].every((path) => setA.has(path));
+      return (
+        setA.size > setB.size && [...setB].every((path) => setA.has(path)) && !catchAllFirst(a, b)
+      );
     };
 
     const failures: string[] = [];

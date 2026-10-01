@@ -201,6 +201,7 @@ interface CompilerContext {
   // The router has routes with segments after `**`: matches are collected
   // with a rank descriptor each (`k`) and ranked from the end of the path
   rank?: boolean;
+  // Data slots of rank descriptors and helpers (`RANK`, `VALUES`)
   rankMap?: Map<string, number>;
   // Compiling the collector of a single-match router with `rank`: same-node
   // ties keep the order that puts the tree order's pick last
@@ -499,7 +500,7 @@ function compileFinalMatch(
         }
         paramsCode += code;
         // A `:name` / `**:name` needs a value (see `emptyParam`)
-        const guard = nonEmptyGuard(map, params[i], data.suffix);
+        const guard = nonEmptyGuard(ctx, map, params[i], data.suffix);
         if (guard) {
           conditions.push(guard);
           guardConditions++;
@@ -828,12 +829,20 @@ function hasSuffixTrie(node: Node<any>): boolean {
 // Positions both `**` cover (`o` up to `h`) compare equal and are skipped.
 const RANK = `(r,k,n)=>{if(!k.some((d)=>d[1]>0))return r;const K=(d,p)=>{const e=n-d[1];if(d[0]>=0&&p>=d[0]&&p<e)return 0;for(let i=2;i<d.length;i+=2)if((d[1]&&d[i]>d[0]?d[i]-d[0]-1+e:d[i])===p)return d[i+1];return 3};return r.map((_,i)=>i).sort((a,b)=>{const A=k[a],B=k[b],o=Math.max(A[0]<0?n:A[0],B[0]<0?n:B[0]),h=n-Math.max(A[1],B[1]);for(let p=n-1;p>=0;p--){if(p<h&&p>=o){p=o;continue}const x=K(A,p)-K(B,p);if(x!==0)return x}return 0}).map((i)=>r[i])}`;
 
+// Whether `s[c]` to `s[e-1]` are all non-empty (see `nonEmptyGuard`)
+const VALUES = `(s,c,e)=>{for(;c<e;c++)if(!s[c])return false;return true}`;
+
 function rankRef(ctx: CompilerContext): string {
+  return helperRef(ctx, RANK);
+}
+
+/** The data slot of a helper function (`RANK`, `VALUES`), from its source. */
+function helperRef(ctx: CompilerContext, source: string): string {
   const rankMap = (ctx.rankMap ??= new Map());
-  let index = rankMap.get(RANK);
+  let index = rankMap.get(source);
   if (index === undefined) {
-    index = ctx.data.push(ctx.compileToString ? RANK : new Function(`return ${RANK}`)()) - 1;
-    rankMap.set(RANK, index);
+    index = ctx.data.push(ctx.compileToString ? source : new Function(`return ${source}`)()) - 1;
+    rankMap.set(source, index);
   }
   return dataRef(ctx, index);
 }
@@ -1014,11 +1023,14 @@ function propKey(name: string): string {
 /**
  * The condition under which param `map` (read as `param`) has a value, where
  * it needs one (mirrors `emptyParam` in operations/_utils.ts): a `:name`'s
- * segment is not empty, and a `**:name` (`:name+`, `:name*`) takes two
- * segments or more, or one that is not empty (a `**` and a `*` may capture
- * `""`). Its `**` starts at `s[c]` and `n` segments follow it.
+ * segment is not empty, and neither is any segment a `**:name` (`:name+`,
+ * `:name*`) takes (a `**` and a `*` may capture `""`): `s[c]` to `s[l-n-1]`,
+ * where its `**` starts at `s[c]` and `n` segments follow it, checked by the
+ * `VALUES` helper (a plain loop: as fast as one `s[c]` read where the path has
+ * a few segments, unlike `Array#lastIndexOf` or a scan of `p`).
  */
 function nonEmptyGuard(
+  ctx: CompilerContext,
   [index, name, optional, empty]: NonNullable<MethodData["paramsMap"]>[number],
   param: string,
   suffix: MethodData["suffix"],
@@ -1029,6 +1041,5 @@ function nonEmptyGuard(
   if (optional || empty) {
     return;
   }
-  const c = ~index + 1;
-  return `(l>${c + (suffix ? suffix[1] : 0) + 1}||s[${c}])`;
+  return `${helperRef(ctx, VALUES)}(s,${~index + 1},l${suffix ? `-${suffix[1]}` : ""})`;
 }

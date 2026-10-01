@@ -148,7 +148,8 @@ const SEPARATOR_GROUP = /^\(\?:.*\/\)\?$/s;
 const OPTIONAL_GROUP = /^\(\?:\/.*\)\?$/s;
 
 /**
- * A whole-part catch-all capture (`**`, and `**:x` / `:x+` / `:x*`, which
- * need a value: `[\s\S]+`), or a `(.*)` constraint: `[name, body]`.
+ * A whole-part catch-all capture (`**`, `*`), or a `(.*)` constraint:
+ * `[name, body]`. (A `**:x` / `:x+` / `:x*` is no such part: each of its
+ * segments needs a value, `[^/]+(?:/[^/]+)*`, which can't end in `/`.)
  */
-export const CATCH_ALL: RegExp = /^\(\?<(\w+)>(\[\\s\\S\][*+]|\.\*)\)$/;
+export const CATCH_ALL: RegExp = /^\(\?<(\w+)>(\[\\s\\S\]\*|\.\*)\)$/;

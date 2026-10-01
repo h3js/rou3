@@ -19,11 +19,9 @@ const LOOKBEHIND_SUFFIX = "(?:(?<=/)/|(?<!/)/?)$";
 // runs greedily to the last non-slash char and only the run of trailing
 // slashes is taken lazily, so a lazy step per char (`[\s\S]*?`, several times
 // slower on long paths) is paid per trailing slash only. `ANY_TAIL` may be
-// empty, `SOME_TAIL` may not (a `//` tail gives `/`), and `VALUE_TAIL` may be
-// neither empty nor `/` (a `///` tail gives `//`).
+// empty, `SOME_TAIL` may not (a `//` tail gives `/`).
 export const ANY_TAIL = "(?:[\\s\\S]*[^/])?/*?";
 const SOME_TAIL = "(?:[\\s\\S]*[^/]|/)/*?";
-const VALUE_TAIL = "(?:[\\s\\S]*[^/]|//)/*?";
 
 /**
  * `[possibly empty, non-empty]` tail bodies for a trailing whole-part capture
@@ -46,28 +44,15 @@ function tails(body: string): readonly [any: string, some: string] {
  * when a match ending in `/` minus that `/` is still a match. That holds when
  * the only parts that can be empty are a group's first segment (`*`, `**`:
  * without the slash, the group is skipped) and a trailing catch-all
- * that may be empty. A `:x` needs a value (`[^/]+`), so most routes end here.
+ * that may be empty. A `:x` needs a value (`[^/]+`), and so does each segment
+ * of a `**:x` / `:x+` / `:x*` (`[^/]+(?:/[^/]+)*`, which can't end in `/`), so
+ * most routes end here.
  * Each group that can be empty is made lazy so captures agree with the
  * router (`/a/` leaves `0` unset, `/a//` gives `0: ""`).
  *
  * Closed endings (`closedEnding`) build the rule in. They cover an empty last
  * segment before optional ones (`/a//{b}?`: the path must not stop right
- * after its separator), at the top or after a separator inside a group, and
- * a `**:x` / `:x+`, which needs a value: it can't be `/` (`/a//` is no match
- * for `/a/**:x`), so a `//` branch comes first,
- * `(?://|(?<x>(?:[\s\S]*[^/]|//)/*?)/?)`, at the top or as a group's whole
- * ending (`{/**:x}?`).
- *
- * The `//` branch leaves the group unset where the router reports `/` (`/a///`
- * for `/a/**:x`). No regex without look-around, backreferences or duplicate
- * group names can do better, so this is the accepted trade-off. Proof: the
- * regex must capture `x = "."` on `/a/.`, where the parts of the parse left
- * and right of the group take `/a/` and nothing. A `x = "/"` on `/a///`
- * (between `/a/` and a last `/`) would combine with those parts into `/a//`,
- * which the router rejects. A group that appears once combines this way, and
- * so do RE2's assertions: `$` can't have been used inside (it wasn't at the
- * end), and `\b` / `\B` read the same wherever both neighbors are `/`, `.`
- * or the end.
+ * after its separator), at the top or after a separator inside a group.
  *
  * A trailing catch-all `[\s\S]*` (or `(.*)` constraint) gets a tail body from
  * `tails()` in all these endings, so it never captures the slash lookup
@@ -80,9 +65,9 @@ function tails(body: string): readonly [any: string, some: string] {
  *
  * Anything else keeps the look-behind suffix:
  * - A part other than a trailing catch-all whose match can end in `/` (a
- *   constraint like `.+`, `[^.]+` or `\S+`, or a required catch-all before
- *   an optional segment: `/a/**:r/:y?`): the rewritten endings would let it
- *   take the stripped slash.
+ *   constraint like `.+`, `[^.]+` or `\S+`, or a `**` / `*` ending its
+ *   segment before an optional one: `/a/x-*\/:y?`): the rewritten endings
+ *   would let it take the stripped slash.
  * - A constraint that can match empty in a required last segment
  *   (`/a/:x(\d*)`). A closed ending needs its non-empty part, and deriving
  *   that from an arbitrary regex is not implemented (it would need a
@@ -127,13 +112,8 @@ function openEnding(level: string): string | undefined {
   // A last segment after a separator (`{/bar/:id}?`: stripping the slash is
   // no match) and an optional sibling before the last group (lazy, it would
   // shift values into later groups: `/*/:y?` capturing `y` instead of `0`)
-  // must not be empty, and a `**:x` / `:x+` must not be `/` (`/a//` doesn't
-  // reach `/a/**:x`).
-  if (
-    (prefix && canBeEmpty(last)) ||
-    groups.some((group) => canBeEmpty(group)) ||
-    CATCH_ALL.exec(last)?.[2] === "[\\s\\S]+"
-  ) {
+  // must not be empty.
+  if ((prefix && canBeEmpty(last)) || groups.some((group) => canBeEmpty(group))) {
     return;
   }
   if (inner === undefined) {
@@ -157,14 +137,6 @@ function closedEnding(level: string): string | undefined {
   const [prefix, last, [inner]] = parsed;
   if (inner === undefined) {
     const param = CATCH_ALL.exec(last);
-    // A `**:x` / `:x+` needs a value: `/a///` gives `x: "/"`, `/a//` is no
-    // match. No regex without look-around both captures `/` there and
-    // rejects `/a//` (by the argument below), so the `//` branch leaves the
-    // group unset where the router reports `/`. It can't be empty, so it
-    // needs no separator before it (`{/**:x}?`).
-    if (param?.[2] === "[\\s\\S]+") {
-      return `${prefix}(?://|(?<${param[1]}>${VALUE_TAIL})/?)`;
-    }
     if (!prefix) return;
     return param ? `${prefix}(?:/|(?<${param[1]}>${tails(param[2])[1]})/?)` : undefined;
   }
@@ -188,9 +160,8 @@ function optionalTail(inner: string): string | undefined {
     return `(?:${out}/?)?${canBeEmpty(out) ? "?" : ""}`;
   }
   // A closed ending starts with the group's first segment and a separator,
-  // or with a first segment that can't be empty (a `**:x` / `:x+` / `:x*`
-  // one, or `sub` in `{/sub/:x*}?`), so it can't be empty and the `?` has a
-  // single parse.
+  // or with a first segment that can't be empty (`sub` in `{/sub//{b}?}?`),
+  // so it can't be empty and the `?` has a single parse.
   const parsed = parseLevel(inner);
   const closed = parsed && (parsed[0] || !canBeEmpty(parsed[1])) ? closedEnding(inner) : undefined;
   return closed === undefined ? undefined : `(?:${closed})?`;

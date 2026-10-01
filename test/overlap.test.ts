@@ -126,7 +126,11 @@ describe("compareRoutes", () => {
     // named `**:name` is one-or-more
     ["/a/**:rest", "/a", "disjoint", "named ** needs >=1 segment"],
     ["/a/**", "/a/**:rest", "superset", "bare ** also matches zero segments"],
-    ["/a/**:rest", "/a/b/**", "superset", "named ** vs deeper **"],
+    // each segment of a `**:name` needs a value: `/a/b//` is only `/a/b/**`'s
+    ["/a/**:rest", "/a/b/**", "partial", "named ** vs deeper **"],
+    ["/a/**:rest", "/a/b/:x+", "superset", "named ** vs deeper named **"],
+    ["/a/**", "/a/:x+", "superset", "a bare ** takes empty segments"],
+    ["/a/:x/**", "/a/:y+", "superset", "a :name and ** cover each segment of a :name+"],
     ["/a/**:x", "/a/**:y", "equal", "match-sets compare, names don't"],
 
     // `*` / `:param` single segments
@@ -464,9 +468,11 @@ describe("segments after `**`", () => {
     ["/**/_payload.json", "/blog", "disjoint"],
     ["/**/_payload.json", "/**/og.png", "disjoint"],
     ["/**.md", "/*.md", "equal"],
-    // A `**:p` needs a value, a `:y` too: `/a//x` is only `**:p`'s.
-    ["/**:p/x", "/**/:y/x", "superset"],
-    ["/**/:y", "/**:y", "subset"],
+    // Each segment of a `**:p` needs a value, a `:y` too: `//a/x` is only
+    // `/**/:y/x`'s (its `**` takes the empty segment).
+    ["/**:p/x", "/**/:y/x", "subset"],
+    ["/**/:y", "/**:y", "superset"],
+    ["/**:p/x", "/**/x", "subset"],
     ["/*/x", "/**:p/x", "superset"],
     ["/a/:x+/b", "/a/**:x/b", "equal"],
     ["/a/*", "/a/**/x", "superset"],
