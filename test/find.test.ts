@@ -338,6 +338,183 @@ describe("a `{` / `}` ends a param name", () => {
   });
 });
 
+describe("a pattern starting with a `{…}` group", () => {
+  // Read expansion by expansion: one starting with `/` is absolute, as in
+  // URLPattern (`{/:a}?/b` is `/:a/b` or `/b`, never `//b`); any other one,
+  // the empty one too, is relative and gets a `/` like a pattern without one
+  // (`{a}/b` is `/a/b`, `{/:a}?` also `/`). `[pattern, path, params]`, `null`
+  // for no match.
+  const cases: [string, string, Record<string, string> | null][] = [
+    ["{/:a}?/b", "/b", {}],
+    ["{/:a}?/b", "/x/b", { a: "x" }],
+    ["{/:a}?/b", "//b", null],
+    ["{/:a}?/b", "//x/b", null],
+    ["{/:a}/b", "/x/b", { a: "x" }],
+    ["{/:a}/b", "//x/b", null],
+    ["{/:a}/b", "/b", null],
+    ["{/:a}?", "/", {}],
+    ["{/:a}?", "/x", { a: "x" }],
+    ["{/:a}?", "//x", null],
+    ["{/:a}?", "//", null],
+    ["{/:a(\\d+)}?/b", "/1/b", { a: "1" }],
+    ["{/:a(\\d+)}?/b", "/b", {}],
+    ["{/:a(\\d+)}?/b", "/x/b", null],
+    ["{/*}?/b", "/b", {}],
+    ["{/*}?/b", "/x/b", { "0": "x" }],
+    ["{/*}?/b", "//b", { "0": "" }],
+    ["{/a/:b}?", "/", {}],
+    ["{/a/:b}?", "/a/x", { b: "x" }],
+    ["{/a/:b}?", "//a/x", null],
+    ["{/:foo}bar", "/bazbar", { foo: "baz" }],
+    ["{/a}b", "/ab", {}],
+    ["{/}a", "/a", {}],
+    ["{}/a", "/a", {}],
+    ["{}/a", "//a", null],
+    ["{/:a}?/:b?", "/", {}],
+    ["{/:a}?/:b?", "/x", { a: "x" }],
+    ["{/:a}?/:b?", "/x/y", { a: "x", b: "y" }],
+    // Several leading groups: the one left after the first is read the same
+    ["{/a}?{/:b}?/c", "/c", {}],
+    ["{/a}?{/:b}?/c", "/a/c", {}],
+    ["{/a}?{/:b}?/c", "/x/c", { b: "x" }],
+    ["{/a}?{/:b}?/c", "/a/x/c", { b: "x" }],
+    ["{/a}?{/:b}?/c", "//c", null],
+    ["{/a}?{/b}?", "/", {}],
+    ["{/a}?{/b}?", "/b", {}],
+    ["{/a}?{/b}?", "/a/b", {}],
+    ["{/a}?{/b}?", "//b", null],
+    // A relative expansion gets a `/` (URLPattern never matches one)
+    ["{a}/b", "/a/b", {}],
+    ["{:x}/b", "/y/b", { x: "y" }],
+    ["{a}?/b", "/a/b", {}],
+    ["{a}?/b", "/b", {}],
+    ["{a}?/b", "//b", null],
+    ["{:x}?/b", "/y/b", { x: "y" }],
+    ["{:x}?/b", "/b", {}],
+    ["{:x}?/b", "//b", null],
+    // Unnamed captures in a relative leading group are counted after its `/`
+    ["{(\\d+)}?/*", "/x", { "1": "x" }],
+    ["{(\\d+)}?/*", "/5/x", { "0": "5", "1": "x" }],
+    ["{*}?/(\\d+)", "/5", { "1": "5" }],
+    ["{a}?{/b}?/c", "/a/b/c", {}],
+    ["{a}?{/b}?/c", "/b/c", {}],
+    ["{a}?{/b}?/c", "/c", {}],
+    // An escaped `{` is a literal: the pattern is relative
+    ["\\{/a\\}", "/%7B/a%7D", {}],
+  ];
+  const patterns = [...new Set(cases.map(([pattern]) => pattern))];
+  const routers = new Map(patterns.map((pattern) => [pattern, createRouter([pattern])]));
+  const lookups = {
+    findRoute: (pattern: string, path: string) => findRoute(routers.get(pattern)!, "GET", path),
+    compiledLookup: (pattern: string, path: string) =>
+      compileRouter(routers.get(pattern)!)("GET", path),
+    aotLookup: (pattern: string, path: string) =>
+      // eslint-disable-next-line no-new-func
+      new Function(`return ${compileRouterToString(routers.get(pattern)!)}`)()("GET", path),
+  };
+  for (const [name, match] of Object.entries(lookups)) {
+    it.each(cases)(`%j on %j (${name})`, (pattern, path, params) => {
+      const result = match(pattern, path);
+      expect(result ? { ...result.params } : null).toEqual(params);
+    });
+  }
+
+  it.each(cases)("%j on %j (routeToRegExp)", (pattern, path, params) => {
+    // An alternation fallback (`{/a}?{/:b}?/c`) needs duplicate named groups
+    if (needsDuplicateNames(pattern)) {
+      expect(() => routeToRegExp(pattern)).toThrow(/^rou3: .*duplicate named groups/);
+      return;
+    }
+    expect(routeToRegExp(pattern).test(path)).toBe(params !== null);
+  });
+
+  it("removes by the pattern as written", () => {
+    const r = createRouter(patterns);
+    // The same expansions after a `/` are other routes, left alone
+    addRoute(r, "GET", "/b", { path: "/b" });
+    addRoute(r, "GET", "/{/:a}?/b", { path: "/{/:a}?/b" });
+    for (const pattern of patterns) removeRoute(r, "GET", pattern);
+    expect(findRoute(r, "GET", "/b")?.data).toEqual({ path: "/b" });
+    expect(findRoute(r, "GET", "//b")?.data).toEqual({ path: "/{/:a}?/b" });
+    expect(findRoute(r, "GET", "//x/b")?.data).toEqual({ path: "/{/:a}?/b" });
+    expect(findRoute(r, "GET", "/x/b")).toBeUndefined();
+    removeRoute(r, "GET", "/b");
+    removeRoute(r, "GET", "/{/:a}?/b");
+    expect(r.root).toEqual(createEmptyRouter().root);
+
+    // Two leading groups that differ only before their first `/` share the
+    // `/b` node: removing one leaves the other's entry
+    const s = createRouter(["{/:a}?/b", "{x/:a}?/b"]);
+    removeRoute(s, "GET", "{/:a}?/b/");
+    expect(findRoute(s, "GET", "/b")?.data).toEqual({ path: "{x/:a}?/b" });
+    expect(findRoute(s, "GET", "/y/b")).toBeUndefined();
+    removeRoute(s, "GET", "{x/:a}?/b");
+    expect(s.root).toEqual(createEmptyRouter().root);
+  });
+
+  it("keeps a leading group's identity apart from the same group after a `/`", () => {
+    // Both register `/a/b` (`{a}?/b` as `/a/b` or `/b`, `/{a}?/b` as `/a/b` or `//b`)
+    for (const [removed, kept] of [
+      ["{a}?/b", "/{a}?/b"],
+      ["/{a}?/b", "{a}?/b"],
+    ]) {
+      const r = createRouter([removed, kept]);
+      removeRoute(r, "GET", removed);
+      expect(findRoute(r, "GET", "/a/b")?.data, removed).toEqual({ path: kept });
+    }
+  });
+
+  it("removes nothing for a malformed pattern starting with `{`", () => {
+    // `addRoute` rejects these; without a group to expand they have no
+    // leading `/` and would split into another route's segments
+    for (const pattern of ["{oops/users/:id", "{abc/x", "{(}/x", "{", "{a"]) {
+      const r = createRouter(["/", "/x", "/users/:id"]);
+      expect(() => addRoute(createEmptyRouter(), "", pattern), pattern).toThrow(/^rou3: /);
+      removeRoute(r, "GET", pattern);
+      expect(findRoute(r, "GET", "/")?.data, pattern).toEqual({ path: "/" });
+      expect(findRoute(r, "GET", "/x")?.data, pattern).toEqual({ path: "/x" });
+      expect(findRoute(r, "GET", "/users/1")?.data, pattern).toEqual({ path: "/users/:id" });
+    }
+  });
+
+  it("rejects text right after a leading `{/…}?` group", () => {
+    // Without the group the route would be relative: URLPattern gives that
+    // form no meaning (`{/a}?b` matches only `/ab`), so it is reserved
+    for (const pattern of [
+      "{/a}?b",
+      "{/:a}?.png",
+      "{/a}?{.json}?",
+      "{/a}?{b}?/c",
+      "{/a}?\\{x",
+      "{/a}?{/b}?c",
+    ]) {
+      const message = `rou3: text after a leading \`{/...}?\` (${pattern})`;
+      expect(() => addRoute(createEmptyRouter(), "", pattern), pattern).toThrow(message);
+      // `removeRoute` quotes the pattern as written too, not an expansion
+      expect(() => removeRoute(createEmptyRouter(), "", pattern), pattern).toThrow(message);
+    }
+    // ... and so for a misplaced modifier (it quoted `undefined`)
+    for (const pattern of ["/a/pre-:x+", "{/a}?/:x(\\d+)+"]) {
+      expect(() => removeRoute(createEmptyRouter(), "", pattern), pattern).toThrow(
+        new RegExp(`^rou3: misplaced .* \\(${pattern.replace(/[{}()?+\\]/g, "\\$&")}\\)$`),
+      );
+    }
+    // Followed by `/`, another `{/…}` group or nothing, it is fine
+    for (const pattern of ["{/a}?/b", "{/a}?{/b}?", "{/a}?", "{/a}b", "{a}?b"]) {
+      expect(() => addRoute(createEmptyRouter(), "", pattern), pattern).not.toThrow();
+    }
+  });
+
+  it("rejects `{/…}+` / `{/…}*`, quoting the pattern as written", () => {
+    expect(() => addRoute(createEmptyRouter(), "", "{/a}+")).toThrow(
+      "rou3: unsupported `{}+` ({/a}+)",
+    );
+    expect(() => addRoute(createEmptyRouter(), "", "{/:a}*/b")).toThrow(
+      "rou3: unsupported `{}*` ({/:a}*/b)",
+    );
+  });
+});
+
 describe("params sharing a segment (URLPattern)", () => {
   const router = createRouter([
     "/a/:a-:b",

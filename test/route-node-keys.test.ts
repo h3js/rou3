@@ -76,6 +76,17 @@ describe("routeNodeKeys", () => {
       ["/x{/a}?{/b}?", ["/x", "/x/a", "/x/a/b", "/x/b"]],
       // 4 registrations (`/a/:x/:y`, `/a/:x`, `/a/:y`, `/a`) onto 3 nodes.
       ["/a/:x?/:y?", ["/a", "/a/*", "/a/*/*"]],
+      // A leading `{/…}` group is absolute: no empty first segment.
+      ["{/:a}?/b", ["/b", "/*/b"]],
+      ["{/:a}/b", ["/*/b"]],
+      ["{/:a}?", ["/", "/*"]],
+      ["{/a}?{/:b}?/c", ["/a/c", "/a/*/c", "/c", "/*/c"]],
+      // ... and a relative expansion gets a `/`, like a relative pattern.
+      ["{a}?/b", ["/a/b", "/b"]],
+      ["{a}?b", ["/ab", "/b"]],
+      ["{:x}/b", ["/*/b"]],
+      // The same group after a `/` keeps its empty first segment.
+      ["/{/:a}?/b", ["//b", "//*/b"]],
     ];
 
     it.each(cases)("%j -> %j", (pattern, keys) => {

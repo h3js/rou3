@@ -145,6 +145,8 @@ A route can have only one catch-all. `**`, `**:name`, and a `:name+` / `:name*` 
 
 Groups can't be nested or repeated (`{...}+` and `{...}*` throw).
 
+A pattern can start with a group. A group that starts with `/` is part of the path, as in URLPattern: `{/:lang}?/docs` matches `/docs` and `/en/docs`, and `{/:lang}?` matches `/` and `/en`. Write `/{/:lang}?/docs` for a route that starts with an empty segment (`//docs`, `//en/docs`). A pattern that doesn't start with `/` gets one (`users/:id` is `/users/:id`), and so does each form of a leading group without one: `{v2}?/api` matches `/v2/api` and `/api`. Text right after a leading `{/…}?` throws (`{/a}?b`, `{/:id}?.png`, `{/a}?{.json}?`): without the group the route would not start with `/`. Follow it with `/`, another `{/…}` group, or nothing.
+
 ### Escaping
 
 Escape `:`, `*`, `?`, `+`, `(`, `)`, `{` and `}` with a backslash to match them literally (a literal `?`, `{` or `}` is then [percent-encoded](#percent-encoding), like other literal text). Outside a regex constraint, any escaped character is a literal (`\\.` is `.`, `\\\\` is `\`), as in URLPattern. A `\` can't escape `/` or end a segment.
@@ -174,7 +176,7 @@ findRoute(router, "GET", "/café/1"); // undefined
 
 ### Invalid patterns
 
-`addRoute` throws a `rou3:` error that quotes the pattern when the syntax has no meaning, instead of silently matching something unexpected. For example: an unclosed `(` or `{`, a nested group, an empty group `()`, a modifier in the wrong place (`*?`, `**+`, `:x.png?`), a `?` after plain text (`/foo?`: lookup paths have no query string, escape a literal one as `\\?`), a `**` in the middle of a segment (`/a**b`), an invalid or repeated param name (`/:0`, `/:café`, `/:id$`, `/a/:x/:x`), a second catch-all, a `\/`, a capturing group inside a regex constraint (`/:x((a))`, use `(?:…)`), or an anchor (`^`, `$`), look-around or numbered backreference (`\1`) in a regex constraint, or a character from U+FFFD to U+FFFF (used internally). The router tests a constraint against its segment alone, while `routeToRegExp` puts it inline, where it would see the rest of the path, so the two would match different paths.
+`addRoute` throws a `rou3:` error that quotes the pattern when the syntax has no meaning, instead of silently matching something unexpected. For example: an unclosed `(` or `{`, a nested group, an empty group `()`, a modifier in the wrong place (`*?`, `**+`, `:x.png?`), a `?` after plain text (`/foo?`: lookup paths have no query string, escape a literal one as `\\?`), a `**` in the middle of a segment (`/a**b`), an invalid or repeated param name (`/:0`, `/:café`, `/:id$`, `/a/:x/:x`), a second catch-all, a `\/`, a capturing group inside a regex constraint (`/:x((a))`, use `(?:…)`), or an anchor (`^`, `$`), look-around or numbered backreference (`\1`) in a regex constraint, or a character from U+FFFD to U+FFFF (used internally), or text right after a leading `{/…}?` group (`{/a}?b`). The router tests a constraint against its segment alone, while `routeToRegExp` puts it inline, where it would see the rest of the path, so the two would match different paths.
 
 ### Differences from URLPattern
 
@@ -190,6 +192,7 @@ rou3 matches paths segment by segment in a tree, which leads to a few intentiona
 | Path normalization (`.`/`..`) | Resolved in input paths            | Opt-in with `{ normalize: true }`               |
 | Case sensitivity              | Can be case-insensitive            | Always case-sensitive                           |
 | Non-`/`-prefixed paths        | Supported                          | Paths must start with `/`                       |
+| Patterns without a leading `/` (`users/:id`, `{v2}?/api`) | Never match an absolute path | Get a `/` (`/users/:id`); a leading group, in each form without one (`{v2}?/api` matches `/v2/api` and `/api`) |
 | Optional group with text after a greedy capture in its segment (`/*{.webp}?`) | The capture takes what it can (`/a.webp`: `{ 0: "a.webp" }`) | The route with the group wins (`/a.webp`: `{ 0: "a" }`); a group holding only a param is that param, as in URLPattern (`/*-{:x}?` is `/*-:x?`, and `/a/*{:x}?`, which is `/a/*:x?`: its segment is required, no match on `/a`, and `/a/b` gives `{ 0: "b" }`, not `{ 0: "", x: "b" }`), except before more of its segment, where it stays a group (`/*-{:x}?(y)` on `/a--y`: `{ 0: "a", x: "-", 1: "y" }`, URLPattern `{ 0: "a-", 1: "y" }`) |
 | Optional group before more of its segment (`/:foo{x}?(.*)`) | The param takes as little as it can (`/abx`: `{ foo: "a", 0: "bx" }`) | The route with the group wins (`/abx`: `{ foo: "ab", 0: "" }`) |
 | Optional group that can match empty text (`/{:foo}{(\\d*)}?`) | Unset where it matches nothing (`/a`: `{ foo: "a" }`) | The router gives `""` (`/a`: `{ foo: "a", 0: "" }`); `routeToRegExp` leaves it unset |
@@ -336,6 +339,8 @@ removeRoute(router, "GET", "/path/:name"); // "/path/:id" is still registered
 ```
 
 Pass the pattern as you registered it. Spellings that the tree can't tell apart are equivalent (`/a/` and `/a`, `/**.md` and `/**/*.md`), but `/path/*` does not remove `/path/:name`, and `/ab` does not remove `/a{b}`.
+
+`removeRoute` throws the same `rou3:` error as `addRoute`, quoting the pattern, for a reserved group or modifier: `{...}+` / `{...}*`, text right after a leading `{/…}?` (`{/a}?b`), or a misplaced `+` / `*` (`/a/pre-:x+`). It does not check the rest of the [invalid patterns](#invalid-patterns), since no route was added for them: a malformed pattern such as `{oops/x` removes nothing.
 
 ## Compiler
 

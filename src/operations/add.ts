@@ -5,6 +5,7 @@ import { createRouter } from "../context.ts";
 import { NullProtoObj } from "../object.ts";
 import type { Node, RouterContext, ParamsIndexMap } from "../types.ts";
 import {
+  absolutePattern,
   checkConstraints,
   decodeEscapes,
   encodeEscapes,
@@ -31,6 +32,12 @@ import {
  * capture the segment is one regex, so a greedy capture takes what it can
  * (`/*-:x?` on `/--` is `{ 0: "-" }`, `/:a(\\d+):b?` on `/12` `{ a: "12" }`).
  *
+ * A pattern without a leading `/` gets one (`foo/:id`). One starting with a
+ * group gets it per expansion (`absolutePattern`): `{/:a}?/b` is absolute, as
+ * in URLPattern (`/:a/b` or `/b`), while `{a}?/b` is `/a/b` or `/b`. Text
+ * right after a leading `{/…}?` throws (`{/a}?b`: without the group the route
+ * would be relative).
+ *
  * @throws a `rou3:` error for pattern syntax with no meaning (yet), quoting
  * the pattern: an unclosed `(`, unbalanced or nested `{}`, `{…}+` / `{…}*`,
  * a `?` / `+` / `*` anywhere but after a whole-segment `:name` (`?` also
@@ -50,9 +57,7 @@ export function addRoute<T>(
   data?: T,
 ): void {
   method = method.toUpperCase();
-  if (path.charCodeAt(0) !== 47 /* '/' */) {
-    path = `/${path}`;
-  }
+  path = absolutePattern(path);
   checkConstraints(path);
   _add(ctx, method, path, data);
 }
@@ -286,8 +291,9 @@ export function skipGroup(path: string, input: string, unnamed: Unnamed = same):
   const count = (p: string) => _add(createRouter(), "", p, undefined, undefined, input);
   const before = count(pre);
   // Joined like `expandGroupDelimiters` joins them: `/:a{(\d+)}?` holds an
-  // unnamed `(\d+)`, not `:a`'s constraint
-  const skip = count(joinGroup(pre, body, input)) - before;
+  // unnamed `(\d+)`, not `:a`'s constraint; a relative leading group is
+  // read after its `/` (`{(\d+)}?/*`)
+  const skip = count(absolutePattern(joinGroup(pre, body, input))) - before;
   return skip ? (index) => unnamed(index < before ? index : index + skip) : unnamed;
 }
 

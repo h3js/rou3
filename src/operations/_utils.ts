@@ -155,6 +155,17 @@ export function checkConstraints(route: string): void {
 }
 
 /**
+ * A relative pattern (`foo/:id`) with a `/` in front, as `addRoute`,
+ * `removeRoute` and `routeToRegExp` read it. A pattern starting with a `{`
+ * group is left alone: `expandGroupDelimiters` reads each expansion of it
+ * the same way (`{/:a}?/b` is absolute, as in URLPattern: `/:a/b` or `/b`,
+ * not `//b`; the empty one of `{/:a}?` is `/`).
+ */
+export function absolutePattern(path: string): string {
+  return /^[/{]/.test(path) ? path : `/${path}`;
+}
+
+/**
  * Throws a `rou3:` error for pattern syntax with no meaning (yet), quoting the
  * route as written.
  */
@@ -280,9 +291,14 @@ export function splitRoute(path: string): string[] {
  * modifiers), shared by `addRoute` and `removeRoute`: its pre-expansion text
  * with trailing empties dropped and static segments keyed like the tree, so
  * spellings the tree cannot tell apart (`/a/:x?/` vs `/a/:x?`, `\)` vs `)`)
- * share one identity (compared through `routeId`).
+ * share one identity (compared through `routeId`). A pattern starting with a group (`{/:a}?/b`, the only
+ * one here without a leading `/`) is read after a `/` (the split would drop
+ * its first piece) and marked with a `{`, which no other identity starts
+ * with: read after a `/`, `{a}?/b` would be the same text as `/{a}?/b`, and
+ * both register `/a/b`.
  */
 export function expandedRouteId(path: string): string {
+  if (path.charCodeAt(0) !== 47 /* '/' */) return `{${expandedRouteId(`/${path}`)}`;
   return (
     "/" +
     splitRoute(encodeEscapes(path))

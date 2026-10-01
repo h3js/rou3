@@ -174,8 +174,14 @@ describe("benchmark", () => {
     // `plain` check (any capture-only segment with one required name).
     // -29B raw / -19B gzip: `expandGroupDelimiters` returns a `{:x}?` rewrite alone
     // (the caller expands the next group).
-    expect(bytes).toBeLessThanOrEqual(11775); // <11.78kb
-    expect(gzipSize).toBeLessThanOrEqual(4985); // <4.99kb
+    // +~165B raw / +~83B gzip: a pattern starting with a `{…}` group gets no
+    // `/` in front (`absolutePattern`); each of its expansions does unless it
+    // starts with one, so `{/:a}?/b` is `/:a/b` or `/b`, not `//b`. Its
+    // removal identity is marked apart from `/{…}`'s (`{a}?/b` vs `/{a}?/b`),
+    // `skipGroup` counts a relative one's captures after its `/`, and text
+    // right after a leading `{/…}?` (`{/a}?b`) throws.
+    expect(bytes).toBeLessThanOrEqual(11940); // <11.94kb
+    expect(gzipSize).toBeLessThanOrEqual(5070); // <5.07kb
   });
 });
 
