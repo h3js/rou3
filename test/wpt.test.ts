@@ -181,9 +181,19 @@ function normalizeGroups(groups: Record<string, string> | undefined): Record<str
  *    inputs; rou3 only in inputs (`normalize`)
  * 8. Case sensitivity: URLPattern may be case-insensitive (`ignoreCase`);
  *    rou3 is always case-sensitive
- * 9. Percent-encoding: URLPattern encodes the input; rou3 does not
+ * 9. Percent-encoding: both encode the pattern's literal text; URLPattern
+ *    also encodes the input, rou3 takes it encoded (`new URL().pathname`), so
+ *    the strategies get it through `encodePathname`
  * 10. Relative paths: rou3 reads every pattern as absolute (`/`-prefixed)
  */
+
+/**
+ * The input as URLPattern (and `new URL().pathname`) encodes it: the URL path
+ * percent-encode set as UTF-8, `%` kept. Checked against URLPattern below.
+ */
+function encodePathname(path: string): string {
+  return path.replace(/[\0- "#<>?^`{}\x7F-\u{10FFFF}]/gu, (c) => encodeURIComponent(c));
+}
 
 // Known diff labels: tests where rou3 intentionally behaves differently.
 // Asserted to differ (and not to throw) so we notice if rou3 gains compatibility.
@@ -212,10 +222,6 @@ const KNOWN_DIFFS = new Set([
   "/foo/** → /foo/ [match]",
   "/foo/** → /foo/bar [match]",
   "/foo/** → /foo/bar/baz [match]",
-
-  // Percent-encoding — URLPattern encodes the input (`/café` is
-  // `/caf%C3%A9`), rou3 matches it as given
-  "/caf%C3%A9 → /café [match]",
 
   // Relative inputs — rou3's regex is anchored at `/` (the router skips them)
   "*/* → foo/bar [match]",
@@ -419,7 +425,7 @@ describe("wpt urlpattern compatibility", () => {
           count[key] = (count[key] ?? 0) + 1;
           const { label, pattern, input, groups } = test;
           const match = () => {
-            const { matched, params } = strategy.match(pattern, input!);
+            const { matched, params } = strategy.match(pattern, encodePathname(input!));
             return matched ? params : null;
           };
           switch (plan.kind) {
@@ -498,6 +504,63 @@ const EMPTY_SEGMENT_CASES: [string, string, Record<string, string> | null][] = [
   ["/foo/:bar", "/foo/a", { bar: "a" }],
   ["/foo/:bar+", "/foo/a/b", { bar: "a/b" }],
 ];
+
+// Not in the WPT data: literal pattern text is percent-encoded like URLPattern
+// (the URL path percent-encode set as UTF-8, `%` kept, a lone surrogate as
+// U+FFFD). `[pattern, raw input, groups]`, `null` for no match; the input is
+// encoded with `encodePathname`, checked against the runtime's URLPattern.
+const PERCENT_ENCODING_CASES: [string, string, Record<string, string> | null][] = [
+  ["/café", "/café", {}],
+  ["/caf\\é", "/café", {}],
+  ["/café/:id", "/café/1", { id: "1" }],
+  ["/café-:id", "/café-1", { id: "1" }],
+  ["/:id-café", "/1-café", { id: "1" }],
+  ["/x/:id{é}?", "/x/1é", { id: "1" }],
+  ["/x-:id-😀", "/x-1-😀", { id: "1" }],
+  ["/a b/:id", "/a b/1", { id: "1" }],
+  ['/a"b<c>`', '/a"b<c>`', {}],
+  ["/a\\#b", "/a#b", {}],
+  ["/a\\?b", "/a?b", {}],
+  ["/a\\{b\\}", "/a{b}", {}],
+  ["/a^b", "/a^b", {}],
+  ["/a\x01\x7Fb", "/a\x01\x7Fb", {}],
+  ["/a|b[c]'!$&=@;,~", "/a|b[c]'!$&=@;,~", {}],
+  ["/caf%C3%A9", "/café", {}],
+  ["/caf%c3%a9", "/café", null],
+  ["/caf%c3%a9", "/caf%c3%a9", {}],
+  ["/100%", "/100%", {}],
+  ["/a%zz", "/a%zz", {}],
+  ["/a\\%b", "/a%b", {}],
+  ["/a\uD800", "/a�", {}],
+  ["/:x(%C3%A9)", "/é", { x: "%C3%A9" }],
+];
+
+describe("wpt urlpattern compatibility: percent-encoding", () => {
+  const URLPatternCtor = (globalThis as { URLPattern?: any }).URLPattern;
+  for (const strategy of strategies) {
+    for (const [pattern, input, groups] of PERCENT_ENCODING_CASES) {
+      it(`${strategy.name}: ${JSON.stringify(pattern)} → ${JSON.stringify(input)}`, () => {
+        const { matched, params } = strategy.match(pattern, encodePathname(input));
+        expect(matched ? params : null).toEqual(groups);
+      });
+    }
+  }
+
+  it.runIf(URLPatternCtor)("agrees with URLPattern", () => {
+    for (const [pattern, input, groups] of PERCENT_ENCODING_CASES) {
+      const urlPattern = new URLPatternCtor({ pathname: pattern });
+      const result = urlPattern.exec({ pathname: input });
+      expect(result ? result.pathname.groups : null, `${pattern} → ${input}`).toEqual(groups);
+      // `encodePathname` encodes the input like URLPattern and `new URL()`
+      expect(
+        new URLPatternCtor({ pathname: input.replace(/[\\:*(){}?+]/g, "\\$&") }).pathname,
+      ).toBe(encodePathname(input));
+      const url = new URL("http://h");
+      url.pathname = input;
+      expect(url.pathname).toBe(encodePathname(input));
+    }
+  });
+});
 
 // Where rou3 still differs (see the README): a `:name*` takes an empty segment
 // (URLPattern's needs a value in each), and `:name+` / `:name*` / `**` take

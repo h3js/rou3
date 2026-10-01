@@ -23,6 +23,7 @@ Read the relevant doc before changing that area:
 - `routeToRegExp(p)` matches exactly the paths `findRoute` matches on a router holding only `p` (consumers use it as a security guard). The one exception: a constraint that can match `/` (`(.*)`) also matches across segments in the regex, so it over-matches, never under-matches.
 - Never write a second pattern parser: derived APIs (`routeToRegExp` validation and dynamic segments, overlap, `routeNodeKeys`) run the real `addRoute` (or its `getParamRegexp`) on a throwaway router.
 - Lookup ignores at most one trailing slash; middle empty segments are meaningful.
+- Literal pattern text is percent-encoded once, at insert, like URLPattern (`encodeLiteral`, see [syntax.md](.agents/syntax.md#percent-encoding)); lookup paths are never decoded or encoded (callers pass `new URL().pathname`). Encode only after syntax is parsed.
 - A `:name`, `:name+` or `**:name` never captures `""` (URLPattern); `*`, `**`, `:name*` and constraints may (see [matching.md](.agents/matching.md#empty-segments-and-normalization)).
 - Optional features (overlap, regexp, `routeNodeKeys`, `regExpToRoute`) must stay tree-shakeable; `test/bench/bundle.test.ts` budgets the core bundle.
 - `addRoute` preprocessing helpers bail early when their trigger char is absent; keep those guards.

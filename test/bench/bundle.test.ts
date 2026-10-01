@@ -130,8 +130,13 @@ describe("benchmark", () => {
     // +39B raw / +18B gzip: the quoted name drops only the `\` a group put
     // before a name char outside a constraint (`**:x(\d+)` read `x(d+)`) and
     // decodes the escape placeholders (`**:x\:y` read `x\uFFFD0y`).
-    expect(bytes).toBeLessThanOrEqual(10550); // <10.56kb
-    expect(gzipSize).toBeLessThanOrEqual(4410); // <4.41kb
+    // +~314B raw / +~149B gzip: literal pattern text is percent-encoded like
+    // URLPattern (`encodeLiteral`, in static keys and `getParamRegexp`), so a
+    // route matches the encoded pathname `new URL()` gives (`/café` was never
+    // reachable). Includes a `test` early bail and a per-char gate that keep
+    // `addRoute` on plain routes as fast as before.
+    expect(bytes).toBeLessThanOrEqual(10870); // <10.87kb
+    expect(gzipSize).toBeLessThanOrEqual(4560); // <4.56kb
   });
 });
 

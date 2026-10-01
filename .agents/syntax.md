@@ -1,6 +1,6 @@
 # Pattern syntax
 
-`addRoute` pipeline: `checkConstraints` → `expandGroupDelimiters` → `encodeEscapes` / `splitRoute` → `expandModifiers` (`:x+` → `**:x`, `:x*` → `**:\uFFFFx` + the route without it, see [matching.md](matching.md#empty-segments-and-normalization)) → per segment `getParamRegexp` / `addName`. Each helper bails early when its trigger is absent (`\`, `�`, `{`, trailing `?`/`+`/`*`, `(`/`{`/`}`), so plain routes skip the scanners. Keep those guards.
+`addRoute` pipeline: `checkConstraints` → `expandGroupDelimiters` → `encodeEscapes` / `splitRoute` → `expandModifiers` (`:x+` → `**:x`, `:x*` → `**:\uFFFFx` + the route without it, see [matching.md](matching.md#empty-segments-and-normalization)) → per segment `segmentKey` (static key) or `getParamRegexp` / `addName`, both percent-encoding literal text (`encodeLiteral`, see [below](#percent-encoding)). Each helper bails early when its trigger is absent (`\`, `�`, `{`, trailing `?`/`+`/`*`, `(`/`{`/`}`, an encode-set char), so plain routes skip the scanners. Keep those guards.
 
 ## Escapes
 
@@ -8,8 +8,19 @@ Any `\x` outside a constraint is a literal `x`, as in URLPattern (`/foo\.bar` ma
 
 - `encodeEscapes()` hides `\:` `\(` `\)` `\{` `\}` `\\` behind U+FFFD + their index in `ESCAPABLE` before splitting, so no scan reads them as syntax; `\\` is one of them so pairs read left to right (`\\:x` is `\` + `:x`). This also applies inside constraints (`\)` doesn't close one).
 - Static keys (`segmentKey`): other `\x` → `x`, then `decodeEscapes(s, "")`.
-- Dynamic segments (`getParamRegexp`): other `\x` outside a group → U+FFFE + `x` (`\*` stays an escape so it is no wildcard); placeholders decode to U+FFFE + char after params and groups are named; U+FFFE pairs then become regex-safe literals. Unescaped regex chars outside a group (`. ^ $ | [ ] ) { }`) are literals too, as in a static segment (`/api/*$`, `/x/^:id`, a stray `)`). A `:` inside a group becomes U+FFFE + `:`, so a `(?:…)` inside a constraint or unnamed group is never read as a param (the name replace skips it with a look-behind).
+- Dynamic segments (`getParamRegexp`): other `\x` outside a group → U+FFFE + `x` (`\*` stays an escape so it is no wildcard), or its percent-encoding when `x` is in the encode set; placeholders decode to U+FFFE + char after params and groups are named (an escaped `{` / `}` at depth 0 is encoded right away); U+FFFE pairs then become regex-safe literals. Unescaped regex chars outside a group (`. $ | [ ] )`) are literals too, as in a static segment (`/api/*$`, a stray `)`); `^` (`/x/^:id`) is percent-encoded. A `:` inside a group becomes U+FFFE + `:`, so a `(?:…)` inside a constraint or unnamed group is never read as a param (the name replace skips it with a look-behind).
 - `routeToRegExp` classifies segments with `segmentKey(encodeEscapes(s))`, reads modifiers from the encoded text too (`\:x?` has none), emits static keys regex-escaped and dynamic segments through `getParamRegexp` (with `_N` unnamed keys), so escapes can't drift between the two.
+
+## Percent-encoding
+
+Literal pattern text is percent-encoded like URLPattern canonicalizes a pathname pattern, so a route matches the encoded pathname `new URL()` gives; lookup input is never decoded or encoded (hot path untouched). `encodeLiteral()` (`operations/_utils.ts`) is the one encoder, verified against Node 24's `URLPattern` and `new URL()` (WPT `PERCENT_ENCODING_CASES`):
+
+- The URL path percent-encode set: C0 controls, space, `"#<>?^\`{}`, U+007F and up, as UTF-8 upper-case `%XX` (`encodeURIComponent` on each run). `%` is never touched, so `%XX` stays as written (`%c3%a9` is not `%C3%A9`, a lone `%` or `%zz` is literal). Other ASCII (`|[]'!$&=@;,~+`) is kept.
+- A lone surrogate becomes U+FFFD (`%EF%BF%BD`), as in URLPattern and `new URL()`; no `URIError` can leak. U+FFFD-U+FFFF are left alone: internal placeholders, rejected in a route by `checkConstraints`.
+- Deliberate difference: a tab / LF / CR is encoded (`%09`, …), URLPattern strips it (URL parsing).
+- Literal text only, after syntax is read: `segmentKey` encodes the static key after `\x` → `x` and `decodeEscapes`; `getParamRegexp` encodes depth-0 literals in its scan loop (a gate regex skips plain chars; a surrogate pair is read at once; an encoded `%XX` is emitted raw, it is no syntax; an escaped `{` / `}` placeholder, index 3 / 4 of `ESCAPABLE`, is encoded there). So `/:café` still throws `invalid param name`, `\é` / `\{` / `\?` are literals that get encoded, and a constraint is regex, never encoded (`:x(é)` matches a raw `é` only; URLPattern rejects non-ASCII there).
+- Everything derived reads the tree's keys and regexes, so `removeRoute` (via `segmentKey` / `expandedRouteId`), `routeToRegExp`, `routeNodeKeys`, overlap and the compiler (static map keys, codegen literals) agree: `/café` and `/caf%C3%A9` are one route. `encodeLiteral` bails with one `test` on plain text (a no-match `replace` cost more at insert).
+- `regExpToRoute` keeps `%XX` as written (decoding could change the route: `%2F`, `%25`) and throws on a literal char outside a constraint that `encodeLiteral` would change (`é`, space, `\{`, `\?`, `\^`): no route matches it.
 
 ## Group delimiters `{…}`
 

@@ -139,6 +139,8 @@ describe("routeToRegExp", () => {
 
   it("reads escapes like findRoute", () => {
     const chars = [".", "b", "\\", "*", "?", "+", ":", "(", ")", "{", "}", "-", "$", "^", "|", "["];
+    // Chars a route percent-encodes (and `%`, which it keeps)
+    chars.push("é", " ", "#", "%", "😀");
     const patterns = chars.flatMap((c) => [
       `/a\\${c}b`,
       `/a\\${c}:x`,
@@ -160,6 +162,12 @@ describe("routeToRegExp", () => {
       `/a/\\${c}1`,
       `/a/${c}x`,
     ]);
+    // Literal text is percent-encoded (like URLPattern): add encoded paths
+    paths.push(
+      ...paths
+        .filter((p) => /[ #?^{}\x7F-\u{10FFFF}]/u.test(p))
+        .map((p) => p.replace(/[ #?^{}\x7F-\u{10FFFF}]/gu, (c) => encodeURIComponent(c))),
+    );
     const mismatches: string[] = [];
     for (const pattern of patterns) {
       const router = createRouter();
@@ -750,11 +758,12 @@ describe("reserved pattern syntax", () => {
     }
   });
 
-  it("keeps escaped braces literal", () => {
+  it("keeps escaped braces literal (percent-encoded like URLPattern)", () => {
     const router = createRouter();
     addRoute(router, "GET", "/a/\\{b\\}/:x", {});
-    expect(findRoute(router, "GET", "/a/{b}/1")?.params).toEqual({ x: "1" });
-    expect(routeToRegExp("/a/\\{b\\}/:x").test("/a/{b}/1")).toBe(true);
+    expect(findRoute(router, "GET", "/a/%7Bb%7D/1")?.params).toEqual({ x: "1" });
+    expect(routeToRegExp("/a/\\{b\\}/:x").test("/a/%7Bb%7D/1")).toBe(true);
+    expect(routeToRegExp("/a/\\{b\\}/:x").test("/a/{b}/1")).toBe(false);
   });
 });
 

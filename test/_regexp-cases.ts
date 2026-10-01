@@ -171,10 +171,11 @@ export const regexpCases: Record<string, RegExpCase> = {
     match: [["/foobar"]],
     noMatch: ["/foo\\bar"],
   },
+  // A literal `?` is percent-encoded, as in URLPattern.
   "/a\\\\b/c\\*d/\\?": {
-    regex: /^\/a\\b\/c\*d\/\?\/?$/,
-    match: [["/a\\b/c*d/?"]],
-    noMatch: ["/a\\\\b/c*d/?", "/ab/c*d/?", "/a\\b/c\\*d/\\?"],
+    regex: /^\/a\\b\/c\*d\/%3F\/?$/,
+    match: [["/a\\b/c*d/%3F"]],
+    noMatch: ["/a\\b/c*d/?", "/a\\\\b/c*d/%3F", "/ab/c*d/%3F", "/a\\b/c\\*d/\\%3F"],
   },
   // ... also in a dynamic segment, where escaped `:` / `(` / `\` stayed
   // placeholders (`x\\:y` read `\:` instead of a `\` and a `:y`).
@@ -1176,6 +1177,23 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/a/b//", { r: "b/", y: undefined }],
     ],
     noMatch: ["/a", "/a/", "/a//", "/ab"],
+  },
+  // Literal text is percent-encoded like URLPattern (`%` kept); a constraint
+  // is regex, kept as written.
+  "/café/:id-é": {
+    regex: /^\/caf%C3%A9\/(?<id>[^/]+?)-%C3%A9\/?$/,
+    match: [["/caf%C3%A9/1-%C3%A9", { id: "1" }]],
+    noMatch: ["/café/1-é", "/caf%c3%a9/1-%C3%A9", "/caf%C3%A9/1-é"],
+  },
+  "/a\\{b\\} \\?^/:x(é)": {
+    regex: /^\/a%7Bb%7D%20%3F%5E\/(?<x>é)\/?$/,
+    match: [["/a%7Bb%7D%20%3F%5E/é", { x: "é" }]],
+    noMatch: ["/a{b} ?^/é", "/a%7Bb%7D%20%3F%5E/%C3%A9"],
+  },
+  "/100%/caf{é}?": {
+    regex: /^\/100%\/caf(?:%C3%A9)?\/?$/,
+    match: [["/100%/caf"], ["/100%/caf%C3%A9"]],
+    noMatch: ["/100%25/caf", "/100%/café"],
   },
 };
 

@@ -7,29 +7,15 @@
 // throw.
 
 import { fromGroupName } from "./_group-names.ts";
+import { encodeLiteral } from "./operations/_utils.ts";
 
 // Chars a literal is backslash-escaped as so `routeToRegExp` re-emits them
-// verbatim: rou3 route syntax (`: ( ) { } * \`), `?` / `+` (modifiers after a
-// param, rejected raw in a dynamic segment) and `| ^ $ [ ]` (literals there
-// too, but kept escaped so reversed routes keep their spelling; a raw `$` right
-// after a `:name` throws). `.` is
-// omitted on purpose: a literal dot stays raw.
-const ROUTE_SPECIAL = new Set([
-  ":",
-  "(",
-  ")",
-  "{",
-  "}",
-  "*",
-  "\\",
-  "?",
-  "+",
-  "|",
-  "^",
-  "$",
-  "[",
-  "]",
-]);
+// verbatim: rou3 route syntax (`: ( ) * \`), `+` (a modifier after a param)
+// and `| $ [ ]` (literals there too, but kept escaped so reversed routes keep
+// their spelling; a raw `$` right after a `:name` throws). `.` is omitted on
+// purpose: a literal dot stays raw. `{ } ? ^` are percent-encoded in a route,
+// so no route has them as literals (see `literal` in `reverseSegment`).
+const ROUTE_SPECIAL = new Set([":", "(", ")", "*", "\\", "+", "|", "$", "[", "]"]);
 
 /**
  * Convert an anchored {@link RegExp} (or its source string) produced by
@@ -310,14 +296,20 @@ function reverseSegment(seg: string): string {
 
   let out = "";
   let i = 0;
-  // After a bare `:name`, a word char would extend the name and a non-ASCII
-  // one is rejected there: escape them. A `(pat)` would read as its
+  // After a bare `:name`, a word char would extend the name: escape it. A
+  // char route text percent-encodes (`encodeLiteral`: non-ASCII, space,
+  // `{ } ? ^ #`, ...) is no literal of any route: throw. A `(pat)` would read as its
   // constraint, after any group a `*` as a modifier and after a `*` a `*` as
   // a `**`: no route emits these.
   let afterName = false;
   let afterStar = false;
   const literal = (ch: string) => {
-    out += afterName && (/\w/.test(ch) || ch > "\x7f") ? `\\${ch}` : escapeLiteral(ch);
+    if (encodeLiteral(ch) !== ch) {
+      throw new Error(
+        `rou3: no route has a literal ${JSON.stringify(ch)} (route text is percent-encoded) in "${seg}"`,
+      );
+    }
+    out += afterName && /\w/.test(ch) ? `\\${ch}` : escapeLiteral(ch);
     afterName = afterStar = false;
   };
   const param = (token: string, name?: string) => {

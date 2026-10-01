@@ -38,6 +38,12 @@ describe("routeNodeKeys", () => {
       ["/**/*.png", ["/**/*"]],
       ["/a/**/\\*", ["/a/**/\\*"]],
 
+      // Literal text is percent-encoded, as the tree keys it.
+      ["/café/:id", ["/caf%C3%A9/*"]],
+      ["/caf%C3%A9/:id", ["/caf%C3%A9/*"]],
+      ["/a\\{b\\}/\\?", ["/a%7Bb%7D/%3F"]],
+      ["/**/é", ["/**/%C3%A9"]],
+
       // Escaped literals are static keys, never markers.
       ["/a/\\*", ["/a/\\*"]],
       ["/a/*", ["/a/*"]],
@@ -46,7 +52,8 @@ describe("routeNodeKeys", () => {
       // Route-syntax punctuation stays escaped in the key.
       ["/a/b\\:c", ["/a/b\\:c"]],
       ["/a/b\\(c\\)", ["/a/b\\(c\\)"]],
-      ["/a/b\\{c\\}", ["/a/b\\{c\\}"]],
+      // ... while `{` / `}` are percent-encoded, as in URLPattern.
+      ["/a/b\\{c\\}", ["/a/b%7Bc%7D"]],
 
       // Trailing empty segments are all popped at registration (#193)...
       ["/a/", ["/a"]],
