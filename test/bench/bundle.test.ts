@@ -158,8 +158,24 @@ describe("benchmark", () => {
     // `*` group right after a param, constraint, group or `*` throws
     // (`/*{*}` was `/**`). `skipGroup` counts a left-out group joined the
     // same way, so unnamed keys after it line up (`/:a{(\d+)}?/*`).
-    expect(bytes).toBeLessThanOrEqual(11530); // <11.53kb
-    expect(gzipSize).toBeLessThanOrEqual(4875); // <4.88kb
+    // +136B raw / +60B gzip: a dynamic segment's registration identity is its
+    // literal text percent-encoded like its regex (`dynamicKey`), so
+    // `removeRoute` takes `/caf%C3%A9-:id` for `/café-:id`.
+    // +54B raw / +20B gzip: an in-place optional after a lone `:name` / `*`
+    // (`:a:b?`) is flagged `plain`, so the from-end ranking reads it as a
+    // plain param (`/**\/:a:b?` beat the narrower `/b/:id`).
+    // +155B raw / +70B gzip: a group holding only an optional param inside its
+    // segment (`*-{:x}?`) is rewritten to `*-:x?`, as URLPattern reads it
+    // (not after a `**`, which is no text).
+    // +16B raw / +10B gzip: `getParamRegexp` returns the in-place optional
+    // param's name and `paramsMap` keeps it, for the compiler (it read the source).
+    // -98B raw / -33B gzip: `dynamicKey` left `addRoute` (`removeRoute` and
+    // the overlap dedupe compare identities through `routeId`), less the wider
+    // `plain` check (any capture-only segment with one required name).
+    // -29B raw / -19B gzip: `expandGroupDelimiters` returns a `{:x}?` rewrite alone
+    // (the caller expands the next group).
+    expect(bytes).toBeLessThanOrEqual(11775); // <11.78kb
+    expect(gzipSize).toBeLessThanOrEqual(4985); // <4.99kb
   });
 });
 

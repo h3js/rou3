@@ -112,6 +112,12 @@ describe("regExpToRoute", () => {
     // `{/:w+}?` is `:w*` (both need a value), which reverses in one spelling.
     expect(routeToRegExp("/a/c{/:w+}?").source).toBe(routeToRegExp("/a/c/:w*").source);
     expect(regExpToRoute(routeToRegExp("/a/c{/:w+}?"))).toBe("/a/c/:w*");
+    // ... also mid-route, where a `:w*` is lazy (`{/**:w}?` too).
+    for (const route of ["/a{/:w+}?/b", "/a{/**:w}?/b", "/a{/:w+}?/:y", "/{/:w+}?/b"]) {
+      const star = route.replace(/\{\/(?:\*\*:w|:w\+)\}\?/, "/:w*");
+      expect(routeToRegExp(route).source, route).toBe(routeToRegExp(star).source);
+      expect(regExpToRoute(routeToRegExp(route)), route).toBe(star);
+    }
     // `{/**}?` is `**` (both unset over zero segments), which reverses in one
     // spelling.
     expect(routeToRegExp("/a{/**}?").source).toBe(routeToRegExp("/a/**").source);
@@ -360,6 +366,20 @@ describe("regExpToRoute", () => {
     }
     // Inside a constraint it is regex, kept as written
     expect(regExpToRoute(/^\/a\/(?<x>é)\/?$/)).toBe("/a/:x(é)");
+    // The error quotes the whole char and its encoded form
+    expect(() => regExpToRoute(/^\/a😀\/?$/)).toThrow(
+      'rou3: no route has a literal "😀" (route text is percent-encoded, write it as %F0%9F%98%80) in "a😀"',
+    );
+    // An escaped one too (a string: a lint autofix would drop the escape)
+    expect(() => regExpToRoute(new RegExp("^\\/a\\é\\/?$"))).toThrow('literal "é" (');
+    expect(() => regExpToRoute(/^\/caf\/?$/)).not.toThrow();
+    // U+FFFD-U+FFFF are internal placeholders: no route has them either
+    for (const code of [0xfffd, 0xfffe, 0xffff]) {
+      const ch = String.fromCharCode(code);
+      expect(() => regExpToRoute(`^\\/a${ch}\\/?$`), ch).toThrow(
+        `write it as ${encodeURIComponent(ch)})`,
+      );
+    }
   });
 
   it("re-escapes literal route-syntax characters", () => {

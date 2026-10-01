@@ -5,10 +5,16 @@ export interface RouterContext<T = unknown> {
 
 /**
  * One entry per param: its route index (`-(i + 1)` for a `**` at `i`), its
- * name (`"0"`, `"1"`, … for a `*`) or segment regex, and whether it may match
- * no segment (a trailing `*`, a bare `**`).
+ * name (`"0"`, `"1"`, … for a `*`) or segment regex, whether it may match
+ * no segment (a trailing `*`, a bare `**`), and, for a segment regex, whether
+ * it restricts the segment no more than a plain `:name` / `*` (`plain`:
+ * captures alone with at most one required `:name`, `*:a`, `:a:b?`), so
+ * that the from-end ranking reads it as one (`kindAt`), and the name of its in-place optional
+ * param (`*-:x?`: `x`, unset when absent), as `getParamRegexp` built it.
  */
-export type ParamsIndexMap = Array<[Index: number, name: string | RegExp, optional: boolean]>;
+export type ParamsIndexMap = Array<
+  [Index: number, name: string | RegExp, optional: boolean, plain?: boolean, inPlace?: string]
+>;
 export type MethodData<T = unknown> = {
   data: T;
   paramsMap?: ParamsIndexMap;

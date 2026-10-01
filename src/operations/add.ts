@@ -81,7 +81,8 @@ function _add<T>(
 ): number {
   const groupExpanded = expandGroupDelimiters(path, input);
   if (groupExpanded) {
-    route ??= expandedRouteId(path);
+    // A single expansion (`/a/*-{:x}?` is `/a/*-:x?`) is that route
+    if (groupExpanded[1] !== undefined) route ??= expandedRouteId(path);
     _add(ctx, method, groupExpanded[0], data, route, input, unnamed);
     if (groupExpanded[1] !== undefined) {
       // A pattern without a `*` or `(` has no unnamed capture to renumber
@@ -179,15 +180,28 @@ function _add<T>(
         // A trailing `*` may match no segment, but not after a `**`
         paramsMap.push([i, String(unnamed(_unnamedParamIndex++)), !suffix /* optional */]);
       } else if (!/^:[A-Za-z_]\w*$/.test(segment)) {
-        const [regexp, nextIndex] = getParamRegexp(segment, _unnamedParamIndex, names, input, (n) =>
-          toUnnamedGroupKey(unnamed(n)),
+        const [regexp, nextIndex, inPlace] = getParamRegexp(
+          segment,
+          _unnamedParamIndex,
+          names,
+          input,
+          (n) => toUnnamedGroupKey(unnamed(n)),
         );
         _unnamedParamIndex = nextIndex;
         paramsRegexp[i] = regexp;
         if (!suffix) {
           node.hasRegexParam = true;
         }
-        paramsMap.push([i, regexp, false]);
+        // Captures alone with at most one required `:name` (`*:a`, `:a:b?`,
+        // `*:x?`) restrict the segment no more than a `:name` / `*`: they
+        // rank from the end like one (`kindAt`)
+        paramsMap.push([
+          i,
+          regexp,
+          false,
+          /^(?!(?:[\s\S]*:\w+(?![\w?])){2})(?:\*|:[A-Za-z_]\w*)+\??$/.test(segment),
+          inPlace,
+        ]);
       } else {
         paramsMap.push([i, addName(names, segment.slice(1), input), false]);
       }
@@ -311,7 +325,8 @@ function addName(names: string[], name: string, input: string): string {
  * stays greedy (URLPattern's `*` is a greedy `(.*)`). A `?` ending the
  * segment after a `:name` / `:name(…)` makes it optional in place
  * (`(?:(?<x>…))?`, unset when absent; `expandModifiers` leaves it here after
- * a capture), so the captures split the segment like URLPattern's regex.
+ * a capture), so the captures split the segment like URLPattern's regex. Its
+ * name is the third element of the result.
  */
 export function getParamRegexp(
   segment: string,
@@ -319,8 +334,10 @@ export function getParamRegexp(
   names: string[],
   input: string,
   groupKey: (index: number) => string = toUnnamedGroupKey,
-): [RegExp, number] {
+): [RegExp, number, string?] {
   let _i = unnamedStart;
+  // The in-place optional param's name
+  let _o: string | undefined;
   // Replace \x escapes outside (...) with a \uFFFE placeholder
   let _s = "",
     _d = 0,
@@ -390,11 +407,11 @@ export function getParamRegexp(
       // emitted as `[^/]+?` (alone it stays as written).
       .replace(/(?<!\uFFFE):([A-Za-z_]\w*)(?:\(([^)]*)\))?(\?$)?/g, (m, id, p, o, i, s) => {
         const group = `(?<${toGroupName(id)}>${p && p + s[i + m.length] != "[^\\x2f]+?(" ? p : "[^/]+?"})`;
-        return o ? `(?:${group})?` : group;
+        return o ? ((_o = id), `(?:${group})?`) : group;
       })
       .replace(/\((?![?<])/g, () => `(?<${groupKey(_i++)}>`),
     "\uFFFE",
   ).replace(/\uFFFE([\s\S])/g, (_, c) => (/[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c));
 
-  return [new RegExp(`^${regex}$`), _i];
+  return [new RegExp(`^${regex}$`), _i, _o];
 }

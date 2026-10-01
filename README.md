@@ -111,7 +111,7 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
   - `:name?` optional (also works with a regex: `:id(\\d+)?`)
   - `:name+` one or more segments
   - `:name*` zero or more segments: like `:name+`, or no segment at all (`/files/:path*` matches `/files`)
-- **`?` inside a segment** makes only the param optional: `/pre-:x?` matches `/pre-` and `/pre-a`, but not `/`. Use a group for an optional segment: `/{pre-:x}?`. After a `*` or a regex constraint, the capture takes what it can first, as in URLPattern: `/*-:x?` on `/--` gives `{ "0": "-" }`, and `/:a(\\d+):b?` on `/12` gives `{ a: "12" }`. An absent param has no key.
+- **`?` inside a segment** makes only the param optional: `/pre-:x?` matches `/pre-` and `/pre-a`, but not `/`. Use a group for an optional segment: `/{pre-:x}?`. After a `*` or a regex constraint, the capture takes what it can first, as in URLPattern: `/*-:x?` on `/--` gives `{ "0": "-" }`, and `/:a(\\d+):b?` on `/12` gives `{ a: "12" }`. An absent param has no key. A group holding only the param is the same (`/*-{:x}?` is `/*-:x?`).
 
 <details>
 <summary>Param naming rules</summary>
@@ -168,8 +168,9 @@ findRoute(router, "GET", "/café/1"); // undefined
 - Not encoded: `%`, so an existing `%xx` stays as written (`/caf%c3%a9` matches only `/caf%c3%a9`, not `/caf%C3%A9`), and other ASCII characters (`/a|b[c]` stays as is).
 - Regex constraints are regex and are not encoded: write `:x(%C3%A9)`, not `:x(é)`.
 - A lone surrogate is encoded as U+FFFD (`%EF%BF%BD`), as in URLPattern.
+- `^` follows the URL spec, as Node.js and Bun do. Deno (2.9) leaves it unencoded in `new URL().pathname` (`/a^b`), so on Deno encode it before a lookup (`pathname.replaceAll("^", "%5E")`) for routes with a literal `^`.
 
-`removeRoute`, `routeToRegExp`, `routeNodeKeys`, the overlap helpers, and the compiler see the encoded text too: `/café` and `/caf%C3%A9` are the same route.
+`removeRoute`, `routeToRegExp`, `routeNodeKeys`, the overlap helpers, and the compiler see the encoded text too: `/café` and `/caf%C3%A9` are the same route, and so are `/café-:id` and `/caf%C3%A9-:id` (a regex constraint is not encoded, so `:x(é)` and `:x(%C3%A9)` stay different routes).
 
 ### Invalid patterns
 
@@ -189,13 +190,13 @@ rou3 matches paths segment by segment in a tree, which leads to a few intentiona
 | Path normalization (`.`/`..`) | Resolved in input paths            | Opt-in with `{ normalize: true }`               |
 | Case sensitivity              | Can be case-insensitive            | Always case-sensitive                           |
 | Non-`/`-prefixed paths        | Supported                          | Paths must start with `/`                       |
-| Optional group after a greedy capture in its segment (`/*{.webp}?`, `/*-{:x}?`) | The capture takes what it can (`/a.webp`: `{ 0: "a.webp" }`) | The route with the group wins (`/a.webp`: `{ 0: "a" }`); write `/*-:x?` for URLPattern's split of an optional param |
+| Optional group with text after a greedy capture in its segment (`/*{.webp}?`) | The capture takes what it can (`/a.webp`: `{ 0: "a.webp" }`) | The route with the group wins (`/a.webp`: `{ 0: "a" }`); a group holding only a param is that param, as in URLPattern (`/*-{:x}?` is `/*-:x?`, and `/a/*{:x}?`, which is `/a/*:x?`: its segment is required, no match on `/a`, and `/a/b` gives `{ 0: "b" }`, not `{ 0: "", x: "b" }`), except before more of its segment, where it stays a group (`/*-{:x}?(y)` on `/a--y`: `{ 0: "a", x: "-", 1: "y" }`, URLPattern `{ 0: "a-", 1: "y" }`) |
 | Optional group before more of its segment (`/:foo{x}?(.*)`) | The param takes as little as it can (`/abx`: `{ foo: "a", 0: "bx" }`) | The route with the group wins (`/abx`: `{ foo: "ab", 0: "" }`) |
 | Optional group that can match empty text (`/{:foo}{(\\d*)}?`) | Unset where it matches nothing (`/a`: `{ foo: "a" }`) | The router gives `""` (`/a`: `{ foo: "a", 0: "" }`); `routeToRegExp` leaves it unset |
 | Several optional groups in a segment (`/{:foo}?{(\\d+)}?`) | One regex (`/1`: `{ foo: "1" }`) | They expand to separate routes, and a regex param outranks a plain `:foo` whatever the order (`/1` matches `/(\\d+)` and `/:foo`: `{ 0: "1" }`); `routeToRegExp` gives URLPattern's `{ foo: "1" }` |
 | Optional segment after `:name+` / `:name*` (`/:a+/:b?`) | The repeated param takes what it can (`/x/y`: `{ a: "x/y" }`) | Segments after a catch-all match from the end (`/x/y`: `{ a: "x", b: "y" }`) |
 | Param names                   | Unicode identifiers                | `[A-Za-z_]\w*`; a non-ASCII char or `$` right after one throws |
-| Empty segments in `:name+` | Every repeated segment needs a value (`/foo/:bar+` doesn't match `/foo//a`) | The value as a whole needs one, empty segments inside it are kept (`/foo/:bar+` on `/foo//a` is `{ bar: "/a" }`; a `:name*` too) |
+| Empty segments in `:name+` | Every repeated segment needs a value (`/foo/:bar+` doesn't match `/foo//a`) | The value as a whole needs one, empty segments inside it are kept (`/foo/:bar+` on `/foo//a` is `{ bar: "/a" }`; a `:name*` too, `/foo/:bar*` on `/foo/a//` is `{ bar: "a/" }`) |
 | Percent-encoding              | Encodes the pattern's literal text and the input | Encodes the pattern's literal text; the input must already be encoded (`new URL().pathname`) and is never decoded |
 
 ## Matching
@@ -287,6 +288,7 @@ In short: static segments beat params, and params beat wildcards. Among routes t
 
 - **Across the tree:** at each level, wildcard (`**`) matches come first, then single-segment params (`*`, `:name`), then static segments. Broader and shallower routes come before more static and deeper ones.
 - **Routes on the same tree node** (for example `/foo/*` and `/foo/:id(\d+)`, see [Route node keys](#route-node-keys)): optional and unconstrained routes come before required and regex-constrained ones. Ties keep registration order. Method-agnostic routes are sorted together with the method's own routes, and on a tie the method-agnostic one comes first (so `findRoute` picks the method's own).
+  - An optional param compiled in place in its segment (`/e/:a:b?`, `/a/*-:x?`) is one regex-constrained route: on its node it beats a plain `:id` sibling on every path, also on deeper routes (`/e/:a:b?/x` over `/e/:id/x`, though both match the same paths), and ties `/e/:id(\d+)` (registration order decides).
 - **Consistent with containment:** when no pattern uses optional syntax or a bare `*` segment and each pattern contains the next (a `"superset"` per [`compareRoutes`](#pattern-overlap)), the result order is broadest first.
 - **Exception — bare `*` segment:** a `*` segment may match an empty segment, or no segment at the end of the path, and the order does not account for that. `/p/*/**` contains `/p/**:rest` but comes after it. A `*` that isn't the last segment, or that follows a `**`, ties with a `:name` in its place (`/p/*/x` and `/p/:id/x`, `/**/*` and `/**/:name`), so registration order decides. `findRoute` can pick the broader route in these cases too.
 - **Carve-out — optional syntax:** a pattern with `:name?`, `:name*` or `{...}?` registers one entry per variant, and results are ordered by the variant that matched, not by the whole pattern. A broader pattern can therefore come **last**:
@@ -302,7 +304,7 @@ In short: static segments beat params, and params beat wildcards. Among routes t
 
   Both routes match `/admin` with an identical entry, so registration order decides: adding `/admin/:page?` first swaps them. If you need a strict pattern-level order with optional syntax, sort the result with [`compareRoutes`](#pattern-overlap).
 
-- **Segments after a wildcard:** a route like `/**/_payload.json` is anchored at the end of the path. On every path such a route matches, all matches are ranked **from the last segment backwards**: a literal segment beats a regex-constrained param, which beats a plain param or a segment covered by `**`. Ties fall back to the rules above. Paths that no such route matches are not affected:
+- **Segments after a wildcard:** a route like `/**/_payload.json` is anchored at the end of the path. On every path such a route matches, all matches are ranked **from the last segment backwards**: a literal segment beats a regex-constrained param, which beats a plain param or a segment covered by `**`. A segment of captures alone with at most one required `:name` (`*:a`, `:a:b?`, `*:x?`) restricts nothing more, so it ranks as a plain param here: `/b/:id` beats `/**/:a:b?` and `/**/*:a` on `/b/x`. Ties fall back to the rules above. Paths that no such route matches are not affected:
 
   ```js
   const router = createRouter();

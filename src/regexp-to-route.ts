@@ -324,14 +324,19 @@ function reverseSegment(seg: string, part?: boolean): string {
   let afterStar = false;
   // The body of the last group (`[^/]+?`, `[^/]+` or `[^/]*` for a bare name)
   let lastBody = "";
-  const literal = (ch: string) => {
-    if (encodeLiteral(ch) !== ch) {
+  // The char (code point) at `at`, as a literal; returns its length.
+  // U+FFFD-U+FFFF are internal placeholders, which no route has either.
+  const literal = (at: number): number => {
+    const ch = String.fromCodePoint(seg.codePointAt(at)!);
+    const encoded = ch.charCodeAt(0) < 0xfffd ? encodeLiteral(ch) : encodeURIComponent(ch);
+    if (encoded !== ch) {
       throw new Error(
-        `rou3: no route has a literal ${JSON.stringify(ch)} (route text is percent-encoded) in "${seg}"`,
+        `rou3: no route has a literal ${JSON.stringify(ch)} (route text is percent-encoded, write it as ${encoded}) in "${seg}"`,
       );
     }
     out += afterName && /\w/.test(ch) ? `\\${ch}` : escapeLiteral(ch);
     afterName = afterStar = false;
+    return ch.length;
   };
   const param = (token: string, name?: string) => {
     if (afterName && token[0] === "(") {
@@ -378,8 +383,7 @@ function reverseSegment(seg: string, part?: boolean): string {
       if (/[a-z0-9]/i.test(next)) {
         throw new Error(`rou3: unsupported escape "\\${next}" in "${seg}"`);
       }
-      literal(next);
-      i += 2;
+      i += 1 + literal(i + 1);
       continue;
     }
     // A bare (unescaped) regex operator at segment level is out of dialect: it
@@ -389,8 +393,7 @@ function reverseSegment(seg: string, part?: boolean): string {
     if (BARE_META.has(c)) {
       throw new Error(`rou3: unsupported metacharacter "${c}" in "${seg}"`);
     }
-    literal(c);
-    i += 1;
+    i += literal(i);
   }
   return out;
 }

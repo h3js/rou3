@@ -662,6 +662,24 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/jpg-x.gz", { a: "jpg" }],
     ],
   },
+  // ... also where the segment and its extension end the same way (`-x`): the
+  // captures can't take the `-` after them (`appendsCleanly`'s last clause).
+  "/:id(\\d+)-x{-x}?": {
+    regex: /^\/(?<id>\d+)-x(?:-x)?\/?$/,
+    match: [
+      ["/1-x", { id: "1" }],
+      ["/1-x-x", { id: "1" }],
+    ],
+    noMatch: ["/1-x-x-x", "/a-x", "/1-"],
+  },
+  "/:a(png|jpg)-x{-x}?": {
+    regex: /^\/(?<a>png|jpg)-x(?:-x)?\/?$/,
+    match: [
+      ["/png-x", { a: "png" }],
+      ["/jpg-x-x", { a: "jpg" }],
+    ],
+    noMatch: ["/png-x-x-x", "/gif-x"],
+  },
   "/*-x{.png}?": {
     regex: /^\/(?<_0>[^/]*)-x(?:\.png)?\/?$/,
     match: [
@@ -1233,6 +1251,19 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/a", "/a/", "/a//", "/ab"],
   },
+  // A `:x*` after a `:y?` leaves its group (its value can start with an empty
+  // segment), but stays in the enclosing `*` one: `x` never takes the `*`'s
+  // segment.
+  "/a/*/:y?/:x*": {
+    regex: /^\/a(?:\/(?<_0>[^/]*)(?:\/(?<y>[^/]+))?(?:\/(?<x>[\s\S]+))?)?(?:(?<=\/)\/|(?<!\/)\/?)$/,
+    match: [
+      ["/a", { "0": undefined, y: undefined, x: undefined }],
+      ["/a/b", { "0": "b", y: undefined, x: undefined }],
+      ["/a/b/c", { "0": "b", y: "c", x: undefined }],
+      ["/a/b/c/d", { "0": "b", y: "c", x: "d" }],
+    ],
+    noMatch: ["/a/b//", "/a///", "/ab"],
+  },
   // Literal text is percent-encoded like URLPattern (`%` kept); a constraint
   // is regex, kept as written.
   "/café/:id-é": {
@@ -1268,6 +1299,7 @@ export const LOOKBEHIND_ROUTES: ReadonlySet<string> = new Set([
   "/files/:name([^.]+)",
   "/path/:x(\\S+)?",
   "/a/**:r/:y?",
+  "/a/*/:y?/:x*",
 ]);
 
 // Fixtures whose regex holds a capture with a look-ahead (a greedy `*` or a
@@ -1350,6 +1382,10 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
   "/a/{/**}?/{b}?",
   "/{/**}?/{(\\d+)}?",
   "/a/{/**}?/{(\\d+)}?",
+  // A `:x*` after a `:y?` nested in a `*` (both can be empty).
+  "/a/*/:y?/:x*",
+  "/*/:y?/:x*",
+  "/*/*{/:g?/:q*}?",
 ]);
 
 // Sweep patterns whose regex holds a capture with a look-ahead (see
@@ -1435,6 +1471,9 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   "/a/{/**}?/:y?",
   "/{/**}?/{(\\d+)}?",
   "/a/{/**}?/{(\\d+)}?",
+  // A group of optionals whose expansions don't line up with the route
+  // without it.
+  "/*/*{/:g?/:q*}?",
 ]);
 
 /** Whether a regex source uses a look-ahead (RE2-family engines have none). */
@@ -1544,6 +1583,9 @@ function allSweepPatterns(): string[] {
     "/{en}?/:page?",
     // An optional group spanning segments ends in an empty-capable one.
     "/a{/b/:x}?",
+    // A mid-route `{/:x+}?` is a `:x*` (same regex).
+    "/a{/:x+}?/b",
+    "/a{/**:x}?/:y",
     // Required segments that can be empty, then optionals, nested ones too.
     "/a/:x/:y/:z?",
     "/a/:x/:y?/:z?",
@@ -1551,6 +1593,11 @@ function allSweepPatterns(): string[] {
     "/a/*/:y?/:z?",
     "/a/:x?/:y?/:z?",
     "/:x/:y?/**",
+    // A `:x*` after a `:y?` nested in a `*`: it leaves the `:y?` group (its
+    // value can start with an empty segment) but not the `*` one.
+    "/a/*/:y?/:x*",
+    "/*/:y?/:x*",
+    "/*/*{/:g?/:q*}?",
     "/a{/b/:x/:y?}?",
     "/a{/:x/:y?}?",
     "/a/:x{/b/:y}?",
