@@ -1,7 +1,7 @@
 import { tokenize } from "./_regexp-scan.ts";
 
 // Whether a segment regex `prefix` followed by an optional part `rest`
-// (`prefix(?:rest)?`, the inline form of `{…}?` / `pre-:x?`) captures like
+// (`prefix(?:rest)?`, the inline form of `{…}?`) captures like
 // the router, which registers `prefix` and `prefix` + `rest` and takes the
 // one with `rest` wherever it matches. The regex tries the ways `prefix` can
 // match in order, each with `rest` and then without, so it agrees unless an

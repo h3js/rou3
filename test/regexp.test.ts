@@ -110,20 +110,21 @@ describe("routeToRegExp", () => {
   // `sweepPatterns()` has no escapes and `sweepPaths()` no escaped chars: a
   // `\x` is a literal `x` in both, wherever it sits in the pattern (#227).
   // An escaped `\{` / `\}` or a `{}` quantifier in a constraint is no group:
-  // `*-:e?` still compiles as `*-{:e}?`.
+  // `*-:e?` still compiles in place, one regex (no alternation) like the tree.
   it("reads an escaped brace as no group before an in-segment optional", () => {
     const paths = ["/{x/a-b", "/{x/a-", "/{x/a", "/a}/a-b", "/a}/a-", "/{x}/a-b-c", "/x/a-b"];
-    paths.push("/12", "/123", "/12/a-b", "/12/a-", "/1/a-b");
-    // All but `/(\d{2}):e?` fall back to an alternation repeating a group name
-    const alternation = ["/\\{x/*-:e?", "/a\\}/*-:e?", "/\\{x\\}/*-:e?", "/:x(\\d{2})/*-:e?"];
-    for (const route of alternation.concat("/(\\d{2}):e?")) {
-      if (!DUPLICATE_NAMED_GROUPS && alternation.includes(route)) {
-        expect(() => routeToRegExp(route), route).toThrowError(NEEDS_DUPLICATE_NAMES);
-        continue;
-      }
+    paths.push("/12", "/123", "/12/a-b", "/12/a-", "/1/a-b", "/12/--");
+    for (const route of [
+      "/\\{x/*-:e?",
+      "/a\\}/*-:e?",
+      "/\\{x\\}/*-:e?",
+      "/:x(\\d{2})/*-:e?",
+      "/(\\d{2}):e?",
+    ]) {
       const router = createRouter();
       addRoute(router, "", route, true);
       const regex = routeToRegExp(route);
+      expect(regex.source, route).not.toContain("|");
       for (const path of paths) {
         const found = findRoute(router, "", path);
         const match = path.match(regex);
@@ -1142,7 +1143,6 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/a/**{.png}?",
     "/a/:r*/:y?/*",
     "/a/:r*/:y?{/b}?",
-    "/**-:e?/:y?",
     "/a/**-:e?/:y?",
   ].map((pattern) => [pattern, OTHER_EXPANSION] as const),
   ...[

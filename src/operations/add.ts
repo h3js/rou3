@@ -12,6 +12,7 @@ import {
   expandModifiers,
   invalidSyntax,
   MISPLACED_MODIFIER,
+  PARAM_MODIFIER,
   segmentKey,
   splitRoute,
 } from "./_utils.ts";
@@ -24,7 +25,9 @@ import {
  * optional `b`), as in URLPattern. Also as there, a `:name` sharing its
  * segment takes as little as it can (`/:a-:b` on `/x-y-z` is `x` and `y-z`),
  * and a `?` on one after text makes only the param optional (`/pre-:x?`
- * matches `/pre-` and `/pre-a`; `/{pre-:x}?` drops the segment).
+ * matches `/pre-` and `/pre-a`; `/{pre-:x}?` drops the segment). After a
+ * capture the segment is one regex, so a greedy capture takes what it can
+ * (`/*-:x?` on `/--` is `{ 0: "-" }`, `/:a(\\d+):b?` on `/12` `{ a: "12" }`).
  *
  * @throws a `rou3:` error for pattern syntax with no meaning (yet), quoting
  * the pattern: an unclosed `(`, unbalanced or nested `{}`, `{…}+` / `{…}*`,
@@ -254,7 +257,10 @@ function addName(names: string[], name: string, input: string): string {
  *
  * A `:name` here shares its segment, so it takes as little as possible
  * (`[^/]+?`, as in URLPattern: `:a-:b` on `x-y-z` is `x` and `y-z`); a `*`
- * stays greedy (URLPattern's `*` is a greedy `(.*)`).
+ * stays greedy (URLPattern's `*` is a greedy `(.*)`). A `?` ending the
+ * segment after a `:name` / `:name(…)` makes it optional in place
+ * (`(?:(?<x>…))?`, unset when absent; `expandModifiers` leaves it here after
+ * a capture), so the captures split the segment like URLPattern's regex.
  */
 export function getParamRegexp(
   segment: string,
@@ -280,9 +286,17 @@ export function getParamRegexp(
       } else if (c === 40 /* ( */ && /[?)]/.test(segment[j + 1])) {
         invalidSyntax("empty or `(?` group", input);
       } else if (c === 63 /* ? */ || c === 43 /* + */ || (c === 42 /* * */ && j === _e)) {
-        // `?` / `+` here would be raw quantifiers; a `*` right after a name or
-        // group is ambiguous with a modifier, after a `*` a mid-segment `**`
-        // (an escaped `\*` is consumed below and never sets `_e`)
+        // A `?` ending the segment after a `:name` / `:name(…)` makes it
+        // optional: kept raw for the name replace below (literal text is
+        // percent-encoded, it would be `%3F`)
+        if (c === 63 && j === segment.length - 1 && PARAM_MODIFIER.test(segment)) {
+          _s += "?";
+          continue;
+        }
+        // Otherwise `?` / `+` here would be raw quantifiers; a `*` right after
+        // a name or group is ambiguous with a modifier, after a `*` a
+        // mid-segment `**` (an escaped `\*` is consumed below and never sets
+        // `_e`)
         invalidSyntax(MISPLACED_MODIFIER, input);
       } else if (c === 42) {
         _e = j + 1;
@@ -321,10 +335,10 @@ export function getParamRegexp(
   const regex = decodeEscapes(
     _s
       // Names were checked and recorded above; a `\uFFFE:` is inside a group
-      .replace(
-        /(?<!\uFFFE):([A-Za-z_]\w*)(?:\(([^)]*)\))?/g,
-        (_, id, p) => `(?<${toGroupName(id)}>${p || "[^/]+?"})`,
-      )
+      .replace(/(?<!\uFFFE):([A-Za-z_]\w*)(?:\(([^)]*)\))?(\?$)?/g, (_, id, p, o) => {
+        const group = `(?<${toGroupName(id)}>${p || "[^/]+?"})`;
+        return o ? `(?:${group})?` : group;
+      })
       .replace(/\((?![?<])/g, () => `(?<${groupKey(_i++)}>`),
     "\uFFFE",
   ).replace(/\uFFFE([\s\S])/g, (_, c) => (/[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c));

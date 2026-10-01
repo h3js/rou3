@@ -111,7 +111,7 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
   - `:name?` optional (also works with a regex: `:id(\\d+)?`)
   - `:name+` one or more segments
   - `:name*` zero or more segments: like `:name+`, or no segment at all (`/files/:path*` matches `/files`)
-- **`?` inside a segment** makes only the param optional: `/pre-:x?` matches `/pre-` and `/pre-a`, but not `/`. Use a group for an optional segment: `/{pre-:x}?`. Where it matches, the route with the param wins (see the differences below).
+- **`?` inside a segment** makes only the param optional: `/pre-:x?` matches `/pre-` and `/pre-a`, but not `/`. Use a group for an optional segment: `/{pre-:x}?`. After a `*` or a regex constraint, the capture takes what it can first, as in URLPattern: `/*-:x?` on `/--` gives `{ "0": "-" }`, and `/:a(\\d+):b?` on `/12` gives `{ a: "12" }`. An absent param has no key.
 
 <details>
 <summary>Param naming rules</summary>
@@ -188,7 +188,8 @@ rou3 matches paths segment by segment in a tree, which leads to a few intentiona
 | Path normalization (`.`/`..`) | Resolved in input paths            | Opt-in with `{ normalize: true }`               |
 | Case sensitivity              | Can be case-insensitive            | Always case-sensitive                           |
 | Non-`/`-prefixed paths        | Supported                          | Paths must start with `/`                       |
-| Optional param after a greedy capture (`/*-:x?`, `/:a(\d+):b?`) | The greedy capture takes what it can (`/--`: `{ 0: "-" }`; `/12`: `{ a: "12" }`) | The route with the param wins (`/--`: `{ 0: "", x: "-" }`; `/12`: `{ a: "1", b: "2" }`) |
+| Optional group after a greedy capture in its segment (`/*{.webp}?`, `/*-{:x}?`) | The capture takes what it can (`/a.webp`: `{ 0: "a.webp" }`) | The route with the group wins (`/a.webp`: `{ 0: "a" }`); write `/*-:x?` for URLPattern's split of an optional param |
+| Optional segment after `:name+` / `:name*` (`/:a+/:b?`) | The repeated param takes what it can (`/x/y`: `{ a: "x/y" }`) | Segments after a catch-all match from the end (`/x/y`: `{ a: "x", b: "y" }`) |
 | Param names                   | Unicode identifiers                | `[A-Za-z_]\w*`; a non-ASCII char or `$` right after one throws |
 | Empty segments in `:name+` | Every repeated segment needs a value (`/foo/:bar+` doesn't match `/foo//a`) | The value as a whole needs one, empty segments inside it are kept (`/foo/:bar+` on `/foo//a` is `{ bar: "/a" }`; a `:name*` too) |
 | Percent-encoding              | Encodes the pattern's literal text and the input | Encodes the pattern's literal text; the input must already be encoded (`new URL().pathname`) and is never decoded |
@@ -437,7 +438,7 @@ These utilities understand the full pattern syntax (groups, modifiers, escapes) 
 - **Regex constraints** are checked exactly against literal segments (`/user/:id(\d+)` does not overlap `/user/abc`). Two dynamic segments where at least one has a regex are assumed to overlap: `routesOverlap("/user/:id(\d+)", "/user/:name([a-z]+)")` returns `true` although no path matches both. For the same reason, two different regexes compare as `"partial"`, even when they are equivalent.
 - An actually equal pair that is only provable in one direction reports that containment: `/u/:id(42)` vs `/u/42` is `"superset"`.
 - **Segment counts:** `**` matches zero or more segments (so `/a/**` overlaps `/a`), `**:name` one or more, a trailing `*` zero or one, and `*` or `:name` elsewhere exactly one. Segments after a `**` are aligned to the end of the path: `compareRoutes("/**/_payload.json", "/blog/:slug/_payload.json")` is `"superset"`.
-- **Optional syntax:** a pattern with `:x?`, `:x*` or `{...}?` expands into several variants, and two patterns overlap when any pair of variants does.
+- **Optional syntax:** a pattern with `:x?`, `:x*` or `{...}?` expands into several variants, and two patterns overlap when any pair of variants does. A `?` param after a capture in its segment (`/a/*-:x?`) is one regex instead, so it compares as `"partial"` with its variants (`/a/*-:x`).
 - In `findOverlappingRoutes`, different routes (another pattern or method) are always reported separately, even when they share the same `data`. Registering the same route twice with the same `data` reports it once. A route with segments after `**` comes right after the bare `**` it follows.
 
 </details>
@@ -555,9 +556,9 @@ routeToRegExp("/users{/:id}?/posts/:post");
 // /^\/users(?:\/(?<id>[^/]+))?\/posts\/(?<post>[^/]+)\/?$/
 ```
 
-A param in a segment with other text is lazy (`[^/]+?`), like in the router, so `/files/:name{.:ext}?` splits `archive.tar.gz` into `name: "archive"` and `ext: "tar.gz"`, and `/pre-:x?` compiles to `^\/pre-(?:(?<x>[^/]+?))?\/?$`. When the group follows a `*` or a regex constraint in its segment (`/files/*{.:ext}?/raw`), a look-ahead gives the capture the same value as the router. RE2-family engines reject that output.
+A param in a segment with other text is lazy (`[^/]+?`), like in the router, so `/files/:name{.:ext}?` splits `archive.tar.gz` into `name: "archive"` and `ext: "tar.gz"`, and `/pre-:x?` compiles to `^\/pre-(?:(?<x>[^/]+?))?\/?$` (an optional param in a segment is compiled in place, as in the router: `/*-:x?` is `^\/(?<_0>[^/]*)-(?:(?<x>[^/]+?))?\/?$`). When the group follows a `*` or a regex constraint in its segment (`/files/*{.:ext}?/raw`), a look-ahead gives the capture the same value as the router. RE2-family engines reject that output.
 
-**Duplicate named groups.** Other optional combinations compile to an alternation: several groups, an in-segment group followed by optional segments (`/:x{.:e}?/:y?`), an optional part after a capture that could take its text (`/media/*{.webp}?`, `/*-:x?`, `/*-x{-x}?`, `/:a([a-z-]+)-:b?`), `/a/:rest*/b/*` and `/a/**{.png}?`. The alternation repeats a named group. That works in JavaScript engines with duplicate named groups (Node.js 23+, Chrome 125+, Firefox 129+, Safari 17+) and Perl, and needs `PCRE2_DUPNAMES` in strict PCRE2 engines. On Node.js 22, `routeToRegExp` throws a `rou3:` `SyntaxError` for these routes, and `regExpToRoute` can't convert them back.
+**Duplicate named groups.** Other optional combinations compile to an alternation: several groups, an in-segment group followed by optional segments (`/:x{.:e}?/:y?`), an optional group after a capture that could take its text (`/media/*{.webp}?`, `/*-x{-x}?`), `/a/:rest*/b/*` and `/a/**{.png}?`. The alternation repeats a named group. That works in JavaScript engines with duplicate named groups (Node.js 23+, Chrome 125+, Firefox 129+, Safari 17+) and Perl, and needs `PCRE2_DUPNAMES` in strict PCRE2 engines. On Node.js 22, `routeToRegExp` throws a `rou3:` `SyntaxError` for these routes, and `regExpToRoute` can't convert them back.
 
 **Catch-all with optional segments.** With one optional segment right after a `**`, the regex picks the same route as the router (`/a/**/:n(\d+)?` gives `/a/b/1` to `n`). With several, it matches the same paths but may assign segments differently (`/docs/**/:page?/:lang(en|fr)?` on `/docs/en` sets `page`, the router sets `lang`).
 

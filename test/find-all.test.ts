@@ -264,6 +264,51 @@ describe("matcher: ordering contract", () => {
   });
 });
 
+describe("matcher: optional param after a capture in its segment", () => {
+  // `*-:x?` is one entry (its regex is compiled in place), so the route is
+  // listed once, with URLPattern's split: the greedy `*` takes what it can.
+  // Same-node siblings keep the weight order (regex + required last param).
+  const router = createRouter(["/g/*-", "/g/*-:x?", "/g/:id"]);
+
+  it("lists the route once, ordered by weight", () => {
+    for (const routes of [
+      ["/g/*-", "/g/*-:x?", "/g/:id"],
+      ["/g/:id", "/g/*-:x?", "/g/*-"],
+    ]) {
+      expect(_findAllRoutes(createRouter(routes), "GET", "/g/--")).toEqual(
+        ["/g/:id"].concat(routes.filter((r) => r !== "/g/:id")),
+      );
+    }
+    expect(_findAllRoutes(router, "GET", "/g/a-b")).toEqual(["/g/:id", "/g/*-:x?"]);
+  });
+
+  it("weighs as a regex param, also after a lone `:name`", () => {
+    // `:a:b?` is one regex (it was `:a:b` + a plain `:a`): it ties a
+    // constrained sibling on `/e/1` too, and registration order decides.
+    for (const routes of [
+      ["/e/:id(\\d+)", "/e/:a:b?"],
+      ["/e/:a:b?", "/e/:id(\\d+)"],
+    ]) {
+      expect(_findAllRoutes(createRouter(routes), "GET", "/e/1")).toEqual(routes);
+      expect(_findAllRoutes(createRouter(routes), "GET", "/e/12")).toEqual(routes);
+    }
+  });
+
+  it("params", () => {
+    const params = (m: { params?: object }) => ({ ...m.params });
+    expect(findAllRoutes(router, "GET", "/g/--").map(params)).toStrictEqual([
+      { id: "--" },
+      { "0": "-" },
+      { "0": "-" },
+    ]);
+    expect(compileRouter(router, { matchAll: true })("GET", "/g/--").map(params)).toStrictEqual([
+      { id: "--" },
+      { "0": "-" },
+      { "0": "-" },
+    ]);
+  });
+});
+
 describe("matcher: ordering contract: optional-syntax carve-out", () => {
   // Pins the *known-divergent* half of the ordering contract, documented in
   // README "Result ordering" (the "Carve-out — optional syntax" bullet).

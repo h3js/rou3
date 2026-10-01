@@ -146,20 +146,29 @@ export const MISPLACED_MODIFIER =
   "misplaced `?` / `+` / `*`: `?` follows `:name` or `:name(…)`, `+` / `*` a whole-segment `:name`, not `**:name`; escape a literal one with `\\`";
 
 /**
+ * A segment ending in a param's modifier: the text before the param, the
+ * `:name` / `:name(…)`, the modifier.
+ */
+export const PARAM_MODIFIER: RegExp = /^(.*)(:[A-Za-z_]\w*(?:\([^)]*\))?)([?+*])$/;
+
+/**
  * Expand the first `?` / `+` / `*` modifier of a param into the routes it
  * stands for. A `?` on a param that does not start its segment makes only the
- * param optional (`pre-:x?` is `pre-{:x}?`, as in URLPattern; `{pre-:x}?`
- * drops the segment). `+` / `*` repeat a whole-segment `:name` only: `input`
- * (quoted in the error) repeating a constrained param (`:x(\\d+)+`) or part
- * of a segment (`pre-:x+`) throws: it would drop the constraint / the rest of
- * the segment.
+ * param optional (`pre-:x?` is `pre-:x` or `pre-`, as in URLPattern;
+ * `{pre-:x}?` drops the segment). After a capture (`*-:x?`, `:a(\\d+):b?`)
+ * it stays for `getParamRegexp`, which compiles it in place: one regex, so a
+ * greedy capture takes what it can first, as in URLPattern (the two routes
+ * would let the one with the param win). `+` / `*` repeat a whole-segment
+ * `:name` only: `input` (quoted in the error) repeating a constrained param
+ * (`:x(\\d+)+`) or part of a segment (`pre-:x+`) throws: it would drop the
+ * constraint / the rest of the segment.
  * A `?` on a `**:name` throws too (the `**` is no text before the param).
  */
 export function expandModifiers(segments: string[], input?: string): string[] | undefined {
   for (let i = 0; i < segments.length; i++) {
     const last = segments[i].charCodeAt(segments[i].length - 1);
     if (last !== 63 /* ? */ && last !== 43 /* + */ && last !== 42 /* * */) continue;
-    const m = segments[i].match(/^(.*)(:[A-Za-z_]\w*(?:\([^)]*\))?)([?+*])$/);
+    const m = segments[i].match(PARAM_MODIFIER);
     if (!m) continue;
     const pre = segments.slice(0, i);
     const suf = segments.slice(i + 1);
@@ -167,6 +176,8 @@ export function expandModifiers(segments: string[], input?: string): string[] | 
     const without = "/" + pre.concat(m[1] || [], suf).join("/");
     // A `**` before it is no text: `**:name?` throws like `**:name+`
     if (m[3] === "?" && m[1] !== "**") {
+      // After a capture, `getParamRegexp` compiles it in place (`*-:x?`)
+      if (typeof segmentKey(m[1]) !== "string") continue;
       return ["/" + pre.concat(m[1] + m[2], suf).join("/"), without];
     }
     if (m[1] || m[2].includes("(")) {
@@ -297,7 +308,10 @@ export function getMatchParams(
       const match = segment.match(name);
       if (match) {
         for (const key in match.groups) {
-          params[fromGroupName(key)] = match.groups[key];
+          // An absent optional (`*-:x?`) has no key
+          if (match.groups[key] !== undefined) {
+            params[fromGroupName(key)] = match.groups[key];
+          }
         }
       }
     }

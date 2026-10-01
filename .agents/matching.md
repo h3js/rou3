@@ -9,7 +9,7 @@ Node kinds: **static**, **param** (key `*`: `:id`, `*`, `:id(\d+)`, mid-segment 
 
 Lookup priority: static > param > wildcard, except on paths a suffix route matches (below).
 
-**Results** are fresh `{ data, params? }` objects, never the stored `MethodData` (one shared object per route). Static matches and `params: false` have no `params` key; interpreter params are null-proto. `addRoute` stores `data ?? null`, so falsy data round-trips.
+**Results** are fresh `{ data, params? }` objects, never the stored `MethodData` (one shared object per route). Static matches and `params: false` have no `params` key; interpreter params are null-proto. An absent optional param has no key, also an in-place one (`*-:x?`: its group is unset, `getMatchParams` skips `undefined`). `addRoute` stores `data ?? null`, so falsy data round-trips.
 
 Guard `index < segments.length` before any `node.static[...]` lookup: `undefined` must never coerce to the key `"undefined"`.
 

@@ -277,8 +277,9 @@ function parseSegments(src: string, atEnd: boolean, dot: boolean, inGroup = fals
     throw new Error(`rou3: cannot parse "${src}" at index ${i}`);
   }
 
-  // A lone param group ending a segment after text is `pre-:x?`, which means
-  // `pre-{:x}?` (not before more groups: `b:x?{.:y}?` is no route).
+  // A lone param group ending a segment after text is `pre-:x?`: `pre-{:x}?`
+  // after plain text, and compiled in place (this regex) after a capture
+  // (not before more groups: `b:x?{.:y}?` is no route).
   return segments.map((segment) =>
     segment.replace(/^([^{]+)\{(:[A-Za-z_]\w*(?:\([^)]*\))?)\}\?$/, "$1$2?"),
   );
