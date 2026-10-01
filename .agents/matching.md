@@ -38,9 +38,11 @@ Least → most specific; interpreter and compiled matchAll agree exactly (`toEqu
 
 - **A1** identical expansion, registration order decides (`/admin` vs `/admin/:page?`).
 - **A2** same node, the matched entry is narrower. No instance `compareRoutes` proves: a `:x*` needs a value, so `/api/:v/:path*` is a `subset` of `/api/:v/**` (`/api/v//`), which the order agrees with; the test pins that.
-- **A3** different nodes, traversal decides (`/p/:id{/**}?` ⊇ `/p/:id/*`: on `/p/a/` its `/p/:id` entry comes after the `*` child, which takes nothing after the trailing slash).
+- **A3** different nodes, traversal decides (`/p/:id{/**}?` and `/p/:id/*`: on `/p/a/` its `/p/:id` entry comes after the `*` child). No strict instance now that a trailing `*` is optional (the two match the same paths, `equal`); the test pins the order.
 
 A3 can't be fixed by weights; a real fix is a global re-sort against `compareRoutes` (major design change).
+
+Swept by "lists a containing route before a contained one (sweep)" in `find-all.test.ts` (`*` included, both registration orders, compiled JIT/AOT and `findRoute` too): a pattern-level miss passes only as a carve-out where no matched entry of the broader pattern is itself strictly broader than one of the narrower listed before it, and every carve-out there is A1 (an entry of the narrower pattern listed before one of the broader with the same match set). Blind spot: `compareRoutes` says `partial` for in-place optionals (`:a:b?`) and constraints that take any non-empty segment (`(.+)`), so the sweep can't see their order. It uses one method: the `""`-first tie rule would break its both-orders reading with mixed methods.
 
 ## Greedy `*`
 

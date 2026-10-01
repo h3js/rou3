@@ -426,8 +426,8 @@ function compileFinalMatch(
   // they must not raise `weight` — otherwise an optional `**` tail ties with a
   // required `**:name` and the weight-sorted emit order flips (#186).
   let guardConditions = 0;
-  // A trailing `*` weighs a point over a `**` (see `_selectMatcher`) without
-  // a condition of its own
+  // A trailing `*` weighs a point over a `**`, which matches the same paths,
+  // below a regex (each condition weighs two, see `_selectMatcher`)
   let starWeight = 0;
 
   // Add param properties
@@ -437,9 +437,8 @@ function compileFinalMatch(
     const lastParam = paramsMap[paramsMap.length - 1];
     if (currentIdx !== -1) {
       // A trailing `*` matches zero segments like a `**` (see `matchesZero`)
-      const star = (lastParam[1] as string) < ":" && !lastParam[2];
-      if (star) starWeight = 1;
-      if (!lastParam[2] && !star) {
+      if (!lastParam[2] && (lastParam[1] as string) < ":") starWeight = 1;
+      else if (!lastParam[2]) {
         // It needs a segment (a `**:name`)
         conditions.push(`l>${currentIdx}`);
       } else if (lastParam[0] < 0 && paramsMap.length > 1) {
@@ -564,7 +563,7 @@ function compileFinalMatch(
     (conditions.length > 0 ? `if(${conditions.join("&&")})` : "") +
     (ctx.opts?.matchAll ? push : `return ${ret};`);
 
-  return { code, weight: conditions.length - guardConditions + starWeight };
+  return { code, weight: 2 * (conditions.length - guardConditions) + starWeight };
 }
 
 function compileNode(
