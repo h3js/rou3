@@ -142,7 +142,9 @@ describe("compareRoutes", () => {
     ["/a/:x?", "/a/*", "subset", "a trailing * takes an empty segment, :param doesn't"],
     ["/a/:x?", "/a{/:y}?", "equal", "optional param == optional group"],
     ["/a/:x?", "/a", "superset", "optional param matches without"],
-    ["/a/:x*", "/a/**", "equal", "repeat* == bare **"],
+    ["/a/:x*", "/a/**", "subset", "repeat* needs a value, ** takes an empty segment"],
+    ["/a/:x*", "/a{/**:y}?", "equal", "repeat* == optional named **"],
+    ["/a/:x*", "/a{/:y+}?", "equal", "repeat* == optional repeat+"],
     ["/a/:x+", "/a/**:rest", "equal", "repeat+ == named **"],
     ["/a/:x+", "/a/**", "subset", "repeat+ needs >=1, ** doesn't"],
 

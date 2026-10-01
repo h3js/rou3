@@ -49,9 +49,9 @@ export function shapeSubsumes(a: RouteShape, b: RouteShape): boolean {
  * Collapse shapes that differ only in tail length into one shape per fixed
  * prefix (union of contiguous total-length ranges). An optional-syntax pattern
  * expands into several entries (`/a/:x*` -> `/a` + `/a/**:x`) whose canonical
- * shapes are `["a"] [0,0]` and `["a"] [1,Infinity]`; merging yields `["a"]
- * [0,Infinity]` — the same shape as `/a/**` — so containment checks see
- * through the expansion.
+ * shapes are `["a"] [0,0]` and `["a"] [1,Infinity]` (a value: `some`);
+ * merging yields `["a"] [0,Infinity]` with `some` — `/a/**` without the
+ * empty segment of `/a//` — so containment checks see through the expansion.
  */
 export function mergeShapes(shapes: RouteShape[]): RouteShape[] {
   for (let i = 0; i < shapes.length; i++) {

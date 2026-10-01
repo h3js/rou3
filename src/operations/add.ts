@@ -125,13 +125,10 @@ function _add<T>(
         node.wildcard = { key: "**" };
       }
       node = node.wildcard;
-      // `**:\uFFFFname`: a `:name*`'s, which may capture `""` (see `emptyParam`)
-      const empty = segment.charCodeAt(3) === 0xffff;
       paramsMap.push([
         -(i + 1),
-        addName(names, segment.length === 2 ? "_" : segment.slice(empty ? 4 : 3), input),
+        addName(names, segment.length === 2 ? "_" : segment.slice(3), input),
         segment.length === 2 /* no id */,
-        empty,
       ]);
       if (i === segments.length - 1) {
         break;

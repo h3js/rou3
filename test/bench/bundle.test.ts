@@ -135,8 +135,11 @@ describe("benchmark", () => {
     // route matches the encoded pathname `new URL()` gives (`/café` was never
     // reachable). Includes a `test` early bail and a per-char gate that keep
     // `addRoute` on plain routes as fast as before.
-    expect(bytes).toBeLessThanOrEqual(10870); // <10.87kb
-    expect(gzipSize).toBeLessThanOrEqual(4560); // <4.56kb
+    // -~79B raw / -~38B gzip: `:name*` expands to a plain `**:name` (it never
+    // captures `""`, as in URLPattern), so its marker and the `empty` slot in
+    // `paramsMap` are gone.
+    expect(bytes).toBeLessThanOrEqual(10790); // <10.79kb
+    expect(gzipSize).toBeLessThanOrEqual(4520); // <4.52kb
   });
 });
 

@@ -83,10 +83,10 @@ export function regExpToRoute(regexp: RegExp | string): string {
 
 // The look-behind-free endings `withTrailingSlash` emits, as `RegExp#source`
 // spells them (`x` stands for any group name):
-// - a required catch-all (`**:x`, `:x+`), which needs a value:
-//   `(?:\/\/|(?<x>(?:[\s\S]*[^/]|\/\/)\/*?)\/?)`
+// - a catch-all that needs a value (`**:x`, `:x+`, and `:x*` in an optional
+//   group): `(?:\/\/|(?<x>(?:[\s\S]*[^/]|\/\/)\/*?)\/?)`
 // - a trailing catch-all, possibly inside optional groups: `(?<x>(?:[\s\S]*[^/])?\/*?)`
-// - a root `:x*`, whole: `(?:\/?(?<x>(?:[\s\S]*[^/])?\/*?))??\/?`
+// - 0.11's root `:x*` (it could be empty), whole: `(?:\/?(?<x>(?:[\s\S]*[^/])?\/*?))??\/?`
 // - a required `(.*)` constraint: `(?:\/|(?<x>.+?)\/?)`
 // - a trailing optional one, possibly inside optional groups: `(?:\/(?<x>.*?))??`
 // - a required `*` (after `**`): `(?:(?<x>[^/]+)\/?|\/)`
@@ -390,14 +390,15 @@ function applyOptional(
 ): void {
   if (inner.startsWith("\\/")) {
     const rest = inner.slice(2);
-    // `**` / `:x*` and a lone optional last segment in one group (see
-    // `pushCatchAll` in regexp.ts): `(?:/(?:(?<x>[\s\S]*)/)?(?<y>[^/]*))?`.
+    // `:x*` and a lone optional last segment in one group (see
+    // `pushCatchAll` in regexp.ts): `(?:/(?:(?<x>[\s\S]+)/)?(?<y>[^/]*))?`
+    // (`[\s\S]*` in older versions, also for a `**`).
     const nested = NESTED_CATCH_ALL.exec(rest);
     // An unnamed catch-all is no `:_N*` (see the unnamed capture below).
     if (nested && !UNNAMED.test(nested[1])) {
-      const [catchAll, last] = nested.slice(1).map(paramName);
-      const unnamed = UNNAMED.test(nested[2]);
-      segments.push(catchAll === "_" && !unnamed ? "**" : `:${catchAll}*`);
+      const [catchAll, last] = [nested[1], nested[3]].map(paramName);
+      const unnamed = UNNAMED.test(nested[3]);
+      segments.push(catchAll === "_" && !unnamed && nested[2] === "*" ? "**" : `:${catchAll}*`);
       segments.push(unnamed ? "*" : `:${last}?`);
       return;
     }
@@ -418,19 +419,22 @@ function applyOptional(
       }
       // A greedy `(?:/(?<_>[\s\S]*))?` is the `**` catch-all, and so is a lazy
       // group with a lazy body (optional segments after it take the end of the
-      // path). A lazy group with a greedy body is a param named `_` (`:_*`),
-      // which the router leaves unset on `/a/` where `**` reports `""`.
-      if (g.name === "_" && isCatchAll(g.body, dot) && (!lazy || g.body.endsWith("?"))) {
-        segments.push("**");
+      // path). A lazy group with a greedy body is `{/**}?`, which leaves `_`
+      // unset on `/a/` where `**` reports `""` (a `:_*` in older versions, and
+      // still where no group can be merged).
+      if (g.name === "_" && isCatchAll(g.body, dot)) {
+        if (!lazy || g.body.endsWith("?")) {
+          segments.push("**");
+        } else if (segments.length > 0 && !inGroup) {
+          mergeGroup(segments, "/**");
+        } else {
+          segments.push(":_*");
+        }
         return;
       }
-      // A single whole-segment param -> `:name?` / `:name*` / `:name(pat)?|*`,
-      // or a catch-all that needs a value -> `{/:name+}?` (`:name*` may be
-      // empty).
-      if (isCatchAll(g.body, dot, true) && !isCatchAll(g.body, dot) && !g.unnamed) {
-        mergeGroup(segments, `/:${g.name}+`);
-        return;
-      }
+      // A single whole-segment param -> `:name?` / `:name*` / `:name(pat)?|*`.
+      // A catch-all that needs a value is a `:name*` (`{/:name+}?`), and so is
+      // one that may be empty, as older versions emitted it.
       segments.push(optionalParam(g, dot));
       return;
     }
@@ -516,15 +520,15 @@ function optionalParam({ name, body, unnamed }: NamedGroup, dot: boolean): strin
   if (body === "[^/]*" || body === "[^/]+") {
     return `:${name}?`;
   }
-  if (isCatchAll(body, dot)) {
+  if (isCatchAll(body, dot, true)) {
     return `:${name}*`;
   }
   return `:${name}${constraint(body)}?`;
 }
 
-// `(?:(?<x>[\s\S]*)\/)?(?<y>[^/]*)`: a catch-all and a lone optional last
-// segment in one optional group.
-const NESTED_CATCH_ALL = /^\(\?:\(\?<(\w+)>\[\\s\\S\]\*\)\\\/\)\?\(\?<(\w+)>\[\^\/\]\*\)$/;
+// `(?:(?<x>[\s\S]+)\/)?(?<y>[^/]*)`: a catch-all and a lone optional last
+// segment in one optional group (`[\s\S]*` in older versions).
+const NESTED_CATCH_ALL = /^\(\?:\(\?<(\w+)>\[\\s\\S\]([*+])\)\\\/\)\?\(\?<(\w+)>\[\^\/\]\*\)$/;
 
 /**
  * Wrap an inline param constraint as `(body)`, rejecting bodies that contain a

@@ -291,8 +291,9 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/path//"],
   },
+  // `:rest*` is `{/:rest+}?`: the same closed ending in an optional group.
   "/path/:rest*": {
-    regex: /^\/path(?:\/(?<rest>(?:[\s\S]*[^/])?\/*?))??\/?$/,
+    regex: /^\/path(?:\/(?:(?:\/\/|(?<rest>(?:[\s\S]*[^/]|\/\/)\/*?)\/?))?)?$/,
     match: [
       ["/path/a/b", { rest: "a/b" }],
       ["/path/a/b/", { rest: "a/b" }],
@@ -300,7 +301,11 @@ export const regexpCases: Record<string, RegExpCase> = {
       ["/path", { rest: undefined }],
       ["/path/", { rest: undefined }],
       ["/path/a\n/b\r/", { rest: "a\n/b\r" }],
+      ["/path///", { rest: undefined }, { rest: "/" }],
+      ["/path//a", { rest: "/a" }],
     ],
+    // `:rest*` never captures `""` (as `:rest+`)
+    noMatch: ["/path//"],
   },
   "/path/(\\d+)": {
     regex: /^\/path\/(?<_0>\d+)\/?$/,
@@ -782,16 +787,15 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/users", "/users/", "/users//", "/users///", "/usersx/1"],
   },
   "/docs/:lang/:page*": {
-    regex: /^\/docs\/(?<lang>[^/]+)(?:\/(?<page>(?:[\s\S]*[^/])?\/*?))??\/?$/,
+    regex: /^\/docs\/(?<lang>[^/]+)(?:\/(?:(?:\/\/|(?<page>(?:[\s\S]*[^/]|\/\/)\/*?)\/?))?)?$/,
     match: [
       ["/docs/en", { lang: "en", page: undefined }],
       ["/docs/en/", { lang: "en", page: undefined }],
-      ["/docs/en//", { lang: "en", page: "" }],
       ["/docs/en/a/b", { lang: "en", page: "a/b" }],
       ["/docs/en/a/b/", { lang: "en", page: "a/b" }],
       ["/docs/en/a//", { lang: "en", page: "a/" }],
     ],
-    noMatch: ["/docs", "/docs/", "/docs//", "/docs//a"],
+    noMatch: ["/docs", "/docs/", "/docs//", "/docs//a", "/docs/en//"],
   },
   // Optional segments in a row nest: the router only takes `day` along with
   // `month` (`/posts/:year/:day` is shadowed by `/posts/:year/:month`).
@@ -926,18 +930,18 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/path/", "/path//", "/path/a.zip//"],
   },
   // A root `:x*` (unlike `/**`) leaves `x` unset on `/`: the router takes the
-  // route without it there.
+  // route without it there, and `//` is no match (`x` would be `""`).
   "/:path*": {
-    regex: /^(?:\/?(?<path>(?:[\s\S]*[^/])?\/*?))??\/?$/,
+    regex: /^(?:\/(?:(?:\/\/|(?<path>(?:[\s\S]*[^/]|\/\/)\/*?)\/?))?)?$/,
     match: [
       ["/", { path: undefined }],
-      ["//", { path: "" }],
       ["/a", { path: "a" }],
       ["/a/b/", { path: "a/b" }],
       ["/a/b//", { path: "a/b/" }],
       ["/\n", { path: "\n" }],
       ["/a\u2028b/", { path: "a\u2028b" }],
     ],
+    noMatch: ["//"],
   },
   // Trailing optionals nested in an inline group get the same endings as
   // top-level ones: a catch-all never keeps the stripped trailing slash, an
@@ -959,17 +963,16 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/path//", "/path/subx", "/path/other"],
   },
   "/path{/sub/:rest*}?": {
-    regex: /^\/path(?:\/sub(?:\/(?<rest>(?:[\s\S]*[^/])?\/*?))??)?\/?$/,
+    regex: /^\/path(?:\/(?:sub(?:\/(?:(?:\/\/|(?<rest>(?:[\s\S]*[^/]|\/\/)\/*?)\/?))?)?)?)?$/,
     match: [
       ["/path", { rest: undefined }],
       ["/path/sub", { rest: undefined }],
       ["/path/sub/", { rest: undefined }],
-      ["/path/sub//", { rest: "" }],
       ["/path/sub/a/", { rest: "a" }],
       ["/path/sub/a/b//", { rest: "a/b/" }],
       ["/path/sub/\u2028x/y", { rest: "\u2028x/y" }],
     ],
-    noMatch: ["/path//", "/path/subx"],
+    noMatch: ["/path//", "/path/subx", "/path/sub//"],
   },
   "/path{/sub/*}?": {
     regex: /^\/path(?:\/sub(?:\/(?<_0>[^/]*))??)?\/?$/,
@@ -995,15 +998,14 @@ export const regexpCases: Record<string, RegExpCase> = {
   // An inline group holding a single optional segment adds nothing: it is the
   // same route as `/path/:rest*`.
   "/path{/:rest*}?": {
-    regex: /^\/path(?:\/(?<rest>(?:[\s\S]*[^/])?\/*?))??\/?$/,
+    regex: /^\/path(?:\/(?:(?:\/\/|(?<rest>(?:[\s\S]*[^/]|\/\/)\/*?)\/?))?)?$/,
     match: [
       ["/path", { rest: undefined }],
       ["/path/", { rest: undefined }],
-      ["/path//", { rest: "" }],
       ["/path/a/", { rest: "a" }],
       ["/path/a//", { rest: "a/" }],
     ],
-    noMatch: ["/pathx"],
+    noMatch: ["/pathx", "/path//"],
   },
   // Segments after `**` match the end of the path, the `**` what is between
   // (empty segments included). At the root the leading slash doubles as the
@@ -1063,13 +1065,13 @@ export const regexpCases: Record<string, RegExpCase> = {
   // A `:x+` / `:x*` before the last segment is a `**:x` in the tree; `:x*`
   // also registers the route without it (lazy: `rest` unset on `/path/suffix`).
   "/path/:rest*/suffix": {
-    regex: /^\/path(?:\/(?<rest>[\s\S]*))??\/suffix\/?$/,
+    regex: /^\/path(?:\/(?<rest>[\s\S]+))??\/suffix\/?$/,
     match: [
       ["/path/suffix", { rest: undefined }],
-      ["/path//suffix", { rest: "" }],
       ["/path/a/b/suffix", { rest: "a/b" }],
+      ["/path///suffix", { rest: "/" }],
     ],
-    noMatch: ["/path", "/path/a", "/pathsuffix"],
+    noMatch: ["/path", "/path/a", "/pathsuffix", "/path//suffix"],
   },
   "/path/:rest+/meta{.json}?": {
     regex: /^\/path\/(?<rest>[\s\S]+)\/meta(?:\.json)?\/?$/,
@@ -1142,14 +1144,14 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/ab", "/b"],
   },
   "/a/:x*/*": {
-    regex: /^\/a(?:\/(?:(?:(?<x>[\s\S]*)\/)?(?:(?<_0>[^/]+)\/?|\/))?)?$/,
+    regex: /^\/a(?:\/(?:(?:(?<x>[\s\S]+)\/)?(?:(?<_0>[^/]+)\/?|\/))?)?$/,
     match: [
       ["/a", { "0": undefined, x: undefined }],
       ["/a/b", { "0": "b", x: undefined }],
       ["/a/b/c", { "0": "c", x: "b" }],
       ["/a/b/c/d/", { "0": "d", x: "b/c" }],
     ],
-    noMatch: ["/ab", "/b"],
+    noMatch: ["/ab", "/b", "/a//c"],
   },
   // Other optionals right after a `**`: it is lazy, so they take the end
   // of the path where they match, and `/?$` is exact (the `**` absorbs a
@@ -1258,13 +1260,16 @@ export const SWEEP_LOOKBEHIND_PATTERNS: ReadonlySet<string> = new Set([
   // A constraint whose match can end in `/`.
   "/files/:name([^.]+)",
   "/path/:x(\\S+)?",
-  // A required catch-all (`**:r`, `:x+`) right before an optional segment:
-  // where that segment is absent the catch-all takes a single one, and
-  // telling a trailing slash from it needs the look-behind.
+  // A catch-all that needs a value (`**:r`, `:x+`, `:x*`) right before an
+  // optional segment: where that segment is absent the catch-all takes a
+  // single one, and telling a trailing slash from it needs the look-behind.
   "/**:r/:y?",
   "/a/**:r/:y?",
   "/:x+/:y?",
   "/a/:x+/:y?",
+  "/:x*/:y?",
+  "/a/:x*/:y?",
+  "/:p/:r*/:y(\\d+)?",
   // A segment that can be empty right before a lazy catch-all: a plain `/?$`
   // would let the stripped slash end it.
   "/*/**/:n(\\d+)?",
@@ -1754,8 +1759,9 @@ export const RESERVED_SYNTAX_ROUTES: readonly string[] = [
   "/:a/:b(x)(\\1)",
   "/:a/((x)\\2)",
   "/a/:x((a)\\1)",
-  // U+FFFD-U+FFFF are internal placeholders (escapes, the `:name*` marker):
-  // written in a route, they read as syntax (`\uFFFD0` as an escaped `:`).
+  // U+FFFD-U+FFFF are reserved for internal placeholders (escapes, and
+  // U+FFFF for the next one): written in a route, they would read as syntax
+  // (`\uFFFD0` as an escaped `:`).
   "/a/**:\uFFFFx",
   "/a/\uFFFD0x",
   "/a/\uFFFEx",

@@ -200,13 +200,13 @@ function _computeShape(edges: Edge[], entry: MethodData): RouteShape {
     if (typeof edge === "string") {
       into.push(edge);
     } else if (edge === 1) {
-      // `**` is optional, `**:name` requires one segment with a value (not a
-      // `:name*`'s, see `emptyParam`). Segments after it are the suffix,
+      // `**` is optional, `**:name` (`:name+`, `:name*`) requires one segment
+      // with a value (see `emptyParam`). Segments after it are the suffix,
       // aligned to the end of the path.
-      const [, , optional, empty] = pMap!.find((e) => e[0] === -(d + 1))!;
+      const optional = pMap!.find((e) => e[0] === -(d + 1))![2];
       tailMin = optional ? 0 : 1;
       tailMax = Number.POSITIVE_INFINITY;
-      if (!optional && !empty) some = true;
+      if (!optional) some = true;
       if (d < edges.length - 1) suffix = [];
     } else if (pMap) {
       // Param: classified by this entry's paramsMap entry at this segment index.

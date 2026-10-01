@@ -1165,6 +1165,52 @@ describe("falsy route data is kept", () => {
   }
 });
 
+// A `:name*` is `**:name` (as `:name+`) plus the route without it, so it never
+// captures `""`, as in URLPattern: an empty segment alone falls through to
+// a less specific route or no match, in every matcher.
+describe("`:name*` never captures an empty value", () => {
+  const router = createEmptyRouter<string>();
+  for (const route of ["/a/:x*", "/b/:x*/c", "/:r*", "/d/:x*", "/d/*"]) {
+    addRoute(router, "GET", route, route);
+  }
+  const jit = compileRouter(router);
+  const jitAll = compileRouter(router, { matchAll: true });
+  const aot = new Function(`return ${compileRouterToString(router)}`)();
+  const aotAll = new Function(`return ${compileRouterToString(router, { matchAll: true })}`)();
+  const cases: [string, { data: string; params?: Record<string, string> } | undefined][] = [
+    ["/a", { data: "/a/:x*" }],
+    ["/a//", { data: "/:r*", params: { r: "a/" } }],
+    ["/a///", { data: "/a/:x*", params: { x: "/" } }],
+    ["/a/b", { data: "/a/:x*", params: { x: "b" } }],
+    ["/b/c", { data: "/b/:x*/c" }],
+    ["/b//c", { data: "/:r*", params: { r: "b//c" } }],
+    ["/b///c", { data: "/b/:x*/c", params: { x: "/" } }],
+    ["/", { data: "/:r*" }],
+    ["//", undefined],
+    ["/d//", { data: "/d/*", params: { "0": "" } }],
+  ];
+  for (const [path, expected] of cases) {
+    it(`${path} -> ${JSON.stringify(expected)}`, () => {
+      const found = findRoute(router, "GET", path);
+      expect(found && { data: found.data, params: found.params && { ...found.params } }).toEqual(
+        expected,
+      );
+      const plain = JSON.parse(JSON.stringify(found ?? null));
+      expect(jit("GET", path) ?? null).toEqual(plain);
+      expect(aot("GET", path) ?? null).toEqual(plain);
+      const all = findAllRoutes(router, "GET", path).map((m) => m.data);
+      expect(jitAll("GET", path).map((m: { data: string }) => m.data)).toEqual(all);
+      expect(aotAll("GET", path).map((m: { data: string }) => m.data)).toEqual(all);
+      // No match gives any `:name*` an empty value
+      for (const m of findAllRoutes(router, "GET", path)) {
+        expect(Object.values(m.params ?? {}).filter((v) => v === "")).toEqual(
+          m.data === "/d/*" ? [""] : [],
+        );
+      }
+    });
+  }
+});
+
 // Paths with an empty segment take `findAllRoutes`' walk in `findRoute` (a
 // `:name` / `**:name` can't take one, #229), while the compiled matchers
 // guard each param: both must still pick the same route, and list the same

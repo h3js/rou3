@@ -479,14 +479,14 @@ describe("routeToRegExp", () => {
       ["/a/:_?", "/a/", {}],
       ["/a/:_?", "/a/b/", { _: "b" }],
       ["/a/:_*", "/a/", {}],
-      ["/a/:_*", "/a//", { _: "" }],
+      ["/a/:_*", "/a//b", { _: "/b" }],
       ["/a/:_*", "/a/b/", { _: "b" }],
       ["/a/**", "/a/", { _: "" }],
       ["/:_?", "/", {}],
       ["/:_*", "/", {}],
-      ["/:_*", "//", { _: "" }],
+      ["/:_*", "//a", { _: "/a" }],
       ["/:x*", "/", {}],
-      ["/:x*", "//", { x: "" }],
+      ["/:x*", "//a", { x: "/a" }],
       ["/:x*", "/a/b/", { x: "a/b" }],
       ["/**", "/", { _: "" }],
     ];
@@ -1047,18 +1047,12 @@ const OTHER_EXPANSION: CaptureDiff = {
     }),
 };
 
-/**
- * The routes `addRoute` registers for `pattern` (groups, then modifiers). A
- * `:x*`'s `**:x` (marked `**:\uFFFFx`, which `addRoute` rejects as written)
- * is written back as `:x*`: the same route, plus the one without it.
- */
+/** The routes `addRoute` registers for `pattern` (groups, then modifiers). */
 function expansions(pattern: string): string[] {
   const groups = expandGroupDelimiters(pattern);
   if (groups) return groups.flatMap((route) => expansions(route));
   const modifiers = expandModifiers(splitRoute(pattern));
-  return modifiers
-    ? modifiers.flatMap((route) => expansions(route))
-    : [pattern.replace(/\*\*:\uFFFF(\w+)/, ":$1*")];
+  return modifiers ? modifiers.flatMap((route) => expansions(route)) : [pattern];
 }
 
 /** Sweep patterns whose captures differ from the router beyond the accepted gap. */
