@@ -195,9 +195,10 @@ function _insert<T>(
         node.wildcard = { key: "**" };
       }
       node = node.wildcard;
-      // A `*` takes one segment or more (or, last, none after a trailing
-      // slash: see `matchesZero`), empty ones too (a `**:name` needs a value)
-      const empty = segment.length === 1;
+      // A `*` takes one segment or more (or, last, none: see `matchesZero`),
+      // empty ones too (a `**:name` needs a value), and so does the `**` of a
+      // split `*` (it may need a segment, see `splitStar`)
+      const empty = segment.length === 1 || i === join;
       // A bare `**` is optional; it and a `*` are unnamed captures (`"0"`,
       // `"1"`, ..., numbered with unnamed groups), as in URLPattern. A bare
       // `**`'s value is also reported as `_` (deprecated, see

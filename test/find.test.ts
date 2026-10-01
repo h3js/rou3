@@ -1722,10 +1722,11 @@ describe("empty segments (compiled parity, sweep)", () => {
     "/(\\w*)/b",
     "/a/:x([a-z]+)",
     "/a/pre-*",
+    "/pre-*",
   ];
   const paths = ["/", "//"];
   for (let depth = 1, prev = [""]; depth <= 3; depth++) {
-    prev = prev.flatMap((path) => ["a", "b", "", "1", "pre-"].map((s) => `${path}/${s}`));
+    prev = prev.flatMap((path) => ["a", "b", "", "1", "pre-", "pre-a"].map((s) => `${path}/${s}`));
     paths.push(...prev);
   }
 

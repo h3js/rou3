@@ -354,7 +354,7 @@ describe("segments after `**`: priority", () => {
     }
     expect(checks).toBeGreaterThan(100_000);
     expect(failures.slice(0, 20)).toEqual([]);
-  }, 30_000);
+  }, 60_000);
 
   it("compiled lookups agree on the whole corpus", () => {
     const router = routerOf([

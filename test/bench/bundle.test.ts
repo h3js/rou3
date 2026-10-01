@@ -201,8 +201,9 @@ describe("benchmark", () => {
     // segment as written (ranked on its node), its `**` needing a segment.
     // +37B raw / +21B gzip: in a suffix trie a capture-only regex (`plain`)
     // weighs a point only, below a `*` (`/*/:y` over `/**/:a:b?`).
-    expect(bytes).toBeLessThanOrEqual(12403); // <12.41kb
-    expect(gzipSize).toBeLessThanOrEqual(5325); // <5.33kb
+    // +7B raw / +3B gzip: the `**` of a split `*` may capture `""` (`empty`).
+    expect(bytes).toBeLessThanOrEqual(12410); // <12.42kb
+    expect(gzipSize).toBeLessThanOrEqual(5328); // <5.33kb
   });
 });
 
