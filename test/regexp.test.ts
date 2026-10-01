@@ -778,6 +778,10 @@ describe("reserved pattern syntax", () => {
       ["/a/**:x\\:y", "x\\:y"],
       ["/a/**:x\\.json", "x\\.json"],
       ["/a/**:x\\(y\\)", "x\\(y\\)"],
+      // A group's `}` before a `(` adds no constraint after a `**:name`
+      // (`joinGroup`): the name runs to its segment's end anyway
+      ["/a/**:x{}(y)", "x(y)"],
+      ["/a/{**:x}(y)", "x(y)"],
     ]) {
       expect(() => addRoute(createRouter(), "", route), route).toThrow(
         `rou3: invalid param name "${name}" (${route})`,

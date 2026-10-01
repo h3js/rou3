@@ -273,6 +273,17 @@ describe("a `{` / `}` ends a param name", () => {
     "/c/{:a}b",
     "/w/:a{-x}?y",
     "/x/:a{-:b}?",
+    // A regex group after it is an unnamed capture, not the param's
+    // constraint (`/{:foo}(.*)` read as `/:foo(.*)`)
+    "/g1/{:foo}(.*)",
+    "/g2/{:foo}(barbaz)",
+    "/g3/{:foo}{(.*)}",
+    "/g4/{:foo}?(.*)",
+    "/g5/:foo{}(.*)",
+    "/g6/:foo{x}?(.*)",
+    "/g7/:foo{(x)}?",
+    "/g8/{:foo}{}{(\\d+)}",
+    "/g9/{pre-:foo}(\\d+)",
   ];
   const router = createRouter(routes);
   const compiledLookup = compileRouter(router);
@@ -298,6 +309,25 @@ describe("a `{` / `}` ends a param name", () => {
       expect(match("/w/q-xy")?.params).toEqual({ a: "q" });
       expect(match("/x/q")?.params).toEqual({ a: "q" });
       expect(match("/x/q-r")?.params).toEqual({ a: "q", b: "r" });
+    });
+
+    it(`reads a regex group after it as an unnamed capture (${name})`, () => {
+      // As URLPattern: the param is lazy, the group a separate `"0"`
+      expect(match("/g1/foobarbaz")?.params).toEqual({ foo: "f", "0": "oobarbaz" });
+      expect(match("/g1/f")?.params).toEqual({ foo: "f", "0": "" });
+      expect(match("/g2/foobarbaz")?.params).toEqual({ foo: "foo", "0": "barbaz" });
+      expect(match("/g2/barbaz")).toBeUndefined();
+      expect(match("/g3/foobarbaz")?.params).toEqual({ foo: "f", "0": "oobarbaz" });
+      expect(match("/g4/foobarbaz")?.params).toEqual({ foo: "f", "0": "oobarbaz" });
+      expect(match("/g4/x")?.params).toEqual({ foo: "x", "0": "" });
+      expect(match("/g5/foobarbaz")?.params).toEqual({ foo: "f", "0": "oobarbaz" });
+      expect(match("/g6/foobar")?.params).toEqual({ foo: "f", "0": "oobar" });
+      expect(match("/g7/abcx")?.params).toEqual({ foo: "abc", "0": "x" });
+      expect(match("/g7/x")?.params).toEqual({ foo: "x" });
+      expect(match("/g8/a12")?.params).toEqual({ foo: "a", "0": "12" });
+      expect(match("/g8/12")?.params).toEqual({ foo: "1", "0": "2" });
+      expect(match("/g8/ab")).toBeUndefined();
+      expect(match("/g9/pre-a12")?.params).toEqual({ foo: "a", "0": "12" });
     });
   }
 

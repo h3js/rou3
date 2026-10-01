@@ -1,4 +1,4 @@
-import { expandGroupDelimiters, scanFirstGroup } from "./_group-delimiters.ts";
+import { expandGroupDelimiters, joinGroup, scanFirstGroup } from "./_group-delimiters.ts";
 import { toGroupName } from "./_group-names.ts";
 import { createRouter } from "./context.ts";
 import { addRoute, getParamRegexp, skipGroup, type Unnamed } from "./operations/add.ts";
@@ -146,10 +146,10 @@ function toRegExp(route: string, input: string, unnamed?: Unnamed): RegExp {
 
 /**
  * Build an inline-optional regex for a route with a single `{…}?` group that
- * ends a segment (`/book{s}?`, `/foo{/bar}?/:id`). Returns `undefined`
- * (falling back to alternation expansion) for anything it can't inline
- * safely: multi-group routes, a group inside a segment, or unexpected segment
- * shapes.
+ * ends a segment (`/book{s}?`, `/foo{/bar}?/:id`), or starts one before more
+ * of it (`/{:x}?(\d+)`). Returns `undefined` (falling back to alternation
+ * expansion) for anything it can't inline safely: multi-group routes, a group
+ * in the middle of a segment, or unexpected segment shapes.
  */
 function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): RegExp | undefined {
   const group = scanFirstGroup(route);
@@ -157,10 +157,15 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
     return;
   }
   const [pre, body, suf, mod] = group;
+  if (mod !== "?" || body === "") {
+    return;
+  }
+  // The two expansions, joined like `expandGroupDelimiters` joins them
+  const base = joinGroup(pre, suf);
+  const full = joinGroup(joinGroup(pre, body), suf);
+  // A group with more of its segment after it (`/{:x}?(\d+)`)
+  const inSegment = suf !== "" && suf.charCodeAt(0) !== 47; /* '/' */
   if (
-    mod !== "?" ||
-    body === "" ||
-    (suf !== "" && suf.charCodeAt(0) !== 47) /* '/' */ ||
     // Only a single group is handled inline; bail if another one is left.
     scanFirstGroup(pre) ||
     scanFirstGroup(body) ||
@@ -169,8 +174,8 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
     // optional segment after it, which the router ranks against the route
     // without it: expand (see `lazyCatchAll`).
     /(?:^|\/)\*\*$/.test(pre) ||
-    needsModifierExpansion(pre + suf, body.charCodeAt(0) === 47 /* '/' */) ||
-    needsModifierExpansion(pre + body + suf)
+    needsModifierExpansion(base, body.charCodeAt(0) === 47 /* '/' */) ||
+    needsModifierExpansion(full)
   ) {
     return;
   }
@@ -182,17 +187,12 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
   // The base keys its unnamed captures like the full route (`skipGroup`), so
   // the two line up
   const [baseSegs, baseOwnSep, baseOpenTail] = routeToRegExpSegments(
-    pre + suf,
+    base,
     input,
     extra,
     skipGroup(route, input, unnamed),
   );
-  const [fullSegs, fullOwnSep, openTail] = routeToRegExpSegments(
-    pre + body + suf,
-    input,
-    extra,
-    unnamed,
-  );
+  const [fullSegs, fullOwnSep, openTail] = routeToRegExpSegments(full, input, extra, unnamed);
   const baseLen = baseSegs.length;
   const fullLen = fullSegs.length;
   if (
@@ -231,6 +231,14 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
     if (last === prefix) {
       // The group adds nothing to the segment.
       merged = last;
+    } else if (inSegment) {
+      // The group starts the segment (`/{:x}?(\d+)`): `last` is `X` + `prefix`,
+      // and `(?:X)?prefix` tries `X prefix`, then `prefix`, the router's order
+      // (the route with the group first). `X` must be a regex of its own.
+      const x = last.slice(0, last.length - k);
+      if (last.endsWith(prefix) && isRegExpSource(x)) {
+        merged = `(?:${x})?${prefix}`;
+      }
     } else if (last.startsWith(prefix) && isOptionalGroups(last.slice(k))) {
       // Only segments that are optional already (`/a{/:x*}?` is `/a/:x*`,
       // `/a{/**}?/*.png` is `/a/**/*.png`).
@@ -258,7 +266,7 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
 
   // `body` adds one or more whole segments (e.g. `/foo` -> `/foo/bar`); make
   // the appended segments optional.
-  if (shared + tail !== baseLen || (suf !== "" && !fixedHead())) {
+  if (inSegment || shared + tail !== baseLen || (suf !== "" && !fixedHead())) {
     return;
   }
   const head =
@@ -269,6 +277,16 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
   const added = fullSegs.slice(shared, fullLen - tail).join("/");
   const rest = tail > 0 ? `/${baseSegs.slice(baseLen - tail).join("/")}` : "";
   return new RegExp(`^${ending(`${head}(?:/${added})?${rest}`, tailEnding)}`);
+}
+
+/** Whether `source` compiles on its own (a whole regex, not part of one). */
+function isRegExpSource(source: string): boolean {
+  try {
+    new RegExp(source);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

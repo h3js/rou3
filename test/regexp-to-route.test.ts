@@ -280,16 +280,41 @@ describe("regExpToRoute", () => {
         routeToRegExp(route).source,
       );
     }
-    // A group right after `:name` would read as its constraint, a `*` after a
-    // group as a modifier and a `*` after a `*` as a `**`: no route emits
-    // these, so they throw.
+    // A group right after `:name` would read as its constraint: the name gets
+    // the one it has, spelled without a `/` (`{:x}(\d+)` expands to the lazy
+    // one, see `joinGroup`).
+    expect(regExpToRoute(/^\/a\/(?<x>[^/]+?)(?<_0>\d+)\/?$/)).toBe("/a/:x([^\\x2f]+?)(\\d+)");
+    expect(regExpToRoute(/^\/a\/(?<x>[^/]+)(\d+)\/?$/)).toBe("/a/:x([^\\x2f]+)(\\d+)");
+    for (const route of ["/a/{:x}(\\d+)", "/a/:x{}(.*)", "/a/b-{:x}(c)"]) {
+      expect(routeToRegExp(regExpToRoute(routeToRegExp(route))).source).toBe(
+        routeToRegExp(route).source,
+      );
+    }
+    // The rest of a segment after an in-segment optional group is part of
+    // that segment: a `(.+)` there is no `:_0+`, and an in-place optional
+    // param after it (`-:bar?`) is no `{:bar}?` group (it routes otherwise)
+    for (const route of ["/{:foo}?(.+)", "/{a-}?(.+)", "/{x}?(.+)", "/{:foo(\\d+)}?(.+)"]) {
+      const back = regExpToRoute(routeToRegExp(route));
+      expect(() => addRoute(createRouter(), "", back), `${route} -> ${back}`).not.toThrow();
+      expect(routeToRegExp(back).source, route).toBe(routeToRegExp(route).source);
+    }
+    for (const route of ["/{:foo}?([^y]+)-:bar?", "/{:foo}?(.+)-:bar?"]) {
+      expect(() => regExpToRoute(routeToRegExp(route)), route).toThrow(/^rou3: /);
+    }
+    // A hand-written `[^\x2f]+?` constraint with no group after it is kept as
+    // written (only the `:name` before a group reads as `[^/]+?`)
+    for (const route of ["/a/:x([^\\x2f]+?)", "/a/pre-:x([^\\x2f]+?)"]) {
+      expect(routeToRegExp(route).source, route).toContain("(?<x>[^\\x2f]+?)");
+      expect(regExpToRoute(routeToRegExp(route)), route).toBe(route);
+    }
+    // A `*` after a group would read as a modifier and a `*` after a `*` as a
+    // `**`: no route emits these, so they throw.
     for (const re of [
       /^\/a(?<_0>[^/]*)(?<_1>[^/]*)\/?$/,
       /^\/a(?<_0>[^/]*)(?<_1>[^/]*)b\/?$/,
       /^\/(?<_0>[^/]*)(?<_1>[^/]*)\/?$/,
       /^\/a\/(?<x>[^/]+)(?<_0>[^/]*)\/?$/,
       /^\/a\/(?<x>\d+)(?<_0>[^/]*)\/?$/,
-      /^\/a\/(?<x>[^/]+)(\d+)\/?$/,
     ]) {
       expect(() => regExpToRoute(re), re.source).toThrow(/rou3: /);
     }

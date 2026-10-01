@@ -186,6 +186,13 @@ describe("types", () => {
       expectTypeOf<InferRouteParams<"/:a{b}">>().toEqualTypeOf<{ a: string }>();
       expectTypeOf<InferRouteParams<"/:foo{}bar">>().toEqualTypeOf<{ foo: string }>();
       expectTypeOf<InferRouteParams<"/c/{:a}b">>().toEqualTypeOf<{ a: string }>();
+      // A regex group after one is an unnamed capture (not typed), not a
+      // constraint
+      expectTypeOf<InferRouteParams<"/{:foo}(.*)">>().toEqualTypeOf<{ foo: string }>();
+      expectTypeOf<InferRouteParams<"/:foo{}(\\d+)">>().toEqualTypeOf<{ foo: string }>();
+      expectTypeOf<InferRouteParams<"/{:foo}?(.*)">>().toEqualTypeOf<{
+        foo: string | undefined;
+      }>();
       // A `**:name` too
       expectTypeOf<InferRouteParams<"/a{/**:x}?">>().toEqualTypeOf<{ x: string | undefined }>();
       expectTypeOf<InferRouteParams<"/a/**:x{/b}?">>().toEqualTypeOf<{ x: string }>();
