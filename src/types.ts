@@ -5,13 +5,10 @@ export interface RouterContext<T = unknown> {
 
 /**
  * One entry per param: its route index (`-(i + 1)` for a `**` at `i`), its
- * name (`"0"`, `"1"`, … for a `*`) or segment regex, whether it may match no
- * segment (a trailing `*`, a bare `**`), and, on the `**:name` a `:name*`
- * expands to, that it may capture `""` (a `:name` / `**:name` needs a value).
+ * name (`"0"`, `"1"`, … for a `*`) or segment regex, and whether it may match
+ * no segment (a trailing `*`, a bare `**`).
  */
-export type ParamsIndexMap = Array<
-  [Index: number, name: string | RegExp, optional: boolean, empty?: boolean]
->;
+export type ParamsIndexMap = Array<[Index: number, name: string | RegExp, optional: boolean]>;
 export type MethodData<T = unknown> = {
   data: T;
   paramsMap?: ParamsIndexMap;

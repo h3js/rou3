@@ -109,8 +109,11 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(routeToRegExp("/:_*"))).toBe("/:_*");
     // The `:name*` ending must not reverse to a single-segment constraint.
     expect(regExpToRoute(routeToRegExp("/path/:rest*"))).toBe("/path/:rest*");
-    // `:w+` needs a value, `:w*` doesn't (`/a/c//`): the group stays.
-    expect(regExpToRoute(routeToRegExp("/a/c{/:w+}?"))).toBe("/a/c{/:w+}?");
+    // `{/:w+}?` is `:w*` (both need a value), which reverses in one spelling.
+    expect(routeToRegExp("/a/c{/:w+}?").source).toBe(routeToRegExp("/a/c/:w*").source);
+    expect(regExpToRoute(routeToRegExp("/a/c{/:w+}?"))).toBe("/a/c/:w*");
+    // A lazy `{/**}?` may be empty, unlike `:_*`: the group stays.
+    expect(regExpToRoute(routeToRegExp("/a{/**}?"))).toBe("/a{/**}?");
   });
 
   it("accepts catch-all regexes emitted by older versions", () => {
@@ -177,6 +180,17 @@ describe("regExpToRoute", () => {
     [String.raw`^\/a(?:\/(?:(?:(?<_>[\s\S]*)\/)?(?:(?<page>[^/]+)\/?|\/))?)?$`, "/a/**/:page?"],
     [String.raw`^\/path\/(?:(?<id>[^/]+)(?:\/|$)|\/)(?:(?<tab>[^/]*)\/?)??$`, "/path/:id/:tab?"],
   ])("reverses the 0.10 ending %s", (source, route) => {
+    expect(regExpToRoute(source)).toBe(route);
+  });
+
+  // 0.11 `:x*` forms, where a `:x*` could be empty (`[\s\S]*`): back to the
+  // route they were emitted for, which now needs a value.
+  it.each([
+    [String.raw`^\/path(?:\/(?<rest>(?:[\s\S]*[^/])?\/*?))??\/?$`, "/path/:rest*"],
+    [String.raw`^(?:\/?(?<path>(?:[\s\S]*[^/])?\/*?))??\/?$`, "/:path*"],
+    [String.raw`^\/path(?:\/(?<rest>[\s\S]*))??\/suffix\/?$`, "/path/:rest*/suffix"],
+    [String.raw`^\/a(?:\/(?:(?:(?<x>[\s\S]*)\/)?(?:(?<_0>[^/]+)\/?|\/))?)?$`, "/a/:x*/*"],
+  ])("reverses the 0.11 `:x*` form %s", (source, route) => {
     expect(regExpToRoute(source)).toBe(route);
   });
 

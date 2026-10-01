@@ -43,8 +43,8 @@ function tails(body: string): readonly [any: string, some: string] {
  *
  * Open endings (`openEnding`) are the body followed by `/?$`, which is exact
  * when a match ending in `/` minus that `/` is still a match. That holds when
- * the only parts that can be empty are a group's first segment (`*`, `:x*`,
- * `**`: without the slash, the group is skipped) and a trailing catch-all
+ * the only parts that can be empty are a group's first segment (`*`, `**`:
+ * without the slash, the group is skipped) and a trailing catch-all
  * that may be empty. A `:x` needs a value (`[^/]+`), so most routes end here.
  * Each group that can be empty is made lazy so captures agree with the
  * router (`/a/` leaves `0` unset, `/a//` gives `0: ""`), except a `**` one:
@@ -106,10 +106,10 @@ function tails(body: string): readonly [any: string, some: string] {
  *   be told apart from a param named `_` (`:_*`) by the body alone.
  */
 export function withTrailingSlash(body: string, starStar = false): string {
-  // Root catch-all (`/**`, `/:x*`): every path matches. `:x*` is unset on `/`.
+  // Root `/**`: every path matches.
   const root = /^\/\?\(\?<(\w+)>\[\\s\\S\]\*\)$/.exec(body);
   if (root) {
-    return starStar ? `/?(?<${root[1]}>${ANY_TAIL})/?$` : `(?:/?(?<${root[1]}>${ANY_TAIL}))??/?$`;
+    return `/?(?<${root[1]}>${ANY_TAIL})/?$`;
   }
   const open = openEnding(body, starStar);
   if (open !== undefined) {
@@ -218,13 +218,12 @@ function optionalTail(inner: string, starStar: boolean): string | undefined {
     return `(?:${out}/?)?${lazy(out, inner, starStar) ? "?" : ""}`;
   }
   // A closed ending starts with the group's first segment and a separator,
-  // or is a `**:x` / `:x+` one, so it can't be empty and the `?` has a single
-  // parse.
+  // or with a first segment that can't be empty (a `**:x` / `:x+` / `:x*`
+  // one, or `sub` in `{/sub/:x*}?`), so it can't be empty and the `?` has a
+  // single parse.
   const parsed = parseLevel(inner);
   const closed =
-    parsed && (parsed[0] || CATCH_ALL.exec(parsed[1])?.[2] === "[\\s\\S]+")
-      ? closedEnding(inner, starStar)
-      : undefined;
+    parsed && (parsed[0] || !canBeEmpty(parsed[1])) ? closedEnding(inner, starStar) : undefined;
   return closed === undefined ? undefined : `(?:${closed})?`;
 }
 

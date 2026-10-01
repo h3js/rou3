@@ -308,10 +308,11 @@ describe("matcher: ordering contract: optional-syntax carve-out", () => {
     ]);
   });
 
-  it("A2: same node, the superset's matched entry is narrower (both orders)", () => {
-    // `/api/*/:path*` matches `/api` (the dropped `:path*` leaves a bare `*`),
-    // `/api/*/**` does not — so the `superset` verdict is correct.
-    expect(compareRoutes("/api/*/:path*", "/api/*/**")).toBe("superset");
+  it("A2: same node — no provable instance, `:x*` doesn't contain `**`", () => {
+    // `:path*` is `**:path` (needs a value) plus the route without it, so it
+    // misses `/api/v1//`, which `**` takes: no superset, and the tree order
+    // (weight: `**:path` is narrower) contradicts no `compareRoutes` claim.
+    expect(compareRoutes("/api/*/:path*", "/api/*/**")).toBe("partial");
     for (const routes of [
       ["/api/*/:path*", "/api/*/**"],
       ["/api/*/**", "/api/*/:path*"],
@@ -324,14 +325,18 @@ describe("matcher: ordering contract: optional-syntax carve-out", () => {
   });
 
   it("A3: matched entries in different nodes, traversal order decides (both orders)", () => {
-    expect(compareRoutes("/p/:id/:rest*", "/p/:id/*")).toBe("superset");
+    // `/p/:id{/**}?` matches `/p/a` twice: through `/p/:id/**` (a child,
+    // first) and `/p/:id` (the node itself, after the `*` child of
+    // `/p/:id/*`).
+    expect(compareRoutes("/p/:id{/**}?", "/p/:id/*")).toBe("superset");
     for (const routes of [
-      ["/p/:id/:rest*", "/p/:id/*"],
-      ["/p/:id/*", "/p/:id/:rest*"],
+      ["/p/:id{/**}?", "/p/:id/*"],
+      ["/p/:id/*", "/p/:id{/**}?"],
     ]) {
       expect(_findAllRoutes(createRouter(routes), "GET", "/p/a")).toEqual([
+        "/p/:id{/**}?",
         "/p/:id/*",
-        "/p/:id/:rest*",
+        "/p/:id{/**}?",
       ]);
     }
   });
@@ -366,13 +371,8 @@ describe("matcher: required params need a value", () => {
     "/**/c",
   ]);
 
-  it("leaves out `:name` / `:name+` / `**:name` on an empty value", () => {
-    expect(_findAllRoutes(router, "GET", "/a//")).toEqual([
-      "/a/**",
-      "/a/:y*",
-      "/a/*",
-      "/a/:id(\\d*)",
-    ]);
+  it("leaves out `:name` / `:name+` / `:name*` / `**:name` on an empty value", () => {
+    expect(_findAllRoutes(router, "GET", "/a//")).toEqual(["/a/**", "/a/*", "/a/:id(\\d*)"]);
     expect(_findAllRoutes(router, "GET", "/a/1")).toEqual([
       "/**/:file",
       "/a/**",

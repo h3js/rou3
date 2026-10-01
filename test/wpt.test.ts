@@ -308,9 +308,10 @@ const RESERVED_PATTERNS = new Set([
 
 // Known diffs that only apply to routeToRegExp (the router skips relative inputs)
 const REGEXP_ONLY_KNOWN_DIFFS = new Set([
-  // Relative input — rou3's regex is anchored at `/` (a `:name*` regex makes
-  // its leading `/` optional, so `:name* → foobar` agrees)
+  // Relative input — rou3's regex is anchored at `/` (a root `:name*` is
+  // `(?:/(?<name>…))?`, like `{/:name+}?`, so it needs the `/` too)
   ":name+ → foobar [match]",
+  ":name* → foobar [match]",
 ]);
 
 // Additional known diffs specific to router-based matching.
@@ -497,6 +498,10 @@ describe("wpt urlpattern compatibility", () => {
 const EMPTY_SEGMENT_CASES: [string, string, Record<string, string> | null][] = [
   ["/foo/:bar", "/foo//", null],
   ["/foo/:bar+", "/foo//", null],
+  ["/foo/:bar*", "/foo//", null],
+  ["/foo/:bar*/baz", "/foo//baz", null],
+  ["/foo/:bar*", "/foo", {}],
+  ["/foo/:bar*/baz", "/foo/baz", {}],
   ["/foo/:bar?", "/foo//", null],
   ["/foo{/:bar}?", "/foo//", null],
   ["/foo/:bar/baz", "/foo//baz", null],
@@ -533,6 +538,10 @@ const PERCENT_ENCODING_CASES: [string, string, Record<string, string> | null][] 
   ["/a\\%b", "/a%b", {}],
   ["/a\uD800", "/a�", {}],
   ["/:x(%C3%A9)", "/é", { x: "%C3%A9" }],
+  // An encoded prefix before a `:name*`, which needs a value or no segment
+  ["/café/:x*", "/café", {}],
+  ["/café/:x*", "/café/a/é", { x: "a/%C3%A9" }],
+  ["/café/:x*", "/café//", null],
 ];
 
 describe("wpt urlpattern compatibility: percent-encoding", () => {
@@ -562,13 +571,14 @@ describe("wpt urlpattern compatibility: percent-encoding", () => {
   });
 });
 
-// Where rou3 still differs (see the README): a `:name*` takes an empty segment
-// (URLPattern's needs a value in each), and `:name+` / `:name*` / `**` take
-// empty segments between others.
+// Where rou3 still differs (see the README): `:name+` / `:name*` / `**` take
+// empty segments between others (URLPattern's `:name+` / `:name*` need a
+// value in each).
 const EMPTY_SEGMENT_DIFFS: [string, string, Record<string, string>][] = [
-  ["/foo/:bar*", "/foo//", { bar: "" }],
   ["/foo/:bar+", "/foo////", { bar: "//" }],
   ["/foo/:bar+", "/foo//a", { bar: "/a" }],
+  ["/foo/:bar*", "/foo//a", { bar: "/a" }],
+  ["/foo/:bar*", "/foo/a//", { bar: "a/" }],
 ];
 
 describe("wpt urlpattern compatibility: empty segments", () => {

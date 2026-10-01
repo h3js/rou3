@@ -661,9 +661,9 @@ describe("Router lookup", function () {
     );
   });
 
-  // `:name` and `:name+` need a value, as in URLPattern; `*`, `**`, `:name*`
-  // and a constraint that can match empty (`:id(\d*)`) still take an empty
-  // segment (#229).
+  // `:name`, `:name+` and `:name*` never capture `""`, as in URLPattern; `*`,
+  // `**` and a constraint that can match empty (`:id(\d*)`) still take an
+  // empty segment (#229).
   describe("required params need a value", function () {
     testRouter(
       [
@@ -671,6 +671,7 @@ describe("Router lookup", function () {
         "/plus/:bar+",
         "/star/*",
         "/rep/:bar*",
+        "/repmid/:bar*/b",
         "/opt/:x?",
         "/mid/:x/b",
         "/grp{/:x}?",
@@ -689,8 +690,14 @@ describe("Router lookup", function () {
         "/plus///": { data: { path: "/plus/:bar+" }, params: { bar: "/" } },
         "/plus//a": { data: { path: "/plus/:bar+" }, params: { bar: "/a" } },
         "/star//": { data: { path: "/star/*" }, params: { "0": "" } },
-        "/rep//": { data: { path: "/rep/:bar*" }, params: { bar: "" } },
+        // Like `:bar+`, or no segment at all
+        "/rep//": undefined,
+        "/rep///": { data: { path: "/rep/:bar*" }, params: { bar: "/" } },
+        "/rep//a": { data: { path: "/rep/:bar*" }, params: { bar: "/a" } },
         "/rep": { data: { path: "/rep/:bar*" } },
+        "/repmid//b": undefined,
+        "/repmid///b": { data: { path: "/repmid/:bar*/b" }, params: { bar: "/" } },
+        "/repmid/b": { data: { path: "/repmid/:bar*/b" } },
         "/opt//": undefined,
         "/opt/": { data: { path: "/opt/:x?" } },
         "/mid//b": undefined,
