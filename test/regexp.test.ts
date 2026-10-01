@@ -897,6 +897,19 @@ describe("routeToRegExp: engines without duplicate named groups", () => {
   it.runIf(DUPLICATE_NAMED_GROUPS).each(fallbackRoutes)("%s compiles", (route) => {
     expect(duplicateGroupNames(routeToRegExp(route).source)).not.toEqual([]);
   });
+
+  // Static segments in a group after a trailing `*`: the route with them wins
+  // wherever both match (a literal last segment), so the `*` is lazy inline
+  it.each([
+    ["/x-*/{b}?", String.raw`^\/x-(?<_0>[\s\S]*?)(?:\/b)?\/?$`],
+    ["/a/x-*{/b}?", String.raw`^\/a\/x-(?<_0>[\s\S]*?)(?:\/b)?\/?$`],
+    ["/a/*{/b}?", String.raw`^\/a\/(?<_0>[\s\S]*?)(?:\/b)?\/?$`],
+    ["/a/*/{b}?", String.raw`^\/a\/(?<_0>[\s\S]*?)(?:\/b)?\/?$`],
+    ["/*/{b}?", String.raw`^\/(?<_0>[\s\S]*?)(?:\/b)?\/?$`],
+    ["/a/*{/b/c%}?", String.raw`^\/a\/(?<_0>[\s\S]*?)(?:\/b\/c%)?\/?$`],
+  ])("%s inlines a lazy `*`", (route, source) => {
+    expect(routeToRegExp(route).source).toBe(source);
+  });
 });
 
 // A single optional group followed by more of the route used to fall back to

@@ -1368,10 +1368,9 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   "/:x?/*/:y?",
   "/a//*/:y?",
   "/a/:x(\\d*)/*/:y?",
-  // A group right after a catch-all.
+  // A group right after a catch-all (static segments after a `*` inline).
   "/a/**{/b/:c?}?",
   "/a/**{.png}?",
-  "/a/x-*{/b}?",
   // An optional unnamed group before a trailing optional or another optional
   // group: the expansions don't line up segment by segment.
   "/{(\\d+)}?/:y?",
@@ -1384,8 +1383,6 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   "/a/{b}?/{(\\d+)}?",
   "/a{/(\\d+)}?/**",
   // An optional group after a trailing optional or `**:r`.
-  "/*/{b}?",
-  "/a/*/{b}?",
   "/*/{(\\d+)}?",
   "/a/*/{(\\d+)}?",
   "/a/**:r/{b}?",

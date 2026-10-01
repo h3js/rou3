@@ -161,6 +161,43 @@ function alternation(regexps: RegExp[], input: string): RegExp {
 }
 
 /**
+ * `pre{/static…}?` where `pre` ends in a `*` (or `pre/{static…}?`): the
+ * router's route with the group wins wherever both match (its last segment is
+ * a literal, the other's is the `*`'s), so a lazy `*` followed by the
+ * optional segments matches like it, without the alternation's duplicate
+ * group names. `undefined` for any other shape.
+ */
+function lazyStarGroup(
+  pre: string,
+  body: string,
+  input: string,
+  unnamed?: Unnamed,
+): RegExp | undefined {
+  const slash = pre.endsWith("/");
+  if (slash === (body.charCodeAt(0) === 47) /* '/' */) {
+    return;
+  }
+  const keys: string[] = [];
+  for (const segment of splitRoute(slash ? `/${body}` : body)) {
+    const key = segment && segmentKey(encodeEscapes(segment));
+    if (typeof key !== "string" || key === "") {
+      return;
+    }
+    keys.push(key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  }
+  const [segments, ownSeparator, openTail] = routeToRegExpSegments(
+    slash ? pre.slice(0, -1) : pre,
+    input,
+    [],
+    unnamed,
+  );
+  const base = joinSegments(segments, ownSeparator);
+  if (openTail === STAR_TAIL && base.endsWith(`${ANY})`)) {
+    return new RegExp(`^${base.slice(0, -1)}?)(?:/${keys.join("/")})?/?$`);
+  }
+}
+
+/**
  * Build an inline-optional regex for a route with a single `{…}?` group that
  * ends a segment (`/book{s}?`, `/foo{/bar}?/:id`). Returns `undefined`
  * (falling back to alternation expansion) for anything it can't inline
@@ -173,6 +210,14 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
     return;
   }
   const [pre, body, suf, mod] = group;
+  // Static segments after a route ending in a `*` (`/a/*{/b}?`, `/x-*/{b}?`)
+  const star =
+    mod === "?" && suf === "" && /(?<!\\)\*\/?$/.test(pre)
+      ? lazyStarGroup(pre, body, input, unnamed)
+      : undefined;
+  if (star) {
+    return star;
+  }
   if (
     mod !== "?" ||
     body === "" ||
@@ -181,9 +226,10 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
     scanFirstGroup(pre) ||
     scanFirstGroup(body) ||
     scanFirstGroup(suf) ||
-    // A group right after a catch-all (`/a/**{.json}?`, `/a/*{/b}?`,
+    // A group right after a catch-all (`/a/**{.json}?`, `/a/*{/:x}?`,
     // `/a/x-*{.png}?`) adds an optional part after it, which the router ranks
-    // against the route without it: expand (see `lazyCatchAll`).
+    // against the route without it: expand (see `lazyCatchAll`), unless it is
+    // static segments after a `*` (`lazyStarGroup`, above).
     /(?<!\\)\*$/.test(pre) ||
     needsModifierExpansion(pre + suf) ||
     needsModifierExpansion(pre + body + suf)
