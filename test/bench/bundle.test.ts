@@ -151,8 +151,15 @@ describe("benchmark", () => {
     // the one with it (`skipGroup`, counted by `_add` itself).
     // +67B raw / +25B gzip: early bails keep `{…}?` groups without unnamed
     // captures as fast as before (no `skipGroup` counting).
-    expect(bytes).toBeLessThanOrEqual(11305); // <11.31kb
-    expect(gzipSize).toBeLessThanOrEqual(4755); // <4.76kb
+    // +~224B raw / +~119B gzip: a regex group right after a `{…}` group
+    // ending in a param is an unnamed capture next to it, as in URLPattern
+    // (`joinGroup` gives the param its lazy constraint, emitted as `[^/]+?`
+    // only before a group; `/{:foo}(.*)` was `/:foo(.*)`), and a `?` / `+` /
+    // `*` group right after a param, constraint, group or `*` throws
+    // (`/*{*}` was `/**`). `skipGroup` counts a left-out group joined the
+    // same way, so unnamed keys after it line up (`/:a{(\d+)}?/*`).
+    expect(bytes).toBeLessThanOrEqual(11530); // <11.53kb
+    expect(gzipSize).toBeLessThanOrEqual(4875); // <4.88kb
   });
 });
 

@@ -1,4 +1,4 @@
-import { invalidSyntax } from "./operations/_utils.ts";
+import { invalidSyntax, MISPLACED_MODIFIER } from "./operations/_utils.ts";
 
 /** `[pre, body, suf, mod]` split of a `{...}` group, or `undefined`. */
 export type GroupDelimiter = [pre: string, body: string, suf: string, mod: string | undefined];
@@ -70,5 +70,32 @@ export function expandGroupDelimiters(path: string, input: string = path): strin
     invalidSyntax(`unsupported \`{}${mod}\``, input);
   }
 
-  return mod ? [pre + body + suf, pre + suf] : [pre + body + suf];
+  const full = joinGroup(joinGroup(pre, body, input), suf, input);
+  return mod ? [full, joinGroup(pre, suf, input)] : [full];
+}
+
+/**
+ * `a` + `b`, two parts of a route a `{` / `}` stood between. A `{` / `}` ends
+ * a param name (see {@link scanFirstGroup}), so where `a` ends in a bare
+ * `:name` and `b` starts with a regex group, the group is an unnamed capture
+ * next to the param, as in URLPattern, not its constraint: the param gets the
+ * lazy constraint a `:name` sharing its segment has anyway (`[^/]+?`, spelled
+ * without a `/`, which would split the segment). A `?` / `+` / `*` there, or
+ * after a constraint, group or `*`, would be a modifier on it (`/*{*}` a
+ * `**`), which it is not in URLPattern: `input` (quoted in the error) is
+ * rejected.
+ */
+export function joinGroup(a: string, b: string, input?: string): string {
+  // `a` ends in a `:name` (not a `**:name`, which ends its segment anyway; an
+  // invalid name throws later), a group of its segment (a stray `)` is a
+  // literal) or a `*`, none escaped, and `b` starts with a `(`, `?`, `+` or
+  // `*` (an empty `b` appends `"undefined"`, which ends in none of them)
+  const m = /(?<!\\)(\\\\)*((?<!\*\*):\w+|\([^/]*[^\\]\)|\*)([(?+*])$/.exec(a + b[0]);
+  if (m) {
+    // `m[3]` is no `(` (`?`, `+` and `*` sort after it)
+    if (m[3] > "(") invalidSyntax(MISPLACED_MODIFIER, input!);
+    // Only a `:name` starts with a char after `*` (`(` and `*` don't)
+    if (m[2] > "*") a += "([^\\x2f]+?)";
+  }
+  return a + b;
 }

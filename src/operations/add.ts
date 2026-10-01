@@ -1,4 +1,4 @@
-import { expandGroupDelimiters, scanFirstGroup } from "../_group-delimiters.ts";
+import { expandGroupDelimiters, joinGroup, scanFirstGroup } from "../_group-delimiters.ts";
 import { toGroupName, toUnnamedGroupKey } from "../_group-names.ts";
 import { replaceSegmentWildcards } from "../_segment-wildcards.ts";
 import { createRouter } from "../context.ts";
@@ -23,7 +23,8 @@ import {
  *
  * Param names are `[A-Za-z_]\w*`: a `-` ends one (`:test-id` is `:test` and a
  * literal `-id`), and so does a group's `{` / `}` (`/:a{b}?` is `:a` and an
- * optional `b`), as in URLPattern. Also as there, a `:name` sharing its
+ * optional `b`; `/{:a}(\\d+)` is `:a` and an unnamed `(\\d+)`, not its
+ * constraint), as in URLPattern. Also as there, a `:name` sharing its
  * segment takes as little as it can (`/:a-:b` on `/x-y-z` is `x` and `y-z`),
  * and a `?` on one after text makes only the param optional (`/pre-:x?`
  * matches `/pre-` and `/pre-a`; `/{pre-:x}?` drops the segment). After a
@@ -33,7 +34,8 @@ import {
  * @throws a `rou3:` error for pattern syntax with no meaning (yet), quoting
  * the pattern: an unclosed `(`, unbalanced or nested `{}`, `{…}+` / `{…}*`,
  * a `?` / `+` / `*` anywhere but after a whole-segment `:name` (`?` also
- * after `:name(regex)` and in a mixed segment), a raw `?` after plain text
+ * after `:name(regex)` and in a mixed segment; never after a group's `{` /
+ * `}`: `/{:a}{*}`, `/{:a}?*`), a raw `?` after plain text
  * (`/foo?`), a `**` in the middle of a segment (`/a**b`), an empty or `(?`
  * group, a `:` without a valid name (`/:0`, `/:café`, `/:id$`), more after `**:name`
  * in its segment, a repeated param name, more than one `**`, a `\` that
@@ -269,7 +271,9 @@ export function skipGroup(path: string, input: string, unnamed: Unnamed = same):
   if (!/[*(]/.test(body) && !pre.endsWith("*")) return unnamed;
   const count = (p: string) => _add(createRouter(), "", p, undefined, undefined, input);
   const before = count(pre);
-  const skip = count(pre + body) - before;
+  // Joined like `expandGroupDelimiters` joins them: `/:a{(\d+)}?` holds an
+  // unnamed `(\d+)`, not `:a`'s constraint
+  const skip = count(joinGroup(pre, body, input)) - before;
   return skip ? (index) => unnamed(index < before ? index : index + skip) : unnamed;
 }
 
@@ -381,9 +385,11 @@ export function getParamRegexp(
 
   const regex = decodeEscapes(
     _s
-      // Names were checked and recorded above; a `\uFFFE:` is inside a group
-      .replace(/(?<!\uFFFE):([A-Za-z_]\w*)(?:\(([^)]*)\))?(\?$)?/g, (_, id, p, o) => {
-        const group = `(?<${toGroupName(id)}>${p || "[^/]+?"})`;
+      // Names were checked and recorded above; a `\uFFFE:` is inside a group.
+      // `[^\x2f]+?` before a group is the `:name` `joinGroup` constrained,
+      // emitted as `[^/]+?` (alone it stays as written).
+      .replace(/(?<!\uFFFE):([A-Za-z_]\w*)(?:\(([^)]*)\))?(\?$)?/g, (m, id, p, o, i, s) => {
+        const group = `(?<${toGroupName(id)}>${p && p + s[i + m.length] != "[^\\x2f]+?(" ? p : "[^/]+?"})`;
         return o ? `(?:${group})?` : group;
       })
       .replace(/\((?![?<])/g, () => `(?<${groupKey(_i++)}>`),

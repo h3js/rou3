@@ -226,8 +226,22 @@ function parseSegments(src: string, atEnd: boolean, dot: boolean, inGroup = fals
       }
       const lazy = src[end + 1] === "?";
       const next = end + (lazy ? 2 : 1);
-      applyOptional(segments, src.slice(i + 3, end - 1), atEnd && next === n, lazy, dot, inGroup);
+      const inner = src.slice(i + 3, end - 1);
+      applyOptional(segments, inner, atEnd && next === n, lazy, dot, inGroup);
       i = next;
+      // More of its segment after an in-segment group (`/{:x}?(\d+)`; `{}`
+      // can't nest, and no segment holds a `/`). It is part of a segment (a
+      // `(.+)` is no `:_0+`), and an optional unit after it in the segment
+      // is no route's: a `{…}?` there routes otherwise than an in-place
+      // `-:y?` (`/{:x}?(.+)-:y?`).
+      if (i < n && !continues(src, i) && !inGroup && !inner.includes("\\/")) {
+        const end = segmentEnd(src, i);
+        if (src.startsWith("(?:", end) && !src.startsWith("(?:\\/", end)) {
+          throw new Error(`rou3: unsupported optional group after a group in "${src}"`);
+        }
+        segments[segments.length - 1] += reverseSegment(src.slice(i, end), true);
+        i = end;
+      }
       continue;
     }
 
@@ -288,11 +302,11 @@ function parseSegments(src: string, atEnd: boolean, dot: boolean, inGroup = fals
 }
 
 /** Reverse a single segment (no top-level separators) into route syntax. */
-function reverseSegment(seg: string): string {
+function reverseSegment(seg: string, part?: boolean): string {
   // Whole-segment repeat form `:name+` (a constrained one, `PAT(?:/PAT)*`
   // as older versions emitted for `:name(pat)+`, has no route form: its `/`
-  // makes `constraint()` throw).
-  const whole = matchNamedGroup(seg, 0);
+  // makes `constraint()` throw). `part`: `seg` is the rest of a segment.
+  const whole = !part && matchNamedGroup(seg, 0);
   if (whole && whole.end === seg.length && whole.body === ".+") {
     return `:${whole.name}+`;
   }
@@ -301,11 +315,15 @@ function reverseSegment(seg: string): string {
   let i = 0;
   // After a bare `:name`, a word char would extend the name: escape it. A
   // char route text percent-encodes (`encodeLiteral`: non-ASCII, space,
-  // `{ } ? ^ #`, ...) is no literal of any route: throw. A `(pat)` would read as its
-  // constraint, after any group a `*` as a modifier and after a `*` a `*` as
-  // a `**`: no route emits these.
+  // `{ } ? ^ #`, ...) is no literal of any route: throw. A `(pat)` would read
+  // as its constraint, so the name gets the one it has, without a `/`
+  // (`:x([^\x2f]+?)(pat)`, what `{:x}(pat)` expands to, see `joinGroup`).
+  // After any group a `*` reads as a modifier and after a `*` a `*` as a
+  // `**`: no route emits these.
   let afterName = false;
   let afterStar = false;
+  // The body of the last group (`[^/]+?`, `[^/]+` or `[^/]*` for a bare name)
+  let lastBody = "";
   const literal = (ch: string) => {
     if (encodeLiteral(ch) !== ch) {
       throw new Error(
@@ -316,7 +334,12 @@ function reverseSegment(seg: string): string {
     afterName = afterStar = false;
   };
   const param = (token: string, name?: string) => {
-    if ((afterName && token[0] !== ":") || (token === "*" && (afterStar || out.endsWith(")")))) {
+    if (afterName && token[0] === "(") {
+      out += `([^\\x2f]${lastBody.slice(4)})`;
+    } else if (
+      (afterName && token[0] !== ":") ||
+      (token === "*" && (afterStar || out.endsWith(")")))
+    ) {
       throw new Error(`rou3: no route has a param followed by a group in "${seg}"`);
     }
     out += token;
@@ -329,6 +352,7 @@ function reverseSegment(seg: string): string {
       const g = matchNamedGroup(seg, i);
       if (g) {
         param(paramToken(g.name, g.body, g.unnamed), g.name);
+        lastBody = g.body;
         i = g.end;
         continue;
       }
