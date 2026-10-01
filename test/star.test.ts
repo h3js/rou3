@@ -477,6 +477,72 @@ describe("`(.*)` and `:name(.*)` are a `*`", () => {
     expect({ ...router.root, hasSuffix: undefined }).toEqual(createRouter().root);
   });
 
+  // A `:name(.*)` is a `*`: any of its segments may be empty, while every
+  // segment of a `:name+` / `:name*` / `**:name` needs a value (URLPattern)
+  it("takes empty segments where a `:name+` doesn't", () => {
+    const cases: [route: string, path: string, params: Record<string, string> | null][] = [
+      ["/a/:p(.*)", "/a//b", { p: "/b" }],
+      ["/a/:p(.*)", "/a/b//", { p: "b/" }],
+      ["/a/:p(.*)", "/a/b//c", { p: "b//c" }],
+      ["/a/:p(.*)", "/a/", { p: "" }],
+      ["/a/:p(.*)", "/a//", { p: "" }],
+      ["/a/:p(.*)/c", "/a//c", { p: "" }],
+      ["/a/:p(.*)/c", "/a/b//c", { p: "b/" }],
+      ["/a/x-:p(.*)", "/a/x-//b", { p: "//b" }],
+      ["/a/:p+", "/a//b", null],
+      ["/a/:p+", "/a/b//", null],
+      ["/a/:p+", "/a/b//c", null],
+      ["/a/:p+", "/a/", null],
+      ["/a/:p+/c", "/a/b//c", null],
+      ["/a/**:p", "/a//b", null],
+      ["/a/:p*", "/a/b//c", null],
+      ["/a/:p+", "/a/b/c", { p: "b/c" }],
+    ];
+    for (const [route, path, params] of cases) {
+      const router = createRouter<string>();
+      addRoute(router, "GET", route, route);
+      const aot = new Function(`return ${compileRouterToString(router)}`)();
+      for (const match of [
+        findRoute(router, "GET", path),
+        findAllRoutes(router, "GET", path).at(-1),
+        compileRouter(router)("GET", path),
+        compileRouter(router, { matchAll: true })("GET", path).at(-1),
+        aot("GET", path),
+      ]) {
+        expect(match ? { ...match.params } : null, `${route} on ${path}`).toEqual(params);
+      }
+      const groups = routeToRegExp(route).exec(path)?.groups;
+      expect(groups ? definedGroups(groups) : null, `regex ${route} on ${path}`).toEqual(params);
+    }
+
+    // Side by side, the narrower `:name+` wins where both match, in every
+    // matcher and both registration orders
+    for (const routes of [
+      ["/a/:p(.*)", "/a/:q+"],
+      ["/a/:q+", "/a/:p(.*)"],
+    ]) {
+      const router = createRouter<string>();
+      for (const route of routes) addRoute(router, "GET", route, route);
+      const aot = new Function(`return ${compileRouterToString(router)}`)();
+      for (const [path, best, all] of [
+        ["/a/b/c", "/a/:q+", ["/a/:p(.*)", "/a/:q+"]],
+        ["/a//b", "/a/:p(.*)", ["/a/:p(.*)"]],
+        ["/a/b//", "/a/:p(.*)", ["/a/:p(.*)"]],
+        ["/a/", "/a/:p(.*)", ["/a/:p(.*)"]],
+      ] as const) {
+        expect(findRoute(router, "GET", path)?.data, `${routes} ${path}`).toBe(best);
+        expect(compileRouter(router)("GET", path)?.data, `${routes} ${path}`).toBe(best);
+        expect(aot("GET", path)?.data, `${routes} ${path}`).toBe(best);
+        expect(findAllRoutes(router, "GET", path).map((m) => m.data)).toEqual(all);
+        expect(
+          compileRouter(router, { matchAll: true })("GET", path).map(
+            (m: { data: string }) => m.data,
+          ),
+        ).toEqual(all);
+      }
+    }
+  });
+
   it("ranks a `:name(.*)` like a `*`", () => {
     const routes = ["/foo/**", "/foo/:p(.*)", "/foo/**:rest", "/foo/:x", "/foo/bar"];
     const router = createRouter<string>();
