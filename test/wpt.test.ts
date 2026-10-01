@@ -542,6 +542,17 @@ const PERCENT_ENCODING_CASES: [string, string, Record<string, string> | null][] 
   ["/café/:x*", "/café", {}],
   ["/café/:x*", "/café/a/é", { x: "a/%C3%A9" }],
   ["/café/:x*", "/café//", null],
+  // Encoded text around an optional param compiled in place after a capture
+  // (its `?` is the modifier, never a literal `%3F`)
+  ["/café-*-:x?", "/café-a-b", { "0": "a", x: "b" }],
+  ["/café-*-:x?", "/café-a-", { "0": "a" }],
+  ["/café-*-:x?", "/café---", { "0": "-" }],
+  ["/*-é-:x?", "/a-é-b", { "0": "a", x: "b" }],
+  ["/*-é-:x?", "/a-é-", { "0": "a" }],
+  ["/a\\?*-:x?", "/a?b-c", { "0": "b", x: "c" }],
+  ["/a\\?*-:x?", "/a?b-", { "0": "b" }],
+  ["/:a(\\d+)é:b?", "/12é", { a: "12" }],
+  ["/:a(\\d+)é:b?", "/12é3", { a: "12", b: "3" }],
 ];
 
 describe("wpt urlpattern compatibility: percent-encoding", () => {

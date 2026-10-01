@@ -11,6 +11,7 @@ import {
 import { compileRouter, compileRouterToString } from "../src/compiler.ts";
 import { normalizePath } from "../src/operations/_utils.ts";
 import { format } from "oxfmt";
+import { isDeepStrictEqual } from "node:util";
 
 describe("route matching", () => {
   const router = createRouter([
@@ -320,6 +321,8 @@ describe("params sharing a segment (URLPattern)", () => {
     "/e/:a:b?",
     "/g/*-:x?",
     "/h/:a(\\d+)-:x?",
+    "/k/:a(\\d+):b?",
+    "/i/*:x?",
   ]);
   const compiledLookup = compileRouter(router);
   // eslint-disable-next-line no-new-func
@@ -364,15 +367,115 @@ describe("params sharing a segment (URLPattern)", () => {
       expect(match("/e//")).toBeUndefined();
       expect(match("/e/x")?.params).toEqual({ a: "x" });
       expect(match("/e/xyz")?.params).toEqual({ a: "x", b: "yz" });
-      // A greedy `*` or a constraint before it: the route with the param wins.
-      expect(match("/g/a-b-")?.params).toEqual({ "0": "a", x: "b-" });
-      expect(match("/g/a-")?.params).toEqual({ "0": "a" });
-      expect(match("/g/--")?.params).toEqual({ "0": "", x: "-" });
       expect(match("/h/1-")?.params).toEqual({ a: "1" });
       expect(match("/h/1-a")?.params).toEqual({ a: "1", x: "a" });
     });
+
+    it(`a greedy capture before \`:x?\` takes what it can, as in URLPattern (${name})`, () => {
+      // An absent param has no key (`toStrictEqual` on a plain copy).
+      const params = (p: string) => {
+        const m = match(p);
+        return m && { ...m.params };
+      };
+      expect(params("/g/a-b-")).toStrictEqual({ "0": "a-b" });
+      expect(params("/g/a-b-c")).toStrictEqual({ "0": "a-b", x: "c" });
+      expect(params("/g/a-")).toStrictEqual({ "0": "a" });
+      expect(params("/g/--")).toStrictEqual({ "0": "-" });
+      expect(params("/g/-")).toStrictEqual({ "0": "" });
+      expect(params("/g/a")).toBeUndefined();
+      expect(params("/k/12")).toStrictEqual({ a: "12" });
+      expect(params("/k/1")).toStrictEqual({ a: "1" });
+      expect(params("/k/12a")).toStrictEqual({ a: "12", b: "a" });
+      expect(params("/k/a")).toBeUndefined();
+      // The `*` takes it all, and the segment is required (as `/i/*.png`'s)
+      expect(params("/i/ab")).toStrictEqual({ "0": "ab" });
+      expect(params("/i")).toBeUndefined();
+    });
   }
 });
+
+// A `?` param sharing its segment splits it like URLPattern's single regex
+// (a greedy capture before it takes what it can), in every matcher and in
+// `routeToRegExp`. One segment only: URLPattern's `*` spans `/`.
+describe.skipIf(typeof (globalThis as any).URLPattern !== "function")(
+  "params sharing a segment with an optional one (URLPattern parity)",
+  () => {
+    const patterns = [
+      "/:a(\\d+):b?",
+      "/*-:x?",
+      "/*.:ext?",
+      "/:a-:b?",
+      "/:a.:b?",
+      "/:a:b?",
+      "/:a:b(\\d+)?",
+      "/:a(\\d+)-:b?",
+      "/:a(\\d+):b(\\d+)?",
+      "/:a([a-z]+)-:b([a-z1]+)?",
+      "/pre-:x?",
+      "/pre-:x(\\d+)?",
+      "/*-*-:x?",
+      "/*:x?",
+    ];
+    const chars = ["a", "1", "-", "."];
+    const paths: string[] = [];
+    // URLPattern resolves `.` / `..` segments
+    const grow = (s: string) => {
+      if (s && s !== "." && s !== "..") paths.push(`/${s}`);
+      if (s.length < 4) for (const c of chars) grow(s + c);
+    };
+    grow("");
+    const plain = (params: object | undefined) => ({ ...params });
+
+    for (const pattern of patterns) {
+      it(pattern, () => {
+        const urlPattern = new (globalThis as any).URLPattern({ pathname: pattern });
+        const router = createEmptyRouter();
+        addRoute(router, "GET", pattern, pattern);
+        const compiled = compileRouter(router);
+        const compiledAll = compileRouter(router, { matchAll: true });
+        const regex = routeToRegExp(pattern);
+        const diffs: string[] = [];
+        for (const path of paths) {
+          const groups = urlPattern.exec({ pathname: path })?.pathname.groups;
+          const expected =
+            groups && Object.fromEntries(Object.entries(groups).filter(([, v]) => v !== undefined));
+          const found = findRoute(router, "GET", path);
+          const all = findAllRoutes(router, "GET", path);
+          const got = {
+            findRoute: found && plain(found.params),
+            compiled: compiled("GET", path) && plain(compiled("GET", path)!.params),
+            findAllRoutes: all.map((m) => plain(m.params)),
+            matchAll: compiledAll("GET", path).map((m) => plain(m.params)),
+            regex: (() => {
+              const m = regex.exec(path);
+              if (!m) return undefined;
+              const g: Record<string, string> = {};
+              for (const [k, v] of Object.entries(m.groups || {})) {
+                if (v !== undefined) g[k.replace(/^_(\d+)$/, "$1")] = v;
+              }
+              return g;
+            })(),
+          };
+          const want = {
+            findRoute: expected,
+            compiled: expected,
+            findAllRoutes: expected ? [expected] : [],
+            matchAll: expected ? [expected] : [],
+            regex: expected,
+          };
+          for (const key of Object.keys(want) as (keyof typeof want)[]) {
+            if (!isDeepStrictEqual(got[key], want[key])) {
+              diffs.push(
+                `${path} ${key}: ${JSON.stringify(got[key])} (${JSON.stringify(want[key])})`,
+              );
+            }
+          }
+        }
+        expect(diffs).toEqual([]);
+      });
+    }
+  },
+);
 
 describe("method-agnostic fallback (compiled parity)", () => {
   // A node's method-agnostic (`""`) entries are siblings of its method-scoped

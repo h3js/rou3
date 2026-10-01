@@ -547,18 +547,26 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/a/1", "/a"],
   },
-  // After a greedy `*` (or a constraint) only an alternation splits the
-  // segment like the router (`*-:x` wins on `a-b-` with `0: "a"`).
+  // After a greedy `*` (or a constraint) too: the capture before it takes
+  // what it can, as in URLPattern (`a-b-` is `0: "a-b"`, no `x`).
   "/f/*-:x?": {
-    regex: duplicateNames(
-      String.raw`^(?:\/f\/(?<_0>[^/]*)-(?<x>[^/]+?)\/?|\/f\/(?<_0>[^/]*)-\/?)$`,
-    ),
+    regex: /^\/f\/(?<_0>[^/]*)-(?:(?<x>[^/]+?))?\/?$/,
     match: [
-      ["/f/a-b-", { "0": "a", x: "b-" }],
+      ["/f/a-b-", { "0": "a-b", x: undefined }],
       ["/f/a-b-c", { "0": "a-b", x: "c" }],
       ["/f/a-", { "0": "a", x: undefined }],
+      ["/f/--", { "0": "-", x: undefined }],
     ],
     noMatch: ["/f/a", "/f"],
+  },
+  "/x/:a(\\d+):b?": {
+    regex: /^\/x\/(?<a>\d+)(?:(?<b>[^/]+?))?\/?$/,
+    match: [
+      ["/x/12", { a: "12", b: undefined }],
+      ["/x/1", { a: "1", b: undefined }],
+      ["/x/12a", { a: "12", b: "a" }],
+    ],
+    noMatch: ["/x/a", "/x"],
   },
   // After a lone `:a`, the route without `b` is the whole-segment `/:a`,
   // which needs a value too.
@@ -1230,13 +1238,13 @@ export const LOOKAHEAD_ROUTES: ReadonlySet<string> = new Set(["/files/*{.:ext}?/
 //
 // A trailing single optional group is normally compiled inline as `(?:...)?`
 // (see inlineOptionalGroup in src/regexp.ts), which avoids duplicate names. But
-// a mid-segment optional after a greedy open-ended capture cannot be inlined
-// safely (the capture would swallow the optional literal), so it falls back to
-// alternation and reuses the capture name across branches. These routes exercise
+// a mid-segment optional group after a greedy open-ended capture cannot be
+// inlined safely (the capture would swallow the optional literal the router's
+// longer route keeps), so it falls back to alternation and reuses the capture
+// name across branches. These routes exercise
 // that fallback and are asserted to be rejected by strict PCRE2 engines.
 export const PCRE2_DUPLICATE_NAME_ROUTES: ReadonlySet<string> = new Set([
   "/media/*{.webp}?",
-  "/f/*-:x?",
   "/*-x{-x}?",
   "/docs/{v2}?/:page?",
 ]);
@@ -1311,51 +1319,11 @@ export const SWEEP_DUPLICATE_NAME_PATTERNS: ReadonlySet<string> = new Set([
   // Two groups.
   "/:x{.:e}?/b{.json}?",
   "/a/:x{.:e}?/b{.json}?",
-  // A mid-segment optional after a greedy capture, also where both can end
-  // the same way (`-x` / `-x-x`).
+  // A mid-segment optional group after a greedy capture, also where both can
+  // end the same way (`-x` / `-x-x`). (An optional param, `*-:x?`, compiles
+  // in place like the tree.)
   "/media/*{.webp}?",
-  "/f/*-:x?",
   "/*-x{-x}?",
-  "/*-:e?",
-  "/a/*-:e?",
-  "/*-:e?/a",
-  "/a/*-:e?/a",
-  "/*-:e?/:y",
-  "/a/*-:e?/:y",
-  "/*-:e?/*",
-  "/a/*-:e?/*",
-  "/*-:e?/:y?",
-  "/a/*-:e?/:y?",
-  "/*-:e?/**",
-  "/a/*-:e?/**",
-  "/*-:e?/*.png",
-  "/a/*-:e?/*.png",
-  "/*-:e?/x-:y",
-  "/a/*-:e?/x-:y",
-  "/*-:e?/x-:y?",
-  "/a/*-:e?/x-:y?",
-  "/*-:e?/b{.json}?",
-  "/a/*-:e?/b{.json}?",
-  // ... after a `**` (`**-:e?` is `**` then `*-:e?`).
-  "/**-:e?",
-  "/**-:e?/a",
-  "/**-:e?/:y",
-  "/**-:e?/*",
-  "/**-:e?/:y?",
-  "/**-:e?/*.png",
-  "/**-:e?/x-:y",
-  "/**-:e?/x-:y?",
-  "/**-:e?/b{.json}?",
-  "/a/**-:e?",
-  "/a/**-:e?/a",
-  "/a/**-:e?/:y",
-  "/a/**-:e?/*",
-  "/a/**-:e?/:y?",
-  "/a/**-:e?/*.png",
-  "/a/**-:e?/x-:y",
-  "/a/**-:e?/x-:y?",
-  "/a/**-:e?/b{.json}?",
-  "/a/**.:ext?",
   // A `:x*` before a `*` that is optional in the route without it.
   "/a/:r*/b/*",
   "/:r*/*.png/*",

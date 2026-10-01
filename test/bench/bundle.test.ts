@@ -138,8 +138,13 @@ describe("benchmark", () => {
     // -~79B raw / -~38B gzip: `:name*` expands to a plain `**:name` (it never
     // captures `""`, as in URLPattern), so its marker and the `empty` slot in
     // `paramsMap` are gone.
-    expect(bytes).toBeLessThanOrEqual(10790); // <10.79kb
-    expect(gzipSize).toBeLessThanOrEqual(4520); // <4.52kb
+    // +~186B raw / +~74B gzip: a `?` param after a capture in its segment
+    // (`*-:x?`, `:a(\d+):b?`) is compiled in place by `getParamRegexp`
+    // instead of expanding into two routes, so a greedy capture before it
+    // takes what it can, as in URLPattern; an absent one has no key. Its `?`
+    // is kept raw past the percent-encoder (it would be a literal `%3F`).
+    expect(bytes).toBeLessThanOrEqual(10975); // <10.98kb
+    expect(gzipSize).toBeLessThanOrEqual(4595); // <4.60kb
   });
 });
 

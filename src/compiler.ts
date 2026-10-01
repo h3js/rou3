@@ -473,8 +473,13 @@ function compileFinalMatch(
       } else {
         const tmp = `_m${tmpCount++}`;
         conditions.push(`(${tmp}=${regexp}.exec(${params[i]}))!==null`);
+        // An optional param ending the segment (`*-:x?` is `…(?:(?<x>…))?$`)
+        // gets no key when absent, as in the interpreter
+        const optional = map[1].source.endsWith("))?$") && groups.names[groups.names.length - 1];
         for (const name of groups.names) {
-          paramsCode += `${propKey(fromGroupName(name))}:${tmp}.groups.${name},`;
+          const prop = `${propKey(fromGroupName(name))}:${tmp}.groups.${name}`;
+          paramsCode +=
+            name === optional ? `...(${tmp}.groups.${name}!==void 0&&{${prop}}),` : `${prop},`;
         }
       }
     }

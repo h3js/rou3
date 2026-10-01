@@ -1209,6 +1209,11 @@ describe("Router remove", function () {
       ["/a/**{.md}?", "/a/**/*{.md}?", "/a/x/y.md"],
       ["/a{/**/*}?", "/a{/**}?", "/a/x/y"],
       ["/a{/**}?", "/a{/**/*}?", "/a"],
+      // An optional param after a capture is one entry (compiled in place)
+      ["/a/*-:x", "/a/*-:x?", "/a/b-c"],
+      ["/a/*-:x?", "/a/*-:x", "/a/b-c"],
+      ["/a/*-", "/a/*-:x?", "/a/b-"],
+      ["/a/*-:x?", "/a/*-:x?/b", "/a/b-"],
     ] as const) {
       for (const order of [
         [keep, remove],
