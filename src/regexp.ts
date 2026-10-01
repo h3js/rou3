@@ -9,6 +9,7 @@ import {
   PARAM_MODIFIER,
   segmentKey,
   splitRoute,
+  starGroups,
 } from "./operations/_utils.ts";
 import { appendsCleanly } from "./_optional-append.ts";
 import { canBeEmpty, isOptionalGroups } from "./_regexp-scan.ts";
@@ -57,9 +58,9 @@ const STAR_SEGMENT = "*/";
  * and a trailing `*` that takes nothing after the stripped slash
  * (`/a/*` matches `/a/`, not `/a`) — so it can stand in for the router as a
  * guard or scope check. Not modeled: param
- * constraints that can match `/` (`(.*)`: the tree splits on `/` first, so
- * the regex matches more paths, never fewer), the empty path, and
- * `normalize: true`.
+ * constraints that can match `/` (`(.+)`: the tree splits on `/` first, so
+ * the regex matches more paths, never fewer; a `(.*)` is no constraint but a
+ * `*`, exact), the empty path, and `normalize: true`.
  *
  * Most routes also compile to RE2-compatible output (RE2, Go, Rust `regex`):
  * the trailing-slash rule is encoded without look-behinds, except for the few
@@ -77,7 +78,7 @@ const STAR_SEGMENT = "*/";
  * named group would compile on some engines and not on others.
  *
  * A `*` is a catch-all (`[\s\S]*`), also inside a segment (`/*.png` matches
- * `/a/b.png`). Segments after a catch-all (`/**\/_payload.json`, `/*\/edit`,
+ * `/a/b.png`), and so is a `(.*)` group (a `:name(.*)` is one keyed by name). Segments after a catch-all (`/**\/_payload.json`, `/*\/edit`,
  * and a `:name+` / `:name*` before the last segment) follow it in the regex,
  * so they match at the end of the path as in the router. Where the route has
  * one optional segment after it, the catch-all is lazy or greedy to pick the
@@ -101,7 +102,9 @@ export function routeToRegExp(route: string = "/"): RegExp {
   // Validate with the router itself: every pattern it rejects (see
   // `addRoute`) throws here with the same error.
   addRoute(createRouter(), "", route);
-  return toRegExp(route, route);
+  // `(.*)` is a `*`, `:name(.*)` one keyed by `name` (see `starGroups`)
+  const [path, unnamed] = starGroups(route);
+  return toRegExp(path, route, unnamed);
 }
 
 /**
@@ -681,7 +684,11 @@ function routeToRegExpSegments(
 ): [segments: string[], ownSeparator: boolean, openTail: string | boolean] {
   const reSegments: string[] = [];
   let idCtr = 0;
-  const unnamedKey = (index: number) => `_${unnamed(index)}`;
+  // `_N`, or the name of a `:name(.*)` (see `starGroups`)
+  const unnamedKey = (index: number) => {
+    const key = unnamed(index);
+    return typeof key === "string" ? toGroupName(key) : `_${key}`;
+  };
   let ownSeparator = false;
   // The `**` (or `:x+` / `:x*`) segments after which match from the end of
   // the path: a route (expansion) can have one.
@@ -824,7 +831,7 @@ function routeToRegExpSegments(
   // regex, which no constraint can write) is a catch-all: it takes `/` too,
   // the rest of the route matching the end of the path (see `splitStar`)
   const greedy = (source: string): string => {
-    const out = source.replace(/(\(\?<_\d+>)\[\^\/\]\*\)/, `$1${ANY})`);
+    const out = source.replace(/(\(\?<\w+>)\[\^\/\]\*\)/, `$1${ANY})`);
     if (out !== source) oneCatchAll();
     return out;
   };

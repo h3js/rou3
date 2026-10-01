@@ -26,12 +26,15 @@ const ROUTE_SPECIAL = new Set([":", "(", ")", "*", "\\", "+", "|", "$", "[", "]"
  * anchored with `^` and `$`, the flags `i`/`m`/`s`/`u`/`v` (`g`/`y`/`d` are
  * ignored) and constructs outside the dialect `routeToRegExp` emits. An
  * unnamed `[^/]*` (a single-segment `*` before 0.12) reads as `([^\x2f]*)`.
+ * A named `[\s\S]*` where `routeToRegExp` puts a `*` is a `:name(.*)` (a `*`
+ * keyed by name), and an unnamed one right after a name or group a `(.*)`.
  *
  * @example
  * regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"
  * regExpToRoute(/^\/path\/(?<param>[^/]+)\/?$/); // "/path/:param"
  * regExpToRoute(/^\/path(?:\/(?<_0>(?:[\s\S]*[^/])?\/*?))??\/?$/); // "/path/**"
  * regExpToRoute(/^\/path\/(?<_0>(?:[\s\S]*[^/])?\/*?)\/?$/); // "/path/*"
+ * regExpToRoute(/^\/path(?:\/(?<p>(?:[\s\S]*[^/])?\/*?))?\/?$/); // "/path/:p(.*)"
  */
 export function regExpToRoute(regexp: RegExp | string): string {
   // Routes carry no flags, so a match-affecting flag would be silently dropped
@@ -133,7 +136,7 @@ export function regExpToRoute(regexp: RegExp | string): string {
 // `:x` and `:x+`.
 const VALUE_CATCH_ALL = /\(\?<(\w+)>\[\^\/\]\+\(\?:\\\/\[\^\/\]\+\)\*(\??)\)/g;
 const STAR_LOOKBEHIND =
-  /\(\?:\\\/\(\?<(_\d+)>\(\?:\[\\s\\S\]\*\[\^\/\]\)\?\\\/\*\?\)\\\/\?\|\(\?<!\\\/\)\)$/;
+  /\(\?:\\\/\(\?<(\w+)>\(\?:\[\\s\\S\]\*\[\^\/\]\)\?\\\/\*\?\)\\\/\?\|\(\?<!\\\/\)\)$/;
 const REQUIRED_PARAM = /\(\?:\(\?<(\w+)>\[\^\/\]\+\)\\\/\?\|\\\/\)$/;
 const REQUIRED_VALUE =
   /\(\?:\\\/\\\/\|\(\?<(\w+)>\(\?:\[\\s\\S\]\*\[\^\/\]\|\\\/\\\/\)\\\/\*\?\)\\\/\?\)$/;
@@ -148,7 +151,7 @@ const REQUIRED_HEAD = /\(\?:\(\?<(\w+)>\[\^\/\]\+\)\(\?:\\\/\|\$\)\|\\\/\)$/;
 const REQUIRED_ENDINGS = [
   [REQUIRED_PARAM, "[^/]*"],
   [REQUIRED_VALUE, "[\\s\\S]+"],
-  [REQUIRED_CATCH_ALL, "[\\s\\S]*"],
+  [REQUIRED_CATCH_ALL, "[\\s\\S]+"],
   [REQUIRED_DOT, ".*"],
 ] as const;
 
@@ -304,9 +307,10 @@ function parseSegments(src: string, atEnd: boolean, dot: boolean, inGroup = fals
       }
     }
 
-    // One-or-more catch-all: `/(?<name>[\s\S]+)` (`**:name` / `:name+`,
-    // `[\s\S]*` before they needed a value). An unnamed `(?<_N>…)` is a
-    // constraint, not a param name.
+    // One-or-more catch-all: `/(?<name>[\s\S]+)` (`**:name` / `:name+`), or
+    // `/(?<name>[\s\S]*)`, a `:name(.*)` (0.11 emitted it for a `**:name`,
+    // which matched `""` there too). An unnamed `(?<_N>…)` is a constraint,
+    // not a param name.
     if (src.startsWith("\\/", i)) {
       const g = matchNamedGroup(src, i + 2);
       if (
@@ -315,7 +319,8 @@ function parseSegments(src: string, atEnd: boolean, dot: boolean, inGroup = fals
         isCatchAll(g.body, dot, true) &&
         !g.unnamed
       ) {
-        segments.push(`:${g.name}+`);
+        // `[\s\S]*` (it may be empty) is a `:name(.*)`, a `*` keyed by name
+        segments.push(STAR_BODY.test(g.body) ? `:${g.name}(.*)` : `:${g.name}+`);
         i = g.end;
         continue;
       }
@@ -378,6 +383,8 @@ function reverseSegment(seg: string, part?: boolean): string {
     return ch.length;
   };
   const param = (token: string, name?: string) => {
+    // A `*` right after a name or group is a `(.*)` there (`{:x}(.*)`)
+    if (token === "*" && !afterStar && (afterName || out.endsWith(")"))) token = "(.*)";
     if (afterName && token[0] === "(") {
       out += `([^\\x2f]${lastBody.slice(4)})`;
     } else if (
@@ -592,8 +599,8 @@ function paramToken(name: string, body: string, unnamed: boolean): string {
   // sharing its segment, or `[^/]*` as older versions emitted) have
   // dedicated syntax. Every other body becomes an inline `(pat)` constraint,
   // which `constraint()` rejects if it can't survive path splitting.
-  if (unnamed && (body === "[\\s\\S]*" || body === "[\\s\\S]*?")) {
-    return "*";
+  if (STAR_BODY.test(body)) {
+    return unnamed ? "*" : `:${name}(.*)`;
   }
   // A single-segment `*` before 0.12 (a `*` takes `/` too now): the same
   // class, spelled without the `/` a constraint can't hold
@@ -652,6 +659,10 @@ interface NamedGroup {
   /** An unnamed capture (`_N`), told apart by the raw group name (see `UNNAMED`). */
   unnamed: boolean;
 }
+
+// The body `routeToRegExp` emits for a `*` (also a `:name(.*)`): lazy where
+// optional segments follow it
+const STAR_BODY = /^\[\\s\\S\]\*\??$/;
 
 // The unnamed-capture group name `routeToRegExp` emits. Tested on the raw group
 // name: a param `:_0` is emitted escaped and decodes to the same `_0`.
@@ -718,10 +729,12 @@ function readGroup(src: string, start: number): number {
  * follow, is optional, as the route without it: `routeToRegExp` wraps it in a
  * greedy `(?:\/(?<_N>…))?` (a `**` has a lazy one), with a lazy body where
  * optional segments follow (`(?:\/(?<_0>[\s\S]*?)(?:\/(?<y>…))??)?`). Back
- * to a plain `\/(?<_N>…)` segment, which reads as `*`.
+ * to a plain `\/(?<_N>…)` segment, which reads as `*`; named, a `:name(.*)`
+ * (not `_`: 0.11's greedy `**` group, see `applyOptional`; 0.11's `:x*` group
+ * is lazy).
  */
 function unwrapStar(src: string): string {
-  const at = src.search(/\(\?:\\\/\(\?<_\d+>\[\\s\\S\]\*\??\)/);
+  const at = src.search(/\(\?:\\\/\(\?<(?!_>)\w+>\[\\s\\S\]\*\??\)/);
   if (at < 0) return src;
   const end = readGroup(src, at);
   const lazyBody = src[src.indexOf(")", at + 5) - 1] === "?";

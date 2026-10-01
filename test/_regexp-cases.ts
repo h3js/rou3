@@ -328,37 +328,47 @@ export const regexpCases: Record<string, RegExpCase> = {
     regex: /^\/path\/(?<_0>\d+)\/?$/,
     match: [["/path/123", { "0": "123" }]],
   },
-  // A trailing unnamed `(.*)` constraint must reverse to `(.*)`, not `:_0+`.
-  // Its `.` keeps its JS meaning (the router runs constraints in JS: no line
-  // terminators), so unlike a catch-all it is matched lazily to leave the
-  // stripped trailing slash out of the capture.
+  // A `(.*)` group is a `*` (the same token in URLPattern): the `*` route's
+  // regex. A `:name(.*)` is that `*` keyed by name, which may be `""`.
   "/path/(.*)": {
-    regex: /^\/path\/(?:\/|(?<_0>.+?)\/?)$/,
+    regex: /^\/path(?:\/(?<_0>(?:[\s\S]*[^/])?\/*?))?\/?$/,
     match: [
+      ["/path", { "0": undefined }],
+      ["/path/", { "0": "" }],
       ["/path/a", { "0": "a" }],
       ["/path/a/", { "0": "a" }],
-      ["/path//", { "0": undefined }, { "0": "" }],
+      ["/path/a/b", { "0": "a/b" }],
+      ["/path/a\nb", { "0": "a\nb" }],
     ],
-    noMatch: ["/path", "/path/", "/path/a\nb"],
+    noMatch: ["/pathx"],
   },
   "/path/:x(.*)": {
-    regex: /^\/path\/(?:\/|(?<x>.+?)\/?)$/,
-    match: [
-      ["/path/a.b", { x: "a.b" }],
-      ["/path/a.b/", { x: "a.b" }],
-    ],
-    noMatch: ["/path", "/path/", "/path/a\nb"],
-  },
-  "/path/:x(.*)?": {
-    regex: /^\/path(?:\/(?<x>.*?))??\/?$/,
+    regex: /^\/path(?:\/(?<x>(?:[\s\S]*[^/])?\/*?))?\/?$/,
     match: [
       ["/path", { x: undefined }],
-      ["/path/", { x: undefined }],
+      ["/path/", { x: "" }],
       ["/path//", { x: "" }],
-      ["/path/a", { x: "a" }],
-      ["/path/a/", { x: "a" }],
+      ["/path/a.b", { x: "a.b" }],
+      ["/path/a.b/", { x: "a.b" }],
+      ["/path/a/b", { x: "a/b" }],
     ],
-    noMatch: ["/path/a\nb"],
+    noMatch: ["/pathx"],
+  },
+  "/path/:x(.*)/foo": {
+    regex: /^\/path\/(?<x>[\s\S]*)\/foo\/?$/,
+    match: [
+      ["/path/a/b/foo", { x: "a/b" }],
+      ["/path//foo", { x: "" }],
+    ],
+    noMatch: ["/path/foo"],
+  },
+  "/path/x-:p(.*)": {
+    regex: /^\/path\/x-(?<p>(?:[\s\S]*[^/])?\/*?)\/?$/,
+    match: [
+      ["/path/x-", { p: "" }],
+      ["/path/x-a/b", { p: "a/b" }],
+    ],
+    noMatch: ["/path/x"],
   },
   // An empty segment turns trailing, and is dropped, once the optionals after
   // it are absent: `/docs/{v2}?/:page?` also registers `/docs`.
@@ -1850,6 +1860,14 @@ export const RESERVED_SYNTAX_ROUTES: readonly string[] = [
   "/a/(\\d+)*",
   "/a/(\\d+)?",
   "/a/x(\\d+)?y",
+  // ... and on a `(.*)` / `:name(.*)`, a catch-all (`*?`, `**`; it was a
+  // segment-scoped constraint: `/a/:x(.*)?` matched `/a` and `/a/b` only)
+  "/a/(.*)?",
+  "/a/(.*)+",
+  "/a/(.*)*",
+  "/a/:x(.*)?",
+  "/a/:x(.*)+",
+  "/a/:x(.*)*",
   // Anything after `**:name` in its segment was part of the name.
   "/a/**:x(\\d+)",
   "/a/**:x:y",

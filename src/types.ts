@@ -110,7 +110,8 @@ type ScanWildcard<
       ? ExtractWildcards<
           SkipGroup<TPath>,
           [...Count, unknown],
-          Acc | [`${Count["length"]}`, Opt, false],
+          // A `(.*)` is a `*`: unset where it is a whole segment ending the route
+          Acc | [`${Count["length"]}`, S extends true ? EndingStar<TPath, Opt> : Opt, false],
           Opt
         >
       : C extends "{" // A group: optional when `}?` closes it (groups don't nest)
@@ -159,6 +160,15 @@ type ScanWildcard<
             : ExtractWildcards<Rest, Count, Acc, Opt, C extends "/" ? true : false>
   : Acc;
 
+// Whether `S`, right after a `/`, is a `(.*)` (a `*`) ending the route, also
+// before a last `{…}?` (optional there): `true`, else `Otherwise`
+type EndingStar<S extends string, Otherwise extends boolean> = S extends `(.*)${
+  | ""
+  | "/"
+  | `{${string}}?`}`
+  ? true
+  : Otherwise;
+
 // Whether the `{…}` group `TPath` starts with is optional (its first `}` is
 // followed by `?`)
 type GroupOptional<TPath extends string> = TPath extends `{${string}}${infer After}`
@@ -202,16 +212,36 @@ type SkipGroup<S extends string, Depth extends unknown[] = []> = S extends `${in
   : S;
 
 // `[name, optional]` for each `:name` (an escaped `\:` and the `:` of a `(?:`
-// group are no param)
-type ExtractParams<TPath extends string> = TPath extends `${infer Pre}:${infer Rest}`
+// group are no param). `Start`: `TPath` starts a segment.
+type ExtractParams<
+  TPath extends string,
+  Start extends boolean = true,
+> = TPath extends `${infer Pre}:${infer Rest}`
   ? Pre extends `${string}${"\\" | "(?"}`
-    ? ExtractParams<Rest>
-    : ParamAt<Rest, NameRun<Rest>>
+    ? ExtractParams<Rest, false>
+    : ParamAt<Rest, NameRun<Rest>, Pre extends "" ? Start : Pre extends `${string}/` ? true : false>
   : never;
 
-type ParamAt<Rest extends string, Name extends string> = Rest extends `${Name}${infer After}`
+// `Segment`: the param starts its segment, where a `:name(.*)` (a `*` keyed
+// by name) ending the route is optional like a `*`
+type ParamAt<
+  Rest extends string,
+  Name extends string,
+  Segment extends boolean,
+> = Rest extends `${Name}${infer After}`
   ? AfterConstraint<After> extends infer Tail extends string
-    ? (Name extends ValidName<Name> ? [Name, OptionalParam<Tail>] : never) | ExtractParams<Tail>
+    ?
+        | (Name extends ValidName<Name>
+            ? [
+                Name,
+                OptionalParam<Tail> extends true
+                  ? true
+                  : Segment extends true
+                    ? EndingStar<After, false>
+                    : false,
+              ]
+            : never)
+        | ExtractParams<Tail, false>
     : never
   : never;
 

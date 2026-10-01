@@ -186,8 +186,9 @@ describe("compareRoutes", () => {
     ["/user/:id(42)", "/user/42", "superset", "regex==literal degrades to containment"],
     ["/u/:id([\\s\\S]+)", "/u/:x", "subset", "regex==any-param degrades to containment"],
     // A regex group after a `{…}` group ending in a param is no constraint of
-    // it (`/{:x}(.*)` read as `/:x(.*)`, "equal")
-    ["/a/{:x}(.*)", "/a/:x(.*)", "partial", "group after a param's group is a capture"],
+    // it: `/{:x}(.*)` is a `:x` and a `*` (a value, then the rest), not the
+    // `*` keyed `x` `/:x(.*)` is (`""` too)
+    ["/a/{:x}(.*)", "/a/:x(.*)", "subset", "group after a param's group is a capture"],
     ["/a/{:x}(y)", "/a/:x([^\\x2f]+?)(y)", "equal", "the lazy param it stands for"],
     ["/a/{:x}?(y)", "/a/(y)", "superset", "optional param before a group"],
     ["/a/{:x}(y)", "/a/:z", "subset", "param + group needs a value"],

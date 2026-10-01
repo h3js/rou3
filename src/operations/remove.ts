@@ -9,6 +9,7 @@ import {
   segmentKey,
   splitRoute,
   splitStar,
+  starGroups,
 } from "./_utils.ts";
 
 /**
@@ -24,7 +25,10 @@ import {
 export function removeRoute<T>(ctx: RouterContext<T>, method: string = "", path: string): void {
   // Normalize exactly like `addRoute`, or removal targets a different route
   method = method.toUpperCase();
-  _removeRoute(ctx, method, absolutePattern(path));
+  path = absolutePattern(path);
+  const [route, named] = starGroups(path);
+  // As in `addRoute`: a `:name(.*)` has an identity of its own
+  _removeRoute(ctx, method, route, named && expandedRouteId(path), path);
 }
 
 /**
