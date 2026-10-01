@@ -97,6 +97,16 @@ const CASES: [
   ["/**.md", "/a.md", { 0: "a" }],
   ["/**.md", "/x/a.md", { 0: "x/a" }],
   ["/**.md", "/.md", { 0: "" }],
+  // README differences: no segment is left after the stripped trailing slash
+  // for a `*` inside one (only a whole-segment `*` takes nothing there)
+  ["/a/*:x?", "/a/", null, true],
+  ["/a/*:x?", "/a//", { 0: "" }, true],
+  ["/a/*(\\d*)", "/a/", null, true],
+  ["/a/*(\\d*)", "/a//", { 0: "", 1: "" }, true],
+  // README differences: segments after a catch-all match from the end, and
+  // the route with an optional one wins
+  ["/*/:x?", "/x/y", { 0: "x", x: "y" }, true],
+  ["/a/*{/b}?", "/a/x/b", { 0: "x" }, true],
 ];
 
 describe("greedy `*` (URLPattern)", () => {
@@ -260,6 +270,19 @@ describe("`*` vs `**` priority and ordering", () => {
       expect(jitAll("GET", path).map((m: { data: string }) => m.data)).toEqual(all);
     });
   }
+
+  it("an optional segment before a static one (README differences)", () => {
+    // The static `a` wins over `:x`, so the route without `:x` does; the
+    // regex (and URLPattern) match left to right. Same paths, other captures.
+    const router = createRouter<string>();
+    addRoute(router, "GET", "/:x?/a/*", "r");
+    expect(findRoute(router, "GET", "/a/a/b")?.params).toEqual({ 0: "a/b" });
+    expect(compileRouter(router)("GET", "/a/a/b")?.params).toEqual({ 0: "a/b" });
+    expect(definedGroups(routeToRegExp("/:x?/a/*").exec("/a/a/b")?.groups)).toEqual({
+      x: "a",
+      0: "b",
+    });
+  });
 });
 
 describe("`*` in pattern relations", () => {
