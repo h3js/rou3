@@ -13,14 +13,15 @@ import type { MethodData, Node } from "./types.ts";
 /**
  * A canonical (fully expanded) route shape: fixed single-segment matchers
  * (`string` literal | `RegExp` constraint, `NON_EMPTY` for a `:name` |
- * `undefined` = any) followed by a variable-length tail. The tail (trailing
- * `*`, `**`, `**:name`) matches any segment values, so it only constrains the
- * total number of segments: trailing bare `*` -> `[0, 1]`, `**` ->
- * `[0, Infinity]`, `**:name` -> `[1, Infinity]`, no variable tail -> `[0, 0]`.
- * A `**:name` needs a value (`some`): a one-segment tail can't be `""`.
+ * `undefined` = any) followed by a variable-length tail. The tail (a
+ * catch-all: `*`, `**`, `**:name`) matches any segment values, so it only
+ * constrains the total number of segments: `**` -> `[0, Infinity]`, `*` and
+ * `**:name` -> `[1, Infinity]`, no variable tail -> `[0, 0]`. A `**:name`
+ * needs a value (`some`): a one-segment tail can't be `""`. A trailing `*` is
+ * optional (see `matchesZero`): its tail is a `**`'s, `[0, Infinity]`.
  *
- * Segments after a `**` form the `suffix`: fixed matchers aligned to the end
- * of the path, after the tail (`/**\/_payload.json` -> `[] [0, Infinity]
+ * Segments after a catch-all form the `suffix`: fixed matchers aligned to the
+ * end of the path, after the tail (`/**\/_payload.json` -> `[] [0, Infinity]
  * ["_payload.json"]`). Never empty when set.
  */
 export interface RouteShape {
@@ -201,49 +202,23 @@ function _computeShape(edges: Edge[], entry: MethodData): RouteShape {
       into.push(edge);
     } else if (edge === 1) {
       // `**` is optional, `**:name` (`:name+`, `:name*`) requires one segment
-      // with a value (see `emptyParam`). Segments after it are the suffix,
-      // aligned to the end of the path.
-      const optional = pMap!.find((e) => e[0] === -(d + 1))![2];
-      tailMin = optional ? 0 : 1;
+      // with a value (see `emptyParam`), a `*` one segment, or none where it
+      // ends the route (named by a digit, see `matchesZero`). Segments after
+      // it are the suffix, aligned to the end of the path.
+      const [, name, optional, empty, , join] = pMap!.find((e) => e[0] === -(d + 1))!;
+      const last = d === edges.length - 1;
+      tailMin = optional || (last && (name as string) < ":" && !join) ? 0 : 1;
       tailMax = Number.POSITIVE_INFINITY;
-      if (!optional) some = true;
-      if (d < edges.length - 1) suffix = [];
+      if (!optional && !empty) some = true;
+      if (!last) suffix = [];
     } else if (pMap) {
-      // Param: classified by this entry's paramsMap entry at this segment index.
+      // Param: classified by this entry's paramsMap entry at this segment
+      // index. A `:name` needs a value.
       const p = pMap.find((e) => e[0] === d)!;
-      if (p[1] instanceof RegExp) {
-        into.push(p[1]);
-      } else if (p[2] /* bare `*` */ && d === edges.length - 1) {
-        // A trailing bare `*` matches zero-or-one segment; elsewhere exactly one.
-        tailMax = 1;
-      } else {
-        // A `:name` needs a value, a `*` (named by a digit) doesn't
-        into.push((p[1] as string) > ":" ? NON_EMPTY : undefined);
-      }
+      into.push(p[1] instanceof RegExp ? p[1] : NON_EMPTY);
     }
   }
-  // Canonical form: trailing any-value matchers are equivalent to tail
-  // positions (both match exactly one arbitrary segment), so fold them into
-  // the tail. This is what lets `/a/*/**` compare equal to shapes reached
-  // through the tail model (`/a/**/*`). A `:name` needs a value (`NON_EMPTY`),
-  // and nothing folds into a `**:name`'s tail: it would move its first
-  // segment.
-  let f = fixed.length;
-  while (f > 0 && !some && fixed[f - 1] === undefined) f--;
-  if (f < fixed.length) {
-    tailMin += fixed.length - f;
-    tailMax += fixed.length - f;
-    fixed.length = f;
-  }
-  if (suffix) {
-    // Likewise for leading any-value matchers of the suffix (`/**\/:x/y` is
-    // `/**:x/y`); a suffix of them only (`/**\/:x`) is just a longer tail.
-    let s = 0;
-    while (s < suffix.length && !some && suffix[s] === undefined) s++;
-    tailMin += s;
-    if (s < suffix.length) return { fixed, tailMin, tailMax, suffix: suffix.slice(s), some };
-  }
-  return { fixed, tailMin, tailMax, some };
+  return suffix ? { fixed, tailMin, tailMax, suffix, some } : { fixed, tailMin, tailMax, some };
 }
 
 /**

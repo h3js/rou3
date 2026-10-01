@@ -1,5 +1,6 @@
 (m, p) => {
-  if (p.charCodeAt(p.length - 1) === 47) p = p.slice(0, -1);
+  let t = p.charCodeAt(p.length - 1) === 47;
+  if (t) p = p.slice(0, -1);
   if (p === "/test") {
     if (m === "GET") {
       return { data: $0 };
@@ -36,12 +37,8 @@
     if (s[1] === "test") {
       if (l > 2) {
         if (s[2] === "foo") {
-          if (l === 4 || l === 3) {
-            if (m === "GET") {
-              return { data: $7, params: { 0: s[3] } };
-            }
-          }
           if (m === "GET") {
+            return l > 3 || t ? { data: $7, params: { 0: p.slice(10) } } : { data: $7, params: {} };
             return l > 3
               ? { data: $8, params: { 0: (_w = p.slice(10)), _: _w } }
               : { data: $8, params: {} };

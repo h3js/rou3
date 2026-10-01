@@ -8,6 +8,7 @@ import {
   routeId,
   segmentKey,
   splitRoute,
+  splitStar,
 } from "./_utils.ts";
 
 /**
@@ -59,6 +60,16 @@ function _removeRoute(
     route ??= expandedRouteId(path);
     for (const expandedPath of modExpanded) {
       _removeRoute(ctx, method, expandedPath, route, input);
+    }
+    return;
+  }
+
+  // A `*` inside a segment, as `addRoute` splits it (see `splitStar`)
+  const split = path.includes("*") ? splitStar(segments, path) : undefined;
+  if (split) {
+    if (split[0].length > 1) route ??= expandedRouteId(path);
+    for (const r of split[0]) {
+      _remove(ctx, ctx.root, method, r, 0, route, "", true);
     }
     return;
   }

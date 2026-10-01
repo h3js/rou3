@@ -38,9 +38,9 @@ describe("find-matchAll: basic", () => {
           ├── /foo ┈> [GET] /foo
           │       ├── /bar ┈> [GET] /foo/bar
           │       │       ├── /baz ┈> [GET] /foo/bar/baz
-          │       ├── /*
-          │       │       ├── /baz ┈> [GET] /foo/*/baz
           │       ├── /** ┈> [GET] /foo/**
+          │       │       ├── <suffix>
+          │       │       │       ├── /baz ┈> [GET] /foo/*/baz
           ├── /** ┈> [GET] /**"
     `);
   });
@@ -94,9 +94,9 @@ describe("matcher: complex", () => {
           │       ├── /bar ┈> [GET] /foo/bar
           │       ├── /baz ┈> [GET] /foo/baz
           │       │       ├── /** ┈> [GET] /foo/baz/**
-          │       ├── /* ┈> [GET] /foo/*
-          │       │       ├── /sub ┈> [GET] /foo/*/sub
-          │       ├── /** ┈> [GET] /foo/**
+          │       ├── /** ┈> [GET] /foo/* + /foo/**
+          │       │       ├── <suffix>
+          │       │       │       ├── /sub ┈> [GET] /foo/*/sub
           ├── /without-trailing ┈> [GET] /without-trailing
           ├── /with-trailing ┈> [GET] /with-trailing/
           ├── /c
@@ -134,11 +134,12 @@ describe("matcher: complex", () => {
         ]
       `);
     expect(_findAllRoutes(router, "GET", "/foo/123/sub")).to.toMatchInlineSnapshot(`
-        [
-          "/foo/**",
-          "/foo/*/sub",
-        ]
-      `);
+      [
+        "/foo/**",
+        "/foo/*",
+        "/foo/*/sub",
+      ]
+    `);
     expect(_findAllRoutes(router, "GET", "/foo/123")).to.toMatchInlineSnapshot(`
         [
           "/foo/**",
@@ -202,8 +203,7 @@ describe("matcher: order", () => {
       "<root>
           ├── /hello ┈> [GET] /hello
           │       ├── /world ┈> [GET] /hello/world
-          │       ├── /* ┈> [GET] /hello/*
-          │       ├── /** ┈> [GET] /hello/**"
+          │       ├── /** ┈> [GET] /hello/* + /hello/**"
     `);
   });
 
@@ -234,6 +234,7 @@ describe("matcher: order", () => {
     expect(matches).to.toMatchInlineSnapshot(`
       [
         "/hello/**",
+        "/hello/*",
       ]
     `);
   });
@@ -274,8 +275,8 @@ describe("matcher: ordering contract", () => {
     // the entry (variant) that matched: a pattern-level miss is the documented
     // carve-out only when no matched entry of the broader pattern is itself
     // strictly broader (match sets over `SWEEP_PATHS`) than one of the
-    // narrower pattern listed before it. No bare `*` (see
-    // `BARE_STAR_EXCEPTIONS`): add it to the tokens once it is a catch-all.
+    // narrower pattern listed before it. A `*` is a catch-all, ordered by its
+    // weight (between `**` and `**:name` on a shared node).
     const failures: string[] = [];
     const carveOuts = new Set<string>();
     let checks = 0;
@@ -304,45 +305,6 @@ describe("matcher: ordering contract", () => {
     // Stale guard: the documented carve-outs still show up as such
     for (const carveOut of KNOWN_CARVE_OUTS) expect(carveOuts).toContain(carveOut);
   }, 60_000);
-
-  it("bare `*` exceptions (known, stale-guarded)", () => {
-    // A bare `*` takes one segment that may be empty, or none at the end of
-    // the path, which neither the traversal nor a weight sees. Different
-    // nodes, in both registration orders: `/p/*/**` (under the param node) is
-    // broader than `/p/**:rest` (on the parent's wildcard node, listed
-    // first), `/p/**/*` (suffix trie) than `/p/**:rest` (listed first on the
-    // same wildcard node). Same node, registration order decides: a `*` that
-    // isn't the last segment, or that follows a `**`, ties with a `:x` (only
-    // a last param is weighted, `collectSuffix` weighs regexes and `**:name`
-    // only, and `rankFromEnd` scores both 0). `findRoute` picks the broader
-    // one on those paths too (when registered first, on a tie).
-    const stale = "stale: remove from `BARE_STAR_EXCEPTIONS` and the README / matching.md bullets";
-    for (const [routes, path, orders] of BARE_STAR_EXCEPTIONS) {
-      const [a, b] = routes;
-      const at = `${routes.join(", ")} @ ${path}: ${stale}`;
-      let relation: string;
-      try {
-        relation = compareRoutes(a, b);
-      } catch (error) {
-        // Two catch-alls once `*` is one
-        expect.fail(`${at} (${(error as Error).message})`);
-      }
-      expect(relation, at).toBe("superset");
-      const routers = [routes, [...routes].reverse()].map((order) => createRouter(order));
-      const check = orders === "both" ? "every" : "some";
-      expect(
-        routers[check]((router) => {
-          const all = _findAllRoutes(router, "GET", path);
-          return all.indexOf(a) > all.indexOf(b);
-        }),
-        `findAllRoutes ${at}`,
-      ).toBe(true);
-      expect(
-        routers[check]((router) => findRoute(router, "GET", path)?.data.path === a),
-        `findRoute ${at}`,
-      ).toBe(true);
-    }
-  });
 });
 
 describe("matcher: optional param after a capture in its segment", () => {
@@ -393,7 +355,7 @@ describe("matcher: optional param after a capture in its segment", () => {
 // `/p` or `/:x0`, then up to two of these (a group joins without a `/`):
 // pairs that differ only below the first segment, or in its kind
 const SWEEP_PATTERNS = (() => {
-  const tokens = ["p", ":x", ":x(\\d+)", "**", "**:r", ":x+", ":x*", "{/:x}?", "{/p}?"];
+  const tokens = ["p", ":x", ":x(\\d+)", "*", "**", "**:r", ":x+", ":x*", "{/:x}?", "{/p}?"];
   const patterns: string[] = [];
   const build = (route: string, depth: number, n: number) => {
     patterns.push(route);
@@ -443,20 +405,6 @@ const KNOWN_CARVE_OUTS = [
 ];
 
 /**
- * Bare `*` exceptions (README, `.agents/matching.md`): `[broader, narrower]`,
- * a path where the narrower comes first and `findRoute` picks the broader,
- * and in which registration orders (`one`: the tie goes to the order).
- */
-const BARE_STAR_EXCEPTIONS: [[string, string], string, "both" | "one"][] = [
-  // Different nodes
-  [["/p/*/**", "/p/**:rest"], "/p/b", "both"],
-  [["/p/**/*", "/p/**:rest"], "/p/b", "both"],
-  // Same node: a `*` that isn't last, or that follows a `**`
-  [["/p/*/x", "/p/:id/x"], "/p/b/x", "one"],
-  [["/p/**:r/*", "/p/**:r/:x"], "/p/a/b", "one"],
-];
-
-/**
  * Checks `routes` (`a` strictly contains `b`) on every path both match.
  * `failure`: a contract violation; `carveOuts`: the paths of pattern-level
  * misses the matched entries explain (optional syntax only).
@@ -494,7 +442,8 @@ function orderMisses(
       [...setY].every((p) => setX.has(p))
     );
   };
-  const optional = /[{*?]/.test(`${a} ${b}`.replace(/\*\*/g, "").replace(/:x\d+\+/g, ""));
+  // Optional syntax: `{…}?`, `:x?`, `:x*` (a `*` is a catch-all, no modifier)
+  const optional = /[{?]|:x\d+\*/.test(`${a} ${b}`);
   const carveOuts: string[] = [];
   for (const p of both) {
     const path = SWEEP_PATHS[p];
@@ -514,8 +463,8 @@ function orderMisses(
           (x, k) => x.data === b && list.slice(k + 1).some((y) => y.data === a && broader(y, x)),
         );
       if (!explained) return { failure: `${a} ⊋ ${b} listed after it: ${at}`, carveOuts };
-      // Without a bare `*` every carve-out is A1: an entry of `b` before one
-      // of `a` with the same match set (A2 / A3 need a `*`, pinned below)
+      // Every carve-out is A1: an entry of `b` before one of `a` with the
+      // same match set (A2 / A3 have no strict instance, see matching.md)
       const a1 = list.some(
         (x, k) =>
           x.data === b && list.slice(k + 1).some((y) => y.data === a && broader(y, x, true)),
@@ -601,30 +550,31 @@ describe("matcher: ordering contract: optional-syntax carve-out", () => {
 
   it("A2: same node — no provable instance, `:x*` doesn't contain `**`", () => {
     // `:path*` is `**:path` (needs a value) plus the route without it, so it
-    // misses `/api/v1//`, which `**` takes: no superset, and the tree order
-    // (weight: `**:path` is narrower) contradicts no `compareRoutes` claim.
-    expect(compareRoutes("/api/*/:path*", "/api/*/**")).toBe("partial");
+    // misses `/api/v1//`, which `**` takes: a subset, and the tree order
+    // (weight: `**:path` is narrower) agrees with it.
+    expect(compareRoutes("/api/:v/:path*", "/api/:v/**")).toBe("subset");
     for (const routes of [
-      ["/api/*/:path*", "/api/*/**"],
-      ["/api/*/**", "/api/*/:path*"],
+      ["/api/:v/:path*", "/api/:v/**"],
+      ["/api/:v/**", "/api/:v/:path*"],
     ]) {
       expect(_findAllRoutes(createRouter(routes), "GET", "/api/v1/x")).toEqual([
-        "/api/*/**",
-        "/api/*/:path*",
+        "/api/:v/**",
+        "/api/:v/:path*",
       ]);
     }
   });
 
   it("A3: matched entries in different nodes, traversal order decides (both orders)", () => {
-    // `/p/:id{/**}?` matches `/p/a` twice: through `/p/:id/**` (a child,
+    // `/p/:id{/**}?` matches `/p/a/` twice: through `/p/:id/**` (a child,
     // first) and `/p/:id` (the node itself, after the `*` child of
-    // `/p/:id/*`).
-    expect(compareRoutes("/p/:id{/**}?", "/p/:id/*")).toBe("superset");
+    // `/p/:id/*`). The two match the same paths (a trailing `*` is
+    // optional), so this pins the order only.
+    expect(compareRoutes("/p/:id{/**}?", "/p/:id/*")).toBe("equal");
     for (const routes of [
       ["/p/:id{/**}?", "/p/:id/*"],
       ["/p/:id/*", "/p/:id{/**}?"],
     ]) {
-      expect(_findAllRoutes(createRouter(routes), "GET", "/p/a")).toEqual([
+      expect(_findAllRoutes(createRouter(routes), "GET", "/p/a/")).toEqual([
         "/p/:id{/**}?",
         "/p/:id/*",
         "/p/:id{/**}?",
@@ -663,25 +613,29 @@ describe("matcher: required params need a value", () => {
   ]);
 
   it("leaves out `:name` / `:name+` / `:name*` / `**:name` on an empty value", () => {
+    // On their node: `**` (none or more), then `*` (one or more, may be
+    // empty), then `**:rest` / `:y*` (need a value)
     expect(_findAllRoutes(router, "GET", "/a//")).toEqual(["/a/**", "/a/*", "/a/:id(\\d*)"]);
     expect(_findAllRoutes(router, "GET", "/a/1")).toEqual([
       "/**/:file",
       "/a/**",
+      "/a/*",
       "/a/**:rest",
       "/a/:y*",
-      "/a/*",
       "/a/:x",
       "/a/:id(\\d*)",
     ]);
     expect(_findAllRoutes(router, "GET", "/a//b")).toEqual([
       "/**/:file",
       "/a/**",
+      "/a/*",
       "/a/**:rest",
       "/a/:y*",
     ]);
     expect(_findAllRoutes(router, "GET", "/a///b")).toEqual([
       "/**/:file",
       "/a/**",
+      "/a/*",
       "/a/**:rest",
       "/a/:y*",
       "/a/:z+/b",
@@ -689,6 +643,7 @@ describe("matcher: required params need a value", () => {
     expect(_findAllRoutes(router, "GET", "/a//c")).toEqual([
       "/**/:file",
       "/a/**",
+      "/a/*",
       "/a/**:rest",
       "/a/:y*",
       "/**/c",
@@ -778,16 +733,17 @@ describe("matcher: regression #184", () => {
     expect(_findAllRoutes(router, "GET", "/42/x")).toEqual(["/(\\d+)/**"]);
   });
 
-  it("optional & required routes on one param node filter per entry", () => {
-    // A single param node can hold both an optional `*` and a required
-    // `:id`/`:id(\d+)` route; the end-of-path branch must filter each entry.
-    expect(_findAllRoutes(createRouter(["/foo/*", "/foo/:id"]), "GET", "/foo")).toEqual(["/foo/*"]);
-    // Reverse insertion order (required registered first) must still match `*`.
-    expect(_findAllRoutes(createRouter(["/foo/:id", "/foo/*"]), "GET", "/foo")).toEqual(["/foo/*"]);
-    // A required regex sibling must not be pushed (previously crashed in getMatchParams).
-    expect(_findAllRoutes(createRouter(["/foo/*", "/foo/:id(\\d+)"]), "GET", "/foo")).toEqual([
-      "/foo/*",
-    ]);
+  it("a trailing `*` matches `/foo` and `/foo/`, required params don't", () => {
+    // A `*` is a catch-all on the wildcard node, a `:id` a param node: at the
+    // end of the path only the `*` can match (it is optional there).
+    for (const routes of [
+      ["/foo/*", "/foo/:id"],
+      ["/foo/:id", "/foo/*"],
+      ["/foo/*", "/foo/:id(\\d+)"],
+    ]) {
+      expect(_findAllRoutes(createRouter(routes), "GET", "/foo")).toEqual(["/foo/*"]);
+      expect(_findAllRoutes(createRouter(routes), "GET", "/foo/")).toEqual(["/foo/*"]);
+    }
   });
 
   // Regression #186: the optional-`**` presence guard (`l>currentIdx-1`) must
@@ -847,6 +803,7 @@ describe("matcher: out-of-bounds segment vs literal 'undefined' key", () => {
     expect(_findAllRoutes(router, "GET", "/w1")).toEqual(["/w1"]);
     // a real "undefined" segment still matches normally
     expect(_findAllRoutes(router, "GET", "/undefined")).toEqual(["/undefined/*"]);
+    expect(_findAllRoutes(router, "GET", "/undefined/")).toEqual(["/undefined/*"]);
     expect(_findAllRoutes(router, "GET", "/w1/undefined")).toEqual(["/w1/undefined/**"]);
   });
 });

@@ -59,9 +59,11 @@ describe("method-agnostic entries on a shared node", () => {
       ["", "/u/*", "A"],
       ["GET", "/u/:id", "B"],
     ]);
+    // A trailing `*` is optional (unlike URLPattern's)
     expect(lookup(r, "GET", "/u")).toMatchObject({ one: "A", all: ["A"] });
     expect(lookup(r, "GET", "/u/")).toMatchObject({ one: "A", all: ["A"] });
     expect(lookup(r, "GET", "/u/42")).toMatchObject({ one: "B", all: ["A", "B"] });
+    expect(lookup(r, "GET", "/u/4/2")).toMatchObject({ one: "A", all: ["A"] });
   });
 
   it("wildcards: `**` vs `**:name`", () => {

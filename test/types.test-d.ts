@@ -32,22 +32,34 @@ describe("types", () => {
     });
 
     it("should infer wildcard params", () => {
-      type Params = InferRouteParams<"/test/*">;
-      type Expected = { "0": string | undefined };
-      expectTypeOf<Params>().toEqualTypeOf<Expected>();
-      expectTypeOf<InferRouteParams<"/test/*/">>().toEqualTypeOf<Expected>();
+      // A `*` has a value (`""` at least: `/test/*/foo` on `/test//foo`)...
+      type Expected = { "0": string };
+      expectTypeOf<InferRouteParams<"/test/*/foo">>().toEqualTypeOf<Expected>();
+      expectTypeOf<InferRouteParams<"/file-*.png">>().toEqualTypeOf<Expected>();
+      expectTypeOf<InferRouteParams<"/file-*">>().toEqualTypeOf<Expected>();
+      // ... unless it is a whole segment ending the route, optional there
+      // (`/test/*` on `/test`), or in an optional group
+      type Optional = { "0": string | undefined };
+      expectTypeOf<InferRouteParams<"/test/*">>().toEqualTypeOf<Optional>();
+      expectTypeOf<InferRouteParams<"/test/*/">>().toEqualTypeOf<Optional>();
+      expectTypeOf<InferRouteParams<"/*">>().toEqualTypeOf<Optional>();
+      expectTypeOf<InferRouteParams<"/test/*{.png}?">>().toEqualTypeOf<Optional>();
+      expectTypeOf<InferRouteParams<"/test{/*}?">>().toEqualTypeOf<{ "0": string | undefined }>();
       // the generic (non-inferred) params type stays narrow
       expectTypeOf<NonNullable<MatchedRoute["params"]>>().toEqualTypeOf<Record<string, string>>();
     });
 
-    it("should infer multiple wildcard params", () => {
-      type Params = InferRouteParams<"/test/*/foo/*/bar">;
-      type Expected = { "0": string; "1": string };
-      expectTypeOf<Params>().toEqualTypeOf<Expected>();
-      expectTypeOf<InferRouteParams<"/file-*-*">>().toEqualTypeOf<Expected>();
-      expectTypeOf<InferRouteParams<"/test/*/foo/*">>().toEqualTypeOf<{
+    it("should infer wildcard params numbered with params around them", () => {
+      expectTypeOf<InferRouteParams<"/test/:id/*">>().toEqualTypeOf<{
+        id: string;
+        "0": string | undefined;
+      }>();
+      // A `*` in the param's segment is no modifier
+      expectTypeOf<InferRouteParams<"/test/:id-*">>().toEqualTypeOf<{ id: string; "0": string }>();
+      expectTypeOf<InferRouteParams<"/test/*-:id">>().toEqualTypeOf<{ "0": string; id: string }>();
+      expectTypeOf<InferRouteParams<"/test/:id(\\d+)-*">>().toEqualTypeOf<{
+        id: string;
         "0": string;
-        "1": string | undefined;
       }>();
     });
 
@@ -69,16 +81,15 @@ describe("types", () => {
         a: string;
         id: string | undefined;
       }>();
-      // a modifier `*` is not a wildcard capture; a real trailing `*` still is
-      expectTypeOf<InferRouteParams<"/test/:id*/x/*">>().toEqualTypeOf<{
+      // a modifier `*` is not a wildcard capture; a real `*` still is
+      expectTypeOf<InferRouteParams<"/test/:id*/x/:y">>().toEqualTypeOf<{
         id: string | undefined;
-        "0": string | undefined;
+        y: string;
       }>();
-      expectTypeOf<InferRouteParams<"/test/:a/:b?/*/**:rest">>().toEqualTypeOf<{
+      expectTypeOf<InferRouteParams<"/test/:a/:b?/*">>().toEqualTypeOf<{
         a: string;
         b: string | undefined;
-        "0": string;
-        rest: string;
+        "0": string | undefined;
       }>();
     });
 
@@ -104,34 +115,24 @@ describe("types", () => {
       expectTypeOf<InferRouteParams<"/blog/**:path/_payload.json">>().toEqualTypeOf<{
         path: string;
       }>();
-      expectTypeOf<InferRouteParams<"/**/*.png">>().toEqualTypeOf<{
+      expectTypeOf<InferRouteParams<"/**/:name.png">>().toEqualTypeOf<{
         "0": string | undefined;
-        "1": string;
+        name: string;
         _?: string;
       }>();
-      expectTypeOf<InferRouteParams<"/*/**/:file/*">>().toEqualTypeOf<{
+      expectTypeOf<InferRouteParams<"/*/:file">>().toEqualTypeOf<{ "0": string; file: string }>();
+      expectTypeOf<InferRouteParams<"/*/:file?">>().toEqualTypeOf<{
         "0": string;
-        "1": string | undefined;
-        file: string;
-        "2": string;
-        _?: string;
+        file: string | undefined;
       }>();
       expectTypeOf<InferRouteParams<"/**:p/:f(.*)">>().toEqualTypeOf<{ p: string; f: string }>();
-      // `**<rest>` is `**/*<rest>`
-      expectTypeOf<InferRouteParams<"/**.md">>().toEqualTypeOf<{
-        "0": string | undefined;
-        "1": string;
-        _?: string;
-      }>();
-      expectTypeOf<InferRouteParams<"/docs/*/**.md">>().toEqualTypeOf<{
+      // `**<rest>` reads like `*<rest>`: one capture, no `_` alias
+      expectTypeOf<InferRouteParams<"/**.md">>().toEqualTypeOf<{ "0": string }>();
+      expectTypeOf<InferRouteParams<"/docs/:v/**.md">>().toEqualTypeOf<{
+        v: string;
         "0": string;
-        "1": string | undefined;
-        "2": string;
-        _?: string;
       }>();
-      // `:x+` before the last segment is a `**`: a `*` after it takes a segment
-      expectTypeOf<InferRouteParams<"/a/:x+/b/*">>().toEqualTypeOf<{ x: string; "0": string }>();
-      // ... but a static segment ending in `+` is not one
+      // A static segment ending in `+` is no `:x+`
       expectTypeOf<InferRouteParams<"/c++/*">>().toEqualTypeOf<{ "0": string | undefined }>();
       // A `}` right after `**` closes a group: no `*` capture follows
       expectTypeOf<InferRouteParams<"/a{/**}?">>().toEqualTypeOf<{
@@ -145,6 +146,7 @@ describe("types", () => {
       // No `_` alias without a bare `**`
       expectTypeOf<InferRouteParams<"/a/**:_">>().toEqualTypeOf<{ _: string }>();
       expectTypeOf<InferRouteParams<"/a/*">>().toEqualTypeOf<{ "0": string | undefined }>();
+      expectTypeOf<InferRouteParams<"/a{/*}?">>().toEqualTypeOf<{ "0": string | undefined }>();
     });
 
     it("should end param names at a `-`", () => {
@@ -186,12 +188,15 @@ describe("types", () => {
       expectTypeOf<InferRouteParams<"/:a{b}">>().toEqualTypeOf<{ a: string }>();
       expectTypeOf<InferRouteParams<"/:foo{}bar">>().toEqualTypeOf<{ foo: string }>();
       expectTypeOf<InferRouteParams<"/c/{:a}b">>().toEqualTypeOf<{ a: string }>();
-      // A regex group after one is an unnamed capture (not typed), not a
-      // constraint
-      expectTypeOf<InferRouteParams<"/{:foo}(.*)">>().toEqualTypeOf<{ foo: string }>();
-      expectTypeOf<InferRouteParams<"/:foo{}(\\d+)">>().toEqualTypeOf<{ foo: string }>();
+      // A regex group after one is an unnamed capture, not a constraint
+      expectTypeOf<InferRouteParams<"/{:foo}(.*)">>().toEqualTypeOf<{ foo: string; "0": string }>();
+      expectTypeOf<InferRouteParams<"/:foo{}(\\d+)">>().toEqualTypeOf<{
+        foo: string;
+        "0": string;
+      }>();
       expectTypeOf<InferRouteParams<"/{:foo}?(.*)">>().toEqualTypeOf<{
         foo: string | undefined;
+        "0": string;
       }>();
       // A `**:name` too
       expectTypeOf<InferRouteParams<"/a{/**:x}?">>().toEqualTypeOf<{ x: string | undefined }>();
@@ -257,10 +262,9 @@ describe("types", () => {
       }>();
       expectTypeOf<InferRouteParams<"/a{/*}?/b">>().toEqualTypeOf<{ "0": string | undefined }>();
       expectTypeOf<InferRouteParams<"/a{-*}/b">>().toEqualTypeOf<{ "0": string }>();
-      // `**{.png}?` is `**` or `**.png` (`**/*.png`)
+      // `**{.png}?` is `**` or `**.png` (`*.png`, the same key)
       expectTypeOf<InferRouteParams<"/a/**{.png}?">>().toEqualTypeOf<{
         "0": string | undefined;
-        "1": string | undefined;
         _?: string;
       }>();
       // Long static routes stay in TS's recursion limit
@@ -289,11 +293,12 @@ describe("types", () => {
         "0": string | undefined;
       }>();
       // Numbered over the whole pattern, a left-out group's included
-      expectTypeOf<InferRouteParams<"/a{/**}?/*">>().toEqualTypeOf<{
+      expectTypeOf<InferRouteParams<"/a{/(\\d+)}?/*">>().toEqualTypeOf<{
         "0": string | undefined;
-        "1": string;
-        _?: string;
+        "1": string | undefined;
       }>();
+      // A `*` inside a segment is numbered where it is (`(\d+)` first)
+      expectTypeOf<InferRouteParams<"/(\\d+)-*">>().toEqualTypeOf<{ "0": string; "1": string }>();
       // Scanned char by char, also a long route
       expectTypeOf<
         InferRouteParams<"/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/:id/(\\d+)/*">

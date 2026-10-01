@@ -18,8 +18,8 @@ import type { Node } from "./types.ts";
  *
  * Sound in both directions *as a statement about nodes*. It is deliberately
  * **not** a statement about match-sets — the key erases regex constraints and
- * widens `**:name` to `**`, so `/u/:id(\d+)` and `/u/:slug([a-z]+)` share the
- * key `/u/*` while matching disjoint paths. Use {@link compareRoutes} for
+ * widens `**:name` and `*` to `**`, so `/u/:id(\d+)` and `/u/:slug([a-z]+)`
+ * share the key `/u/:_0` while matching disjoint paths. Use {@link compareRoutes} for
  * match-set relations; the two properties are independent (node identity is
  * syntactic, match-set containment is semantic).
  *
@@ -34,12 +34,15 @@ import type { Node } from "./types.ts";
  *
  * Invalid patterns throw exactly as `addRoute` does.
  *
+ * Keys name a param segment `:_0`, `:_1`, … (in key order) and a catch-all
+ * (`*`, `**`, `**:name`) `**`.
+ *
  * @example
- * routeNodeKeys("/users/:id"); // ["/users/*"]
- * routeNodeKeys("/users/*"); // ["/users/*"]  (same node -> same bucket)
- * routeNodeKeys("/admin/**:rest"); // ["/admin/**"]
+ * routeNodeKeys("/users/:id"); // ["/users/:_0"]
+ * routeNodeKeys("/users/:name"); // ["/users/:_0"]  (same node -> same bucket)
+ * routeNodeKeys("/admin/*"); // ["/admin/**"]  (the node of `/admin/**`)
  * routeNodeKeys("/**:path/_payload.json"); // ["/**\/_payload.json"]
- * routeNodeKeys("/a/:x?"); // ["/a", "/a/*"]
+ * routeNodeKeys("/a/:x?"); // ["/a", "/a/:_0"]
  */
 export function routeNodeKeys(pattern: string): string[] {
   let keys = _patternKeys.get(pattern);
@@ -68,33 +71,42 @@ const _patternKeys = new Map<string, string[]>();
 function _collectKeys(node: Node, prefix: string, keys: string[]): void {
   // A node carries `methods` iff some route was registered on it, so walking
   // the throwaway tree yields one key per distinct node — deduplication is free.
-  if (node.methods) keys.push(prefix || "/");
+  if (node.methods) _pushKey(keys, prefix || "/");
   if (node.static) {
     for (const key in node.static) {
       _collectKeys(node.static[key], prefix + "/" + _escapeKey(key), keys);
     }
   }
-  if (node.param) _collectKeys(node.param, prefix + "/*", keys);
+  if (node.param) _collectKeys(node.param, prefix + PARAM, keys);
   if (node.wildcard) _collectKeys(node.wildcard, prefix + "/**", keys);
   // A wildcard's suffix trie holds the segments after `**`, last one first
   if (node.suffix) _collectSuffixKeys(node.suffix, prefix, "", keys);
 }
 
 function _collectSuffixKeys(node: Node, prefix: string, suffix: string, keys: string[]): void {
-  if (node.methods) keys.push(prefix + suffix);
+  if (node.methods) _pushKey(keys, prefix + suffix);
   if (node.static) {
     for (const key in node.static) {
       _collectSuffixKeys(node.static[key], prefix, "/" + _escapeKey(key) + suffix, keys);
     }
   }
-  if (node.param) _collectSuffixKeys(node.param, prefix, "/*" + suffix, keys);
+  if (node.param) _collectSuffixKeys(node.param, prefix, PARAM + suffix, keys);
+}
+
+// A param segment, named `:_0`, `:_1`, … once its key is complete (`addRoute`
+// rejects a U+FFFF, so no static key holds one)
+const PARAM = "/\uFFFF";
+
+function _pushKey(keys: string[], key: string): void {
+  let n = 0;
+  keys.push(key.replace(/\uFFFF/g, () => `:_${n++}`));
 }
 
 /**
  * Encode a decoded static key back into route syntax, so it can never be
- * confused with the `*` / `**` node markers and re-registers as the same static
- * key: route-syntax punctuation and `\` are backslash-escaped (a static `*` is
- * `\*`).
+ * confused with the `:_N` / `**` node markers and re-registers as the same
+ * static key: route-syntax punctuation and `\` are backslash-escaped (a static
+ * `*` is `\*`).
  */
 function _escapeKey(key: string): string {
   return key.replace(/[\\:(){}*]/g, "\\$&");

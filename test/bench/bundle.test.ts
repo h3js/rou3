@@ -180,8 +180,32 @@ describe("benchmark", () => {
     // removal identity is marked apart from `/{…}`'s (`{a}?/b` vs `/{a}?/b`),
     // `skipGroup` counts a relative one's captures after its `/`, and text
     // right after a leading `{/…}?` (`{/a}?b`) throws.
-    expect(bytes).toBeLessThanOrEqual(11940); // <11.94kb
-    expect(gzipSize).toBeLessThanOrEqual(5070); // <5.07kb
+    // +361B raw / +217B gzip: a `*` is a greedy catch-all as in URLPattern
+    // (one segment or more, none after the lookup path's trailing slash):
+    // `matchesZero` and the `slash` flag through both walks, a whole-segment
+    // `*` on the wildcard node (the param-node end-of-path fallback is gone),
+    // `splitStar` reading a `*` inside a segment as its segment-local parts
+    // around a `**` and `getMatchParams` joining their captures, `**:name`
+    // outweighing `*` on a shared node, and the one-catch-all error naming
+    // `*`. `replaceSegmentWildcards` and `dynamicTerminal` are gone.
+    // +32B raw / +18B gzip: `normalizePath` keeps the trailing slash of a
+    // last `.` / `..` as WHATWG does (`/foo/bar/..` is `/foo/`, a `/foo/*`).
+    // -23B raw / -15B gzip: a trailing `*` is optional again (as in 0.11),
+    // so the walks no longer thread the trailing-slash flag (`matchesZero`
+    // ignores it; only `getMatchParams` reads it, for the `""` capture).
+    // Weights are doubled so that a `*` outweighs a `**` (a trailing one: same
+    // paths) by less than a regex param.
+    // Merged with main at 11935B / 5064B: the greedy `*` above is +396B raw
+    // / +225B gzip on top of it.
+    // +35B raw / +15B gzip: a `pre*` ending its segment also registers the
+    // segment as written (ranked on its node), its `**` needing a segment.
+    // +37B raw / +21B gzip: in a suffix trie a capture-only regex (`plain`)
+    // weighs a point only, below a `*` (`/*/:y` over `/**/:a:b?`).
+    // +7B raw / +3B gzip: the `**` of a split `*` may capture `""` (`empty`).
+    // +12B raw / +7B gzip: that `**` needs a segment before more of the
+    // route too (a `pre*` route is listed once per path).
+    expect(bytes).toBeLessThanOrEqual(12422); // <12.43kb
+    expect(gzipSize).toBeLessThanOrEqual(5335); // <5.34kb
   });
 });
 

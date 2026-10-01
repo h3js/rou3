@@ -78,8 +78,50 @@ describe("regExpToRoute", () => {
   it("maps the core constructs", () => {
     expect(regExpToRoute(/^\/path\/?$/)).toBe("/path");
     expect(regExpToRoute(/^\/path\/(?<param>[^/]+)\/?$/)).toBe("/path/:param");
-    expect(regExpToRoute(/^\/path\/(?<_0>[^/]*)\/foo\/?$/)).toBe("/path/*/foo");
-    expect(regExpToRoute(/^\/path\/(?<_0>[^/]*)\.png\/?$/)).toBe("/path/*.png");
+    expect(regExpToRoute(/^\/path\/(?<_0>[\s\S]*)\/foo\/?$/)).toBe("/path/*/foo");
+    expect(regExpToRoute(/^\/path\/(?<_0>[\s\S]*)\.png\/?$/)).toBe("/path/*.png");
+    expect(regExpToRoute(/^\/path\/(?<_0>(?:[\s\S]*[^/])?\/*?)\/?$/)).toBe("/path/*");
+    expect(regExpToRoute(/^\/path\/(?<_0>[\s\S]*?)(?:\/(?<y>[^/]+))??\/?$/)).toBe("/path/*/:y?");
+    // A single-segment `*` before 0.12 (`[^/]*`, as 0.11 emitted it) is the
+    // constraint `([^\x2f]*)` now (a `*` takes `/` too): the same paths and
+    // captures
+    for (const [re, route] of [
+      [/^\/path\/(?<_0>[^/]*)\/foo\/?$/, "/path/([^\\x2f]*)/foo"],
+      [/^\/path\/(?<_0>[^/]*)\.png\/?$/, "/path/([^\\x2f]*).png"],
+      [/^\/path(?:\/(?<_0>[^/]*))??\/?$/, "/path{/([^\\x2f]*)}?"],
+      // At the root: a leading `{/…}?` (`/X` or `/`), as 0.11 emitted `/*`
+      // and `/*/:x?`
+      [/^(?:\/(?<_0>[^/]*))??\/?$/, "{/([^\\x2f]*)}?"],
+      [/^(?:\/(?<_0>[^/]*)(?:\/(?<x>[^/]+))?)??\/?$/, "{/([^\\x2f]*)/:x?}?"],
+    ] as const) {
+      expect(regExpToRoute(re), re.source).toBe(route);
+      const router = createRouter<string>();
+      addRoute(router, "GET", route, route);
+      for (const path of LEGACY_STAR_PATHS) {
+        const groups = re.exec(path)?.groups;
+        const found = findRoute(router, "GET", path);
+        expect(!!found, `${route} on ${path}`).toBe(re.test(path));
+        if (groups?._0 !== undefined) expect(found?.params?.["0"], path).toBe(groups._0);
+      }
+    }
+    // 0.11's `/*/:x*` (its `:x*` could be empty, a `:x*` can't now)
+    expect(regExpToRoute(/^(?:\/(?<_0>[^/]*)(?:\/(?<x>(?:[\s\S]*[^/])?\/*?))??)??\/?$/)).toBe(
+      "{/([^\\x2f]*)/:x*}?",
+    );
+    // No route matches what these do: a hand-written trailing one matches `""`
+    // on `/path/` (a route's last segment can't be empty there), and 0.11's
+    // `*` after an empty segment (`/a//*`, `//*`) matches `/a//` (a route
+    // ending in an empty segment is the route without it, `/a`)
+    for (const re of [
+      /^\/path\/(?<_0>[^/]*)\/?$/,
+      /^\/path\/([^/]*)\/?$/,
+      /^\/a\/\/(?:(?<_0>[^/]*)\/?)??$/,
+      /^\/\/(?:(?<_0>[^/]*)\/?)??$/,
+      /^\/(?<x>[^/]+)\/\/(?:(?<_0>[^/]*)\/?)??$/,
+      /^\/a\/\/(?:(?<_0>\d+)\/?)??$/,
+    ]) {
+      expect(() => regExpToRoute(re), re.source).toThrow(/^rou3: /);
+    }
     expect(regExpToRoute(/^\/path(?:\/(?<_>.*))?\/?$/)).toBe("/path/**");
     expect(regExpToRoute(/^\/?(?<_>.*)\/?$/)).toBe("/**");
     expect(regExpToRoute(/^\/path\/(?<id>\d+)\/?$/)).toBe("/path/:id(\\d+)");
@@ -197,9 +239,14 @@ describe("regExpToRoute", () => {
     [String.raw`^\/path(?:\/(?<rest>(?:[\s\S]*[^/])?\/*?))??\/?$`, "/path/:rest*"],
     [String.raw`^(?:\/?(?<path>(?:[\s\S]*[^/])?\/*?))??\/?$`, "/:path*"],
     [String.raw`^\/path(?:\/(?<rest>[\s\S]*))??\/suffix\/?$`, "/path/:rest*/suffix"],
-    [String.raw`^\/a(?:\/(?:(?:(?<x>[\s\S]*)\/)?(?:(?<_0>[^/]+)\/?|\/))?)?$`, "/a/:x*/*"],
   ])("reverses the 0.11 `:x*` form %s", (source, route) => {
     expect(regExpToRoute(source)).toBe(route);
+  });
+
+  it("rejects the 0.11 `:x*` then `*` form (two catch-alls now)", () => {
+    expect(() =>
+      regExpToRoute(String.raw`^\/a(?:\/(?:(?:(?<x>[\s\S]*)\/)?(?:(?<_0>[^/]+)\/?|\/))?)?$`),
+    ).toThrow(/^rou3: /);
   });
 
   it("accepts the two-trailing-slash suffix emitted by older versions (#209)", () => {
@@ -217,7 +264,7 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(/^\/api(?:\/(?<__rou3_esc_____rou3__x>[^/]+))?\/?$/)).toBe(
       "/api/:__rou3_x?",
     );
-    expect(regExpToRoute(/^\/mix\/(?<__rou3_esc_____rou3__x>[^/]+)\.(?<_0>[^/]*)\/?$/)).toBe(
+    expect(regExpToRoute(/^\/mix\/(?<__rou3_esc_____rou3__x>[^/]+)\.(?<_0>[\s\S]*)\/?$/)).toBe(
       "/mix/:__rou3_x.*",
     );
     // A `_N` param (escaped, `__rou3_esc___N`) is no unnamed capture (`_N`).
@@ -230,7 +277,7 @@ describe("regExpToRoute", () => {
       "/a/:_0(\\d+)",
       "/a/:_0.*",
       "/a/:_0*/:_1?",
-      "/a/:_0*/*",
+      "/a/:_0/*",
       "/a/:_0+/b",
     ]) {
       const re = routeToRegExp(route);
@@ -316,11 +363,11 @@ describe("regExpToRoute", () => {
     // A `*` after a group would read as a modifier and a `*` after a `*` as a
     // `**`: no route emits these, so they throw.
     for (const re of [
-      /^\/a(?<_0>[^/]*)(?<_1>[^/]*)\/?$/,
-      /^\/a(?<_0>[^/]*)(?<_1>[^/]*)b\/?$/,
-      /^\/(?<_0>[^/]*)(?<_1>[^/]*)\/?$/,
-      /^\/a\/(?<x>[^/]+)(?<_0>[^/]*)\/?$/,
-      /^\/a\/(?<x>\d+)(?<_0>[^/]*)\/?$/,
+      /^\/a(?<_0>[\s\S]*)(?<_1>[\s\S]*)\/?$/,
+      /^\/a(?<_0>[\s\S]*)(?<_1>[\s\S]*)b\/?$/,
+      /^\/(?<_0>[\s\S]*)(?<_1>[\s\S]*)\/?$/,
+      /^\/a\/(?<x>[^/]+)(?<_0>[\s\S]*)\/?$/,
+      /^\/a\/(?<x>\d+)(?<_0>[\s\S]*)\/?$/,
     ]) {
       expect(() => regExpToRoute(re), re.source).toThrow(/rou3: /);
     }
@@ -528,7 +575,8 @@ describe("regExpToRoute", () => {
     // group following the same conventions should map too.
     expect(regExpToRoute(/^\/path\/(\d+)\/?$/)).toBe("/path/(\\d+)");
     expect(regExpToRoute(/^\/path\/(png|jpg)\/?$/)).toBe("/path/(png|jpg)");
-    expect(regExpToRoute(/^\/path\/([^/]*)\/?$/)).toBe("/path/*");
+    expect(regExpToRoute(/^\/path\/([\s\S]*)\/foo\/?$/)).toBe("/path/*/foo");
+    expect(() => regExpToRoute(/^\/path\/([^/]*)\/?$/)).toThrow(/^rou3: /);
     expect(regExpToRoute(/^\/path\/(\d+)-x\/?$/)).toBe("/path/(\\d+)-x");
     // A bare group that can't survive path splitting still throws.
     expect(() => regExpToRoute(/^\/path\/([^/]+)\/?$/)).toThrow(/cannot contain/);
@@ -570,21 +618,25 @@ describe("regExpToRoute", () => {
     for (const re of [
       /^\/a(?:\/(?<x>[^/]+)(?:\/(?<_0>\d+))?)?\/?$/,
       /^\/a(?:\/b(?:\/(?<_0>\d+))?)?\/?$/,
-      /^\/a(?:\/b(?:\/(?<_0>[^/]*))??\/c)?\/?$/,
+      /^\/a(?:\/b(?:\/(?<_0>\d*))??\/c)?\/?$/,
     ]) {
       expect(() => regExpToRoute(re), re.source).toThrow(/^rou3: /);
     }
   });
 
-  it("keeps a mid-route optional `*` optional", () => {
-    // A bare `*` is optional only at the end of the route: `{/*}?` elsewhere.
-    for (const route of ["/a{/*}?/b", "/a{/*}?/:q", "/a/*{/*}?/b", "/{/*}?/b"]) {
+  it("reads an optional `*` group back as `**`", () => {
+    // `{/*}?` is a `*` (one segment or more) or nothing: a `**`'s paths and
+    // captures (it reports the deprecated `_` alias too, see
+    // KNOWN_NON_EQUIVALENT), and the same regex.
+    for (const [route, back] of [
+      ["/a{/*}?/b", "/a/**/b"],
+      ["/a{/*}?/:q", "/a/**/:q"],
+      ["/a{/*}?", "/a/**"],
+    ]) {
       const re = routeToRegExp(route);
-      const back = regExpToRoute(re);
-      expect(back, route).toBe(route);
+      expect(regExpToRoute(re), route).toBe(back);
       expect(routeToRegExp(back).source, route).toBe(re.source);
     }
-    expect(regExpToRoute(routeToRegExp("/a{/*}?"))).toBe("/a/*");
   });
 });
 
@@ -613,6 +665,13 @@ const KNOWN_NON_EQUIVALENT: Record<string, readonly [back: string, reason: strin
     "/a/**{/:y/:n(a|b)?}?",
     "the router gives a lone last `a` / `b` to `n`, the regex to `y`",
   ],
+  // An optional `*` group compiles like a `**`, which also reports the
+  // deprecated `_` alias (no regex can).
+  "/a{/*}?": ["/a/**", "the `**` also reports `_`"],
+  "/a{/*}?/b": ["/a/**/b", "the `**` also reports `_`"],
+  "/a{/*}?/:q": ["/a/**/:q", "the `**` also reports `_`"],
+  "/{/*}?/b": ["//**/b", "the `**` also reports `_`"],
+  "{/*}?/b": ["/**/b", "the `**` also reports `_`"],
 };
 
 /** Sweep paths, also under the route's leading static segments (`/path/…`). */
@@ -646,3 +705,27 @@ function describeMatch(match?: { params?: Record<string, string | undefined> }):
   }
   return JSON.stringify(params);
 }
+
+// Paths for the 0.11 single-segment `*` regexes (`[^/]*`)
+const LEGACY_STAR_PATHS = [
+  "/",
+  "//",
+  "/a",
+  "/a/",
+  "/a//",
+  "/a/b",
+  "/a/b/",
+  "/path",
+  "/path/",
+  "/path//",
+  "/path/a",
+  "/path/a/",
+  "/path/a/b",
+  "/path/foo",
+  "/path//foo",
+  "/path/a/foo",
+  "/path/a/b/foo",
+  "/path/.png",
+  "/path/a.png",
+  "/path/a/b.png",
+];

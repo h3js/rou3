@@ -81,7 +81,7 @@ describe("segments after `**`", () => {
     const { find } = lookups(
       routerOf([
         "/**:path/_payload.json",
-        "/**/*.png",
+        "/*.png",
         "/:lang(en|fr)/**/og/:file",
         "/img/**/:name.:ext(webp|avif)",
       ]),
@@ -90,20 +90,24 @@ describe("segments after `**`", () => {
     expect(find("/_payload.json")).toBeUndefined();
     expect(find("/a/_payload.json")?.params).toEqual({ path: "a" });
     expect(find("/a/b/_payload.json")?.params).toEqual({ path: "a/b" });
-    // Unnamed captures are numbered in pattern order, the `**` included
-    expect(find("/a/b/x.png")?.params).toEqual({ 0: "a/b", 1: "x", _: "a/b" });
-    expect(find("/x.png")?.params).toEqual({ 1: "x" });
+    // A `*` inside a segment is a `**` and the segment's part in the tree,
+    // one capture (`/` between them)
+    expect(find("/a/b/x.png")?.params).toEqual({ 0: "a/b/x" });
+    expect(find("/x.png")?.params).toEqual({ 0: "x" });
+    expect(find("//x.png")?.params).toEqual({ 0: "/x" });
     expect(find("/fr/a/og/b")?.params).toEqual({ lang: "fr", 0: "a", _: "a", file: "b" });
     expect(find("/de/a/og/b")).toBeUndefined();
     expect(find("/img/a/b/c.webp")?.params).toEqual({ 0: "a/b", _: "a/b", name: "c", ext: "webp" });
     expect(find("/img/c.gif")).toBeUndefined();
   });
 
-  it("take the segment for a `*` after `**` (not optional there)", () => {
-    const { find } = lookups(routerOf(["/a/**/*"]));
-    expect(find("/a")).toBeUndefined();
-    expect(find("/a/x")?.params).toEqual({ 1: "x" });
-    expect(find("/a/x/y")?.params).toEqual({ 0: "x", 1: "y", _: "x" });
+  it("take one segment or more for a `*` before more of the route", () => {
+    const { find } = lookups(routerOf(["/a/*/x"]));
+    expect(find("/a/x")).toBeUndefined();
+    expect(find("/a//x")?.params).toEqual({ 0: "" });
+    expect(find("/a/b/x")?.params).toEqual({ 0: "b" });
+    expect(find("/a/b/c/x/")?.params).toEqual({ 0: "b/c" });
+    expect(find("/a/x/x")?.params).toEqual({ 0: "x" });
   });
 
   it("make `:name+` / `:name*` before the last segment keep the segments after it", () => {
@@ -116,36 +120,33 @@ describe("segments after `**`", () => {
     expect(find("/c/1/2/d")?.params).toEqual({ y: "1/2" });
   });
 
-  it("`**<rest>` is `**/*<rest>` (`/**.md`: any path ending in a `.md` segment)", () => {
+  it("`**<rest>` reads like `*<rest>` (`/**.md`: any path ending in `.md`, one capture)", () => {
     const router = routerOf(["/**.md", "/blog/**.json"]);
     const { find, all } = lookups(router);
-    expect(find("/readme.md")).toEqual({ data: "/**.md", params: { 1: "readme" } });
-    expect(find("/docs/guide/intro.md")?.params).toEqual({
-      0: "docs/guide",
-      1: "intro",
-      _: "docs/guide",
-    });
-    expect(find("/docs/intro.md/")?.params).toEqual({ 0: "docs", 1: "intro", _: "docs" });
-    expect(find("/blog/a/post.json")?.params).toEqual({ 0: "a", 1: "post", _: "a" });
-    expect(find("/blog/post.json")?.params).toEqual({ 1: "post" });
+    expect(find("/readme.md")).toEqual({ data: "/**.md", params: { 0: "readme" } });
+    expect(find("/docs/guide/intro.md")?.params).toEqual({ 0: "docs/guide/intro" });
+    expect(find("/docs/intro.md/")?.params).toEqual({ 0: "docs/intro" });
+    expect(find("/blog/a/post.json")?.params).toEqual({ 0: "a/post" });
+    expect(find("/blog/post.json")?.params).toEqual({ 0: "post" });
+    expect(find("/.md")?.params).toEqual({ 0: "" });
     for (const path of ["/", "/a", "/a.mdx", "/a.md/b", "/post.json"]) {
       expect(find(path), path).toBeUndefined();
     }
     expect(all("/blog/a.json.md").map((m) => m.data)).toEqual(["/**.md"]);
-    // Same node and registration identity as the spelled-out form
-    expect(routeNodeKeys("/**.md")).toEqual(["/**/*"]);
-    expect(routeNodeKeys("/blog/**.json")).toEqual(routeNodeKeys("/blog/**/*.json"));
-    expect(compareRoutes("/**.md", "/**/*.md")).toBe("equal");
-    removeRoute(router, "", "/**/*.md");
+    // Same node and registration identity as the `*` form
+    expect(routeNodeKeys("/**.md")).toEqual(["/**/:_0"]);
+    expect(routeNodeKeys("/blog/**.json")).toEqual(routeNodeKeys("/blog/*.json"));
+    expect(compareRoutes("/**.md", "/*.md")).toBe("equal");
+    removeRoute(router, "", "/*.md");
     expect(lookups(router).find("/readme.md")).toBeUndefined();
-    // `***` is two `**`
-    expect(() => addRoute(createRouter(), "", "/***")).toThrow(/only one `\*\*`/);
+    // `***` is `**` and a `*`, two catch-alls
+    expect(() => addRoute(createRouter(), "", "/***")).toThrow(/only one `\*`/);
   });
 
-  it("allow one `**` per route", () => {
-    for (const route of ["/**/**", "/a/**/b/**:x", "/a/:x+/b/:y+", "/**/a/:x*"]) {
+  it("allow one catch-all per route", () => {
+    for (const route of ["/**/**", "/a/**/b/**:x", "/a/:x+/b/:y+", "/**/a/:x*", "/*/a/*"]) {
       expect(() => addRoute(createRouter(), "", route), route).toThrow(
-        /^rou3: a route can have only one `\*\*`/,
+        /^rou3: a route can have only one `\*`, `\*\*`/,
       );
     }
   });
@@ -215,24 +216,24 @@ describe("segments after `**`: priority", () => {
     ],
     [["/blog/post/_payload.json", "/**/_payload.json"], P, ["/**/_payload.json", P]],
     [
-      ["/**/*.png", "/**/__og_image__/og.png", "/blog/**"],
+      ["/*.png", "/**/__og_image__/og.png", "/blog/**"],
       "/blog/a/__og_image__/og.png",
-      ["/blog/**", "/**/*.png", "/**/__og_image__/og.png"],
+      ["/blog/**", "/*.png", "/**/__og_image__/og.png"],
     ],
     // Narrower wins even when the broader one diverges earlier
-    [["/a/*/**", "/a/**/x"], "/a/q/x", ["/a/*/**", "/a/**/x"]],
-    [["/*/**/p", "/**/b/p"], "/b/p", ["/*/**/p", "/**/b/p"]],
-    // An in-place optional after a lone `:name` / `*` restricts nothing: it
-    // ranks like a plain param, not a regex one (same node: it weighs as one)
+    [["/a/*", "/a/**/x"], "/a/q/x", ["/a/*", "/a/**/x"]],
+    [["/*/p", "/**/b/p"], "/b/p", ["/*/p", "/**/b/p"]],
+    // A `*` ranks like a `**` over the segments it takes
+    [["/a/*", "/a/:x/p"], "/a/b/p", ["/a/*", "/a/:x/p"]],
+    [["/*/p", "/b/:s/p"], "/b/q/p", ["/*/p", "/b/:s/p"]],
+    // An in-place optional after a lone `:name` restricts nothing: it ranks
+    // like a plain param, not a regex one (same node: it weighs as one)
     [["/b/:id", "/**/:a:b?"], "/b/x", ["/**/:a:b?", "/b/:id"]],
-    [["/b/**", "/**/*:x?"], "/b/x", ["/**/*:x?", "/b/**"]],
     [["/b/**", "/**/:a:b?"], "/b/x", ["/**/:a:b?", "/b/**"]],
     [["/**/:id", "/**/:a:b?"], "/b/x", ["/**/:id", "/**/:a:b?"]],
-    // ... and so does any segment of captures alone with at most one required
-    // `:name` (it matches any non-empty value, or any value)
-    [["/b/:id", "/**/*:a"], "/b/x", ["/**/*:a", "/b/:id"]],
-    [["/b/**", "/**/*:a:b?"], "/b/x", ["/**/*:a:b?", "/b/**"]],
-    [["/b/:id", "/**/*:a:b?"], "/b/x", ["/**/*:a:b?", "/b/:id"]],
+    // ... also against a narrower `*` on the same suffix node
+    [["/*/:y", "/**/:a:b?"], "/b/b", ["/**/:a:b?", "/*/:y"]],
+    [["/**/:a:b?", "/*/:y"], "/b/b", ["/**/:a:b?", "/*/:y"]],
     // Two required names need two chars: narrower, a regex param
     [["/b/:id", "/**/:a:b"], "/b/xy", ["/b/:id", "/**/:a:b"]],
     // Paths no suffix route matches keep the tree order
@@ -290,7 +291,12 @@ describe("segments after `**`: priority", () => {
       "/**:n/p",
       "/**/1/p",
       "/**/:n(\\d+)",
-      "/**/*.p",
+      "/*.p",
+      // `*`: a catch-all, one segment or more (none after a trailing slash)
+      "/*",
+      "/b/*",
+      "/*/p",
+      "/b/*/p",
       // an in-place optional that restricts nothing more than `:y`
       "/**/:y:z?",
     ];
@@ -309,6 +315,7 @@ describe("segments after `**`: priority", () => {
         return [route, new Set(paths.filter((path) => findRoute(router, "", path)))];
       }),
     );
+    const suffixRoutes = new Set(corpus.filter((route) => routerOf([route]).root.hasSuffix));
     const broader = (a: string, b: string) => {
       const [setA, setB] = [matchSets.get(a)!, matchSets.get(b)!];
       return setA.size > setB.size && [...setB].every((path) => setA.has(path));
@@ -324,7 +331,7 @@ describe("segments after `**`: priority", () => {
           if (k !== i) sets.push([corpus[i], corpus[j], corpus[k]]);
         }
         // Sets without a suffix route resolve in tree order, as before
-        for (const routes of sets.filter((set) => set.some((r) => /\*\*[^/]*\/./.test(r)))) {
+        for (const routes of sets.filter((set) => set.some((r) => suffixRoutes.has(r)))) {
           const router = routerOf(routes);
           for (const path of paths) {
             const found = findRoute(router, "", path)?.data;
@@ -347,7 +354,7 @@ describe("segments after `**`: priority", () => {
     }
     expect(checks).toBeGreaterThan(100_000);
     expect(failures.slice(0, 20)).toEqual([]);
-  }, 30_000);
+  }, 60_000);
 
   it("compiled lookups agree on the whole corpus", () => {
     const router = routerOf([
@@ -366,7 +373,9 @@ describe("segments after `**`: priority", () => {
       "/b/**/:y",
       "/**:n/p",
       "/**/:n(\\d+)",
-      "/**/*.p",
+      "/*.p",
+      "/b/*",
+      "/*/p",
     ]);
     const { find, all } = lookups(router);
     for (const path of [
@@ -407,7 +416,7 @@ describe("segments after `**`: priority", () => {
       return /if\((l>1&&.*?)\)\{let r=\[\],k=\[\]/.exec(compileRouterToString(router))?.[1];
     };
     expect(probe("GET", "/**.md")).toMatchInlineSnapshot(`"l>1&&(m==="GET"&&($3.test(s[l-1])))"`);
-    expect(probe("POST", "/**/*")).toMatchInlineSnapshot(`"l>1&&(m==="POST")"`);
+    expect(probe("POST", "/**/:p")).toMatchInlineSnapshot(`"l>1&&(m==="POST")"`);
     expect(probe("", "/**/:id(\\d+)")).toMatchInlineSnapshot(`"l>1&&($3.test(s[l-1]))"`);
     expect(probe("", "/a/**/x/:id(\\d+)")).toMatchInlineSnapshot(
       `"l>1&&s[1]==="a"&&(l>2&&(l>3&&(s[l-2]==="x"&&($3.test(s[l-1])))))"`,
@@ -418,8 +427,10 @@ describe("segments after `**`: priority", () => {
   });
 
   it("agrees with compareRoutes on the scenarios above", () => {
-    expect(compareRoutes("/a/*/**", "/a/**/x")).toBe("superset");
-    expect(compareRoutes("/*/**/p", "/**/b/p")).toBe("superset");
+    expect(compareRoutes("/a/*", "/a/**/x")).toBe("superset");
+    expect(compareRoutes("/*/p", "/**/b/p")).toBe("superset");
+    expect(compareRoutes("/a/*", "/a/:x/p")).toBe("superset");
+    expect(compareRoutes("/*/p", "/b/:s/p")).toBe("superset");
     expect(compareRoutes("/**/_payload.json", "/blog/:slug/_payload.json")).toBe("superset");
     expect(compareRoutes("/blog/**", "/**/_payload.json")).toBe("partial");
   });

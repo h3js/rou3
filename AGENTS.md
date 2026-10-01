@@ -9,7 +9,7 @@ Lightweight, high-performance HTTP router for JS/TS: a segment trie (one node pe
 
 Read the relevant doc before changing that area:
 
-- [`.agents/matching.md`](.agents/matching.md): tree, lookup, same-node siblings, `""` method entries, `findAllRoutes` ordering, segments after `**`, removal, empty segments.
+- [`.agents/matching.md`](.agents/matching.md): tree, lookup, same-node siblings, `""` method entries, `findAllRoutes` ordering, the greedy `*`, segments after a catch-all, removal, empty segments.
 - [`.agents/syntax.md`](.agents/syntax.md): pattern pipeline, escapes, `{}` groups, reserved syntax, param/capture-group names.
 - [`.agents/compiler.md`](.agents/compiler.md): `compileRouter` / `compileRouterToString` contract and codegen invariants.
 - [`.agents/regexp.md`](.agents/regexp.md): `routeToRegExp` (regex ≡ router) and `regExpToRoute`.
@@ -22,10 +22,11 @@ Read the relevant doc before changing that area:
 - `findAllRoutes` order (least → most specific) is a public contract (README "Result ordering").
 - `routeToRegExp(p)` matches exactly the paths `findRoute` matches on a router holding only `p` (consumers use it as a security guard). The one exception: a constraint that can match `/` (`(.*)`) also matches across segments in the regex, so it over-matches, never under-matches.
 - Never write a second pattern parser: derived APIs (`routeToRegExp` validation and dynamic segments, overlap, `routeNodeKeys`) run the real `addRoute` (or its `getParamRegexp`) on a throwaway router.
-- Lookup ignores at most one trailing slash; middle empty segments are meaningful.
+- Lookup ignores at most one trailing slash; middle empty segments are meaningful. The one reader of that slash is a trailing `*` over zero segments, for its capture only: `/a/*` matches `/a` (no key; optional, as in 0.11, unlike URLPattern) and `/a/` (`""`).
+- `*` is URLPattern's greedy catch-all (`(.*)`, also inside a segment), `**` the same plus zero segments; one catch-all per route (`*`, `**`, `:x+`, `:x*`). On a shared node `**` < `*` < `**:name` (containment). See [matching.md](.agents/matching.md#greedy-).
 - Literal pattern text is percent-encoded once, at insert, like URLPattern (`encodeLiteral`, see [syntax.md](.agents/syntax.md#percent-encoding)); lookup paths are never decoded or encoded (callers pass `new URL().pathname`). Encode only after syntax is parsed.
 - A `:name`, `:name+`, `:name*` or `**:name` never captures `""` (URLPattern); `*`, `**` and constraints may (see [matching.md](.agents/matching.md#empty-segments-and-normalization)).
-- Unnamed captures (`*`, a bare `**`, unnamed groups) are keyed `"0"`, `"1"`, … in pattern order over the whole pattern, as in URLPattern; a bare `**` over zero segments leaves its key out. The router also reports a bare `**` as `_` (deprecated alias, no regex group; see [matching.md](.agents/matching.md#unnamed-captures)).
+- Unnamed captures (`*`, a bare `**`, unnamed groups) are keyed `"0"`, `"1"`, … in pattern order over the whole pattern, as in URLPattern (the pieces a `*` inside a segment is split into share one key); a bare `**` over zero segments leaves its key out. The router also reports a bare `**` as `_` (deprecated alias, no regex group; see [matching.md](.agents/matching.md#unnamed-captures)).
 - Optional features (overlap, regexp, `routeNodeKeys`, `regExpToRoute`) must stay tree-shakeable; `test/bench/bundle.test.ts` budgets the core bundle.
 - `addRoute` preprocessing helpers bail early when their trigger char is absent; keep those guards.
 - Every thrown error starts with `rou3:`; pattern errors (via `invalidSyntax()`) are `rou3: <what> (<route as written>)`.

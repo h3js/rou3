@@ -34,12 +34,14 @@ describe("routesOverlap", () => {
     ["/a/:x", "/a/b", true, ":param overlaps literal"],
     ["/a/*", "/a/*", true, "* overlaps *"],
 
-    // trailing bare `*` is zero-or-one
-    ["/a/*", "/a", true, "trailing * matches zero segments"],
-    ["/a/*", "/a/b/c", false, "trailing * is single-segment"],
+    // `*` is one segment or more (URLPattern's `(.*)` after its `/`), or none
+    // after a trailing slash: `/a/` matches `/a` and `/a/*`
+    ["/a/*", "/a", true, "trailing * meets `/a` on `/a/`"],
+    ["/a/*", "/a/b/c", true, "trailing * takes several segments"],
 
-    // mid-pattern `*` is exactly one
+    // mid-pattern `*` too, but not none
     ["/a/*/c", "/a/b/c", true, "mid * matches one segment"],
+    ["/a/*/c", "/a/b/d/c", true, "mid * takes several segments"],
     ["/a/*/c", "/a/c", false, "mid * is not optional"],
     ["/a/*/c", "/a/b/d", false, "mid * with differing suffix"],
 
@@ -65,9 +67,9 @@ describe("routesOverlap", () => {
     // mid-pattern segment wildcards (`*.png`)
     ["/*.png", "/logo.png", true, "segment wildcard matches static"],
     ["/*.png", "/logo.jpg", false, "segment wildcard rejects static"],
-    ["/*.png", "/a/logo.png", false, "segment wildcard is single-segment"],
-    ["/file-*-*.png", "/file-a-b.png", true, "multi segment wildcard matches"],
-    ["/file-*-*.png", "/file-a.png", false, "multi segment wildcard rejects"],
+    ["/*.png", "/a/logo.png", true, "segment wildcard spans segments"],
+    ["/file-*.png", "/file-a/b.png", true, "segment wildcard spans segments after its text"],
+    ["/file-*.png", "/a/file-b.png", false, "segment wildcard keeps the text before it first"],
 
     // optional / repeat modifiers
     ["/a/:x?", "/a", true, "optional param matches without"],
@@ -130,16 +132,22 @@ describe("compareRoutes", () => {
     // `*` / `:param` single segments
     ["/a/:x", "/a/b", "superset", ":param vs literal"],
     ["/a/:x", "/a/:y", "equal", "params equal regardless of name"],
-    ["/a/*", "/a/:x", "superset", "trailing * also matches zero segments"],
-    ["/a/*/c", "/a/:x/c", "superset", "mid * is exactly one, and takes an empty one"],
+    ["/a/*", "/a/:x", "superset", "a * takes an empty segment, and several"],
+    ["/a/*/c", "/a/:x/c", "superset", "mid * takes an empty segment, and several"],
     ["/a/**", "/a/:x", "superset", "** vs :param"],
+    ["/a/**", "/a/*", "equal", "a trailing * is optional, like **"],
+    ["/a/*", "/a/**:rest", "superset", "a * may be empty, **:name not"],
+    ["/a/*", "/a/:x+", "superset", "a * may be empty, :x+ not"],
+    ["/a/*", "/a/b/:x/**", "superset", "a * vs deeper wildcard"],
+    ["/*.png", "/a/b.png", "superset", "segment wildcard spans segments"],
+    ["/**.md", "/*.md", "equal", "`**<rest>` reads like `*<rest>`"],
 
     // partial overlap (the pre-merge ambiguity case)
     ["/a/*/c", "/a/b/*", "partial", "crossing dynamic segments"],
     ["/a/**", "/*/b", "partial", "deep wildcard vs fixed-depth suffix"],
 
     // optional / repeat modifiers (multi-shape patterns)
-    ["/a/:x?", "/a/*", "subset", "a trailing * takes an empty segment, :param doesn't"],
+    ["/a/:x?", "/a/*", "subset", "a trailing * is optional and takes several segments"],
     ["/a/:x?", "/a{/:y}?", "equal", "optional param == optional group"],
     ["/a/:x?", "/a", "superset", "optional param matches without"],
     ["/a/:x*", "/a/**", "subset", "repeat* needs a value, ** takes an empty segment"],
@@ -150,7 +158,8 @@ describe("compareRoutes", () => {
 
     // non-capturing group delimiters `{...}?`
     ["/a{/b}?", "/a", "superset", "optional group matches without"],
-    ["/a{/b}?", "/a/*", "subset", "optional group is a subset of trailing *"],
+    ["/a{/b}?", "/a/*", "subset", "a trailing * matches `/a` too"],
+    ["/a{/*}?", "/a/**", "equal", "an optional * group is a **"],
     ["/a{/b}?", "/a/c", "disjoint", "optional group rejects other suffix"],
     ["{/:a}?/b", "/:a?/b", "equal", "leading group is absolute (URLPattern form)"],
     ["{/:a}?/b", "//b", "disjoint", "leading group adds no empty segment"],
@@ -398,11 +407,15 @@ describe("findOverlappingRoutes", () => {
     addRoute(deep, "GET", "/a/b/c/d", "deep");
     expect(findOverlappingRoutes(deep, "GET", "/a/**").map((m) => m.data)).toEqual(["deep"]);
 
-    // A trailing `*` tail is [0,1], so it must not reach a 2-deep static.
+    // A trailing `*` tail is [1, Infinity] too, a `:x` one segment only.
     const shallow = createRouter<string>();
     addRoute(shallow, "GET", "/a/b", "hit");
-    addRoute(shallow, "GET", "/a/b/c", "miss");
-    expect(findOverlappingRoutes(shallow, "GET", "/a/*").map((m) => m.data)).toEqual(["hit"]);
+    addRoute(shallow, "GET", "/a/b/c", "deep");
+    expect(findOverlappingRoutes(shallow, "GET", "/a/*").map((m) => m.data)).toEqual([
+      "deep",
+      "hit",
+    ]);
+    expect(findOverlappingRoutes(shallow, "GET", "/a/:x").map((m) => m.data)).toEqual(["hit"]);
   });
 
   it("orders wildcard -> param -> static -> self at a single node", () => {
@@ -450,20 +463,21 @@ describe("segments after `**`", () => {
     ["/**/_payload.json", "/blog/:slug", "partial"],
     ["/**/_payload.json", "/blog", "disjoint"],
     ["/**/_payload.json", "/**/og.png", "disjoint"],
-    ["/**.md", "/**/*.md", "equal"],
+    ["/**.md", "/*.md", "equal"],
     // A `**:p` needs a value, a `:y` too: `/a//x` is only `**:p`'s.
     ["/**:p/x", "/**/:y/x", "superset"],
     ["/**/:y", "/**:y", "subset"],
-    ["/**/*/x", "/**:p/x", "superset"],
+    ["/*/x", "/**:p/x", "superset"],
     ["/a/:x+/b", "/a/**:x/b", "equal"],
-    ["/a/*/**", "/a/**/x", "superset"],
-    ["/*/**/p", "/**/b/p", "superset"],
+    ["/a/*", "/a/**/x", "superset"],
+    ["/*/p", "/**/b/p", "superset"],
     // A `:p` needs a value: `/a//x` is only `/a/**/x`'s.
     ["/a/:p/**", "/a/**/x", "partial"],
     ["/**/a/b", "/**/b", "subset"],
     ["/a/**/b", "/**/a/b", "partial"],
     ["/a/**/b", "/b/**/a", "disjoint"],
-    ["/**/*.png", "/**/x.png", "superset"],
+    ["/*.png", "/**/x.png", "superset"],
+    ["/*/x", "/**/x", "subset"],
     ["/**/:n(\\d+)", "/**/:m(\\d+)", "equal"],
   ] as const)("compareRoutes(%j, %j) === %j", (a, b, expected) => {
     expect(compareRoutes(a, b)).toBe(expected);
@@ -514,8 +528,14 @@ describe("segments after `**`", () => {
       "/**/a/:x",
       "/b/**/b",
       "/a/:x/**/b",
-      "/**/*.png",
+      "/*.png",
       "/**/:x/:y/b",
+      // `*`: one segment or more, or none after a trailing slash
+      "/*/b",
+      "/a/*/b",
+      "/:x/*",
+      "/a{/*}?",
+      "/a-*",
       "/a/b/**/b",
       "/:x(\\d+)/**/b",
     ];
@@ -533,7 +553,9 @@ describe("segments after `**`", () => {
         return [pattern, new Set(paths.filter((path) => findRoute(router, "", path)))];
       }),
     );
-    const hasRegex = (pattern: string) => /\(|\*\./.test(pattern);
+    // A constraint, or a `*` inside a segment (a regex for its text)
+    const hasRegex = (pattern: string) =>
+      pattern.split("/").some((s) => s.includes("(") || (/\*/.test(s) && !/^\*\*?$/.test(s)));
     const failures: string[] = [];
     for (const a of patterns) {
       for (const b of patterns) {

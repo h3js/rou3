@@ -30,15 +30,20 @@ export function collectSuffix<T>(
     for (const m of match) {
       const w = m.suffix![0];
       let weight = 0;
-      for (const [index, , optional] of m.paramsMap!) {
+      for (const [index, , optional, empty] of m.paramsMap!) {
         if (index < 0 && !optional) {
-          weight = end > start ? 1 : -1;
+          weight = end > start ? (empty ? 2 : 4) : -1;
         }
       }
       const regexps = m.paramsRegexp;
       for (let i = 0; i < regexps.length && weight >= 0; i++) {
         if (regexps[i]) {
-          weight = regexps[i].test(segments[i > w ? i - w - 1 + end : i]) ? weight + 1 : -1;
+          // A capture-only regex (`plain`: `:a:b?`) restricts no more than a
+          // `:name`: it weighs a point only (no tie with one), less than a
+          // `*` (`/*/:y` over `/**/:a:b?`)
+          weight = regexps[i].test(segments[i > w ? i - w - 1 + end : i])
+            ? weight + (m.paramsMap!.find((e) => e[0] === i)![3] ? 1 : 4)
+            : -1;
         }
       }
       if (weight >= 0) {

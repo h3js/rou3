@@ -588,7 +588,7 @@ describe("routeToRegExp", () => {
       if (duplicateGroupNames(source).length > 0) duplicates.push(pattern);
     }
     // Without duplicate named groups (Node 22) `sweepPatterns()` leaves out
-    // the ones that need them, look-behind ones included (`/*/*{/:g?/:q*}?`).
+    // the ones that need them, look-behind ones included.
     // Drop only those, so a stale or misspelled entry still fails.
     const unsupported = new Set(unsupportedSweepPatterns());
     const kept = (set: ReadonlySet<string>) => [...set].filter((p) => !unsupported.has(p)).sort();
@@ -627,7 +627,7 @@ describe("regex-body scans", () => {
 describe("routeToRegExp: more than one `**`", () => {
   it.each(TWO_CATCH_ALL_ROUTES)("%s throws like addRoute", (route) => {
     // Quoting the route as written, not its rewritten form (`:x+` is `**:x`)
-    const message = `rou3: a route can have only one \`**\`, \`:name+\` or \`:name*\` (${route})`;
+    const message = `rou3: a route can have only one \`*\`, \`**\`, \`:name+\` or \`:name*\` (${route})`;
     expect(() => addRoute(createRouter(), "", route)).toThrow(message);
     expect(() => routeToRegExp(route)).toThrow(message);
   });
@@ -686,7 +686,7 @@ describe("reserved pattern syntax", () => {
     "/a{/**:x}?",
     "/a/**{.md}?",
     "/a/*.png",
-    "/a/file-*-*.png",
+    "/a/file-*.png",
     "/a/:x-*",
     "/a/(\\d+)/(a|b)",
     "/a/*/:x",
@@ -845,14 +845,14 @@ describe("routeToRegExp: duplicate param names", () => {
   it.each([
     ...PCRE2_DUPLICATE_NAME_ROUTES,
     "/media/:name{.webp}?",
-    "/a/*/*",
+    "/a/(\\d+)/*",
     "/a/(\\d+)/(\\d+)",
-    "/a/*/b/*.png/(\\d+)",
+    "/a/(\\d+)/b/*.png/(\\d+)",
     // `:_0` escapes to `__rou3_esc___0`, distinct from the unnamed `*` (`_0`).
     "/w/:_0/*",
     // `**` is an unnamed capture, distinct from a param named `_0`.
     "/a/:_0/**",
-    "/a/*/**",
+    "/a/(\\d+)/**",
   ])("accepts %s", (route) => {
     if (!DUPLICATE_NAMED_GROUPS && PCRE2_DUPLICATE_NAME_ROUTES.has(route)) {
       expect(() => routeToRegExp(route)).toThrowError(NEEDS_DUPLICATE_NAMES);
@@ -867,7 +867,7 @@ describe("routeToRegExp: duplicate param names", () => {
 // without duplicate named groups (Node 22 / V8 < 12.5) threw a raw
 // `SyntaxError: ... Duplicate capture group name` from `routeToRegExp`.
 describe("routeToRegExp: engines without duplicate named groups", () => {
-  const fallbackRoutes = ["/media/*{.webp}?", "/a{/:x}?{/:y}?", "/a/:rest*/b/*"];
+  const fallbackRoutes = ["/media/*{.webp}?", "/a{/:x}?{/:y}?", "/files/*{.:ext}?/raw"];
 
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -907,6 +907,22 @@ describe("routeToRegExp: engines without duplicate named groups", () => {
 
   it.runIf(DUPLICATE_NAMED_GROUPS).each(fallbackRoutes)("%s compiles", (route) => {
     expect(duplicateGroupNames(routeToRegExp(route).source)).not.toEqual([]);
+  });
+
+  // Static segments in a group after a trailing `*`: the route with them wins
+  // wherever both match (a literal last segment), so the `*` is lazy inline
+  it.each([
+    ["/x-*/{b}?", String.raw`^\/x-(?<_0>[\s\S]*?)(?:\/b)?\/?$`],
+    ["/a/x-*{/b}?", String.raw`^\/a\/x-(?<_0>[\s\S]*?)(?:\/b)?\/?$`],
+    ["/a/*{/b}?", String.raw`^\/a(?:\/(?<_0>[\s\S]*?))?(?:\/b)?\/?$`],
+    ["/a/*/{b}?", String.raw`^\/a(?:\/(?<_0>[\s\S]*?))?(?:\/b)?\/?$`],
+    ["/*/{b}?", String.raw`^(?:\/(?<_0>[\s\S]*?))?(?:\/b)?\/?$`],
+    ["/a/*{/b/c%}?", String.raw`^\/a(?:\/(?<_0>[\s\S]*?))?(?:\/b\/c%)?\/?$`],
+    // After an empty segment a `*` isn't optional: the separator is outside
+    ["/a//*{/b}?", String.raw`^\/a\/\/(?<_0>[\s\S]*?)(?:\/b)?\/?$`],
+    ["//*/{b}?", String.raw`^\/\/(?<_0>[\s\S]*?)(?:\/b)?\/?$`],
+  ])("%s inlines a lazy `*`", (route, source) => {
+    expect(routeToRegExp(route).source).toBe(source);
   });
 });
 
@@ -1047,11 +1063,11 @@ interface CaptureDiff {
   ): boolean;
 }
 
-// Pre-existing: the regex's first optional group is greedy and takes a lone
-// segment, while the router matches the `/*` expansion, which ends there.
+// The regex's first optional group is greedy and takes a lone segment, while
+// the router gives it to a later optional param it prefers.
 const OPTIONAL_BEFORE_WILDCARD: CaptureDiff = {
   reason:
-    "an optional param takes the segment the router gives a later optional (`x` vs the router's `0`)",
+    "an optional param takes the segment the router gives a later optional (`x` vs the router's `y`)",
   test: (_pattern, _keys, groups, params) =>
     Object.keys(groups).length === 1 &&
     Object.keys(params).length === 1 &&
@@ -1097,7 +1113,6 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/a/**/:y?/:n(a|b)?",
     "/a/**/:y?{/b}?",
     "/a/**/{/b}?",
-    "/a/:r*/:y?/*",
     "/a/:r*/:y?{/b}?",
     // An optional group after a catch-all or optional segment, inlined: the
     // regex's catch-all (or optional) takes the group's segment where the
@@ -1121,12 +1136,6 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
     "/a/:x?/{b}?",
     "/a/:x?/{(\\d+)}?",
   ].map((pattern) => [pattern, OTHER_EXPANSION] as const),
-  ...[
-    "/:x?/*",
-    "/a/:x?/*",
-    "/:x(\\d+)?/*",
-    "/a/:x(\\d+)?/*",
-    // The router prefers the constrained `y` (see `_selectMatcher`).
-    "/a/:x?/:y(\\d+)?",
-  ].map((pattern) => [pattern, OPTIONAL_BEFORE_WILDCARD] as const),
+  // The router prefers the constrained `y` (see `_selectMatcher`).
+  ["/a/:x?/:y(\\d+)?", OPTIONAL_BEFORE_WILDCARD],
 ]);

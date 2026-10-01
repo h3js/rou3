@@ -6,8 +6,9 @@ import { CATCH_ALL, canBeEmpty, parseLevel } from "./_regexp-scan.ts";
 // Lookup ignores at most one trailing slash (#209): a path matches iff the body
 // matches it with one trailing `/` stripped. So `/a/b` and `/a/b/` reach
 // `/a/b` but `/a/b//` does not, and when the body match itself ends in `/` (an
-// empty last segment: `/a//` reaches `/a/*` with `0: ""`) exactly one more
-// must follow. The general encoding needs look-behinds, which RE2-family
+// empty last segment: `/a//` reaches `/a/**` with `0: ""`) exactly one more
+// must follow. (A trailing `*`, which also takes nothing after the stripped
+// slash, gets its own ending: see `ending` in regexp.ts.) The general encoding needs look-behinds, which RE2-family
 // engines (Go, Rust `regex`, RE2) reject, so the common endings are rewritten
 // look-behind free and only the rest fall back to `LOOKBEHIND_SUFFIX`.
 const LOOKBEHIND_SUFFIX = "(?:(?<=/)/|(?<!/)/?)$";
@@ -20,7 +21,7 @@ const LOOKBEHIND_SUFFIX = "(?:(?<=/)/|(?<!/)/?)$";
 // slower on long paths) is paid per trailing slash only. `ANY_TAIL` may be
 // empty, `SOME_TAIL` may not (a `//` tail gives `/`), and `VALUE_TAIL` may be
 // neither empty nor `/` (a `///` tail gives `//`).
-const ANY_TAIL = "(?:[\\s\\S]*[^/])?/*?";
+export const ANY_TAIL = "(?:[\\s\\S]*[^/])?/*?";
 const SOME_TAIL = "(?:[\\s\\S]*[^/]|/)/*?";
 const VALUE_TAIL = "(?:[\\s\\S]*[^/]|//)/*?";
 
@@ -49,32 +50,24 @@ function tails(body: string): readonly [any: string, some: string] {
  * Each group that can be empty is made lazy so captures agree with the
  * router (`/a/` leaves `0` unset, `/a//` gives `0: ""`).
  *
- * Closed endings (`closedEnding`) build the rule in. They cover a required
- * last segment that can be empty (a `*` after a `**`, or an empty segment:
- * `/a//*`), whether optional segments follow it or not, at the top or after a
- * separator inside a group. The path must not stop right after the segment's
- * separator, so the segment splits into a non-empty branch and one that is
- * just the next slash: `(?:(?<x>[^/]+)/?|/)` at the end, and before optional
- * segments `(?:(?<x>[^/]+)(?:/|$)|/)`, followed by the optionals without their
- * leading slash (`$` inside an alternation is an anchor, which RE2 has, not a
- * look-around). They also cover a `**:x` / `:x+`, which needs a value: it
- * can't be `/` (`/a//` is no match for `/a/**:x`), so a `//` branch comes
- * first, `(?://|(?<x>(?:[\s\S]*[^/]|//)/*?)/?)`, at the top or as a group's
- * whole ending (`{/**:x}?`).
+ * Closed endings (`closedEnding`) build the rule in. They cover an empty last
+ * segment before optional ones (`/a//{b}?`: the path must not stop right
+ * after its separator), at the top or after a separator inside a group, and
+ * a `**:x` / `:x+`, which needs a value: it can't be `/` (`/a//` is no match
+ * for `/a/**:x`), so a `//` branch comes first,
+ * `(?://|(?<x>(?:[\s\S]*[^/]|//)/*?)/?)`, at the top or as a group's whole
+ * ending (`{/**:x}?`).
  *
- * The slash branch leaves the group unset where the router reports `""`
- * (`/a//` for `/**\/*`), the `//` branch where it reports `/` (`/a///` for
- * `/a/**:x`). No regex without look-around, backreferences or duplicate group
- * names can do better, so this is the accepted trade-off. Proof, for
- * `/a/**\/*`: the regex must capture `0 = "."` on `/a/.`, where the parts of
- * the parse left and right of the group take `/a/` and nothing. If it
- * captured an empty `0` after `/a/` on any path, that empty match with those
- * two parts would parse `/a/`, which the router rejects. A group that appears
- * once combines this way, and so do RE2's assertions: the empty match can't
- * have used `$` (it wasn't at the end), and `\b` / `\B` read the same
- * wherever both neighbors are `/`, `.` or the end. Likewise for `/a/**:x`, a
- * `x = "/"` on `/a///` (between `/a/` and a last `/`) would combine with the
- * parts around `x = "."` on `/a/.` into `/a//`, which the router rejects.
+ * The `//` branch leaves the group unset where the router reports `/` (`/a///`
+ * for `/a/**:x`). No regex without look-around, backreferences or duplicate
+ * group names can do better, so this is the accepted trade-off. Proof: the
+ * regex must capture `x = "."` on `/a/.`, where the parts of the parse left
+ * and right of the group take `/a/` and nothing. A `x = "/"` on `/a///`
+ * (between `/a/` and a last `/`) would combine with those parts into `/a//`,
+ * which the router rejects. A group that appears once combines this way, and
+ * so do RE2's assertions: `$` can't have been used inside (it wasn't at the
+ * end), and `\b` / `\B` read the same wherever both neighbors are `/`, `.`
+ * or the end.
  *
  * A trailing catch-all `[\s\S]*` (or `(.*)` constraint) gets a tail body from
  * `tails()` in all these endings, so it never captures the slash lookup
@@ -162,7 +155,6 @@ function closedEnding(level: string): string | undefined {
   const parsed = parseLevel(level);
   if (!parsed || parsed[2].length > 1) return;
   const [prefix, last, [inner]] = parsed;
-  const some = nonEmpty(last);
   if (inner === undefined) {
     const param = CATCH_ALL.exec(last);
     // A `**:x` / `:x+` needs a value: `/a///` gives `x: "/"`, `/a//` is no
@@ -174,7 +166,6 @@ function closedEnding(level: string): string | undefined {
       return `${prefix}(?://|(?<${param[1]}>${VALUE_TAIL})/?)`;
     }
     if (!prefix) return;
-    if (some) return `${prefix}(?:${some}/?|/)`;
     return param ? `${prefix}(?:/|(?<${param[1]}>${tails(param[2])[1]})/?)` : undefined;
   }
   const tail = optionalTail(inner);
@@ -183,19 +174,7 @@ function closedEnding(level: string): string | undefined {
   if (!prefix || !canBeEmpty(last)) {
     return `${prefix}${last}(?:/${tail})?`;
   }
-  if (last === "") {
-    return `${prefix}/${tail}`;
-  }
-  return some ? `${prefix}(?:${some}(?:/|$)|/)${tail}` : undefined;
-}
-
-/**
- * A last segment that is empty only on an empty path segment, without that
- * empty match: a whole `*` (`[^/]*`, a `:x` is `[^/]+`).
- */
-function nonEmpty(last: string): string | undefined {
-  const param = /^\(\?<(\w+)>\[\^\/\]\*\)$/.exec(last);
-  return param ? `(?<${param[1]}>[^/]+)` : undefined;
+  return last === "" ? `${prefix}/${tail}` : undefined;
 }
 
 /**
