@@ -299,10 +299,11 @@ function inlineOptionalGroup(route: string, input: string, unnamed?: Unnamed): R
   // A group that starts with a trailing `*` (`/a{/*}?`, `/a/{*}?`,
   // `/a{/*/:y?}?`): where it takes zero segments, the route without it wins
   // (`/a/` is `{}`), as for a `**`. Not after an empty segment (`/a//{*}?`):
-  // the route without it drops that segment (`/a//` is the `*`'s `""`).
+  // the route without it drops that segment (`/a//` is the `*`'s `""`). A
+  // `(.*)` group's `*` may follow a U+FFFF (`/{a}?{(.*)}?`, see `starGroups`).
   const at = pre.endsWith("/") ? pre.length - 1 : pre.length;
   const starFirst =
-    /^\/\*(?:\/|$)/.test((pre + body).slice(at)) && pre.charCodeAt(at - 1) !== 47; /* '/' */
+    /^\/\uFFFF?\*(?:\/|$)/.test((pre + body).slice(at)) && pre.charCodeAt(at - 1) !== 47; /* '/' */
   const tailEnding =
     suf === ""
       ? starEnding(openTail) &&
@@ -804,8 +805,10 @@ function routeToRegExpSegments(
     }
     if (star && open) {
       // The route without the optional segments ends in the `*`, which is
-      // optional there: the optional segments nest in its group
-      pushOptional(group, true, false, false);
+      // optional there: the optional segments nest in its group. It can
+      // start with an empty segment, so it doesn't nest in a preceding
+      // `:x?` group (which needs a value: `/a/:x?/*/:y?` on `/a//a`)
+      pushOptional(group, true);
     } else if (required) {
       reSegments.push(reSegments.length > 0 ? `${reSegments.pop()}/${group}` : group);
       nest = 0;

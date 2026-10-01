@@ -233,12 +233,14 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(source)).toBe(route);
   });
 
-  // 0.11 `:x*` forms, where a `:x*` could be empty (`[\s\S]*`): back to the
-  // route they were emitted for, which now needs a value.
+  // 0.11 `:x*` forms, where a `:x*` could be empty (`[\s\S]*`): an optional
+  // `:x(.*)` (a `*` keyed `x`, which may be empty too: the same paths as the
+  // regex; the first is what `/path{/:rest(.*)}?` emits now), and the root
+  // form back to the route it was emitted for, which now needs a value.
   it.each([
-    [String.raw`^\/path(?:\/(?<rest>(?:[\s\S]*[^/])?\/*?))??\/?$`, "/path/:rest*"],
+    [String.raw`^\/path(?:\/(?<rest>(?:[\s\S]*[^/])?\/*?))??\/?$`, "/path{/:rest(.*)}?"],
     [String.raw`^(?:\/?(?<path>(?:[\s\S]*[^/])?\/*?))??\/?$`, "/:path*"],
-    [String.raw`^\/path(?:\/(?<rest>[\s\S]*))??\/suffix\/?$`, "/path/:rest*/suffix"],
+    [String.raw`^\/path(?:\/(?<rest>[\s\S]*))??\/suffix\/?$`, "/path{/:rest(.*)}?/suffix"],
   ])("reverses the 0.11 `:x*` form %s", (source, route) => {
     expect(regExpToRoute(source)).toBe(route);
   });
@@ -472,6 +474,25 @@ describe("regExpToRoute", () => {
     }
   });
 
+  it("reads an optional `:name(.*)` group back as itself", () => {
+    // Its `*` tail may be empty (`/a//` gives `p: ""`): no `:p*`, which needs
+    // a value
+    for (const route of [
+      "/a{/:p(.*)}?",
+      "{/:p(.*)}?",
+      "/:x{/:p(.*)}?",
+      "/(\\d+){/:p(.*)}?/b",
+      "/a{/:p(.*)}?/b",
+    ]) {
+      const back = regExpToRoute(routeToRegExp(route));
+      expect(routeToRegExp(back).source, route).toBe(routeToRegExp(route).source);
+      expect(
+        routingDiffs(route, back, [...pathsUnder(route), "/a//", "//", "/1//b"]),
+        route,
+      ).toEqual([]);
+    }
+  });
+
   it("reads a `(.*)` group back as the `*` it is", () => {
     expect(regExpToRoute(routeToRegExp("/a/(.*)"))).toBe("/a/*");
     expect(regExpToRoute(routeToRegExp("/a/(.*)/b"))).toBe("/a/*/b");
@@ -672,7 +693,7 @@ const KNOWN_NON_EQUIVALENT: Record<string, readonly [back: string, reason: strin
   // regex (constraints that can match `/` are not modeled, see AGENTS.md).
   "/:x([\\s\\S]*)": ["/:x(.*)", "a `[\\s\\S]*` constraint comes back as a catch-all"],
   "/a/:x([\\s\\S]*)": ["/a/:x(.*)", "a `[\\s\\S]*` constraint comes back as a catch-all"],
-  "/a/:x([\\s\\S]*)?": ["/a/:x*", "a `[\\s\\S]*` constraint comes back as a catch-all"],
+  "/a/:x([\\s\\S]*)?": ["/a{/:x(.*)}?", "a `[\\s\\S]*` constraint comes back as a catch-all"],
   // Optionals after a whole-segment `:x?` nest in its group (see
   // `routeToRegExpSegments`), so these compile to the regex of the `{/:x/…}?`
   // route and come back as it: the same paths, captured like the regex does,

@@ -96,7 +96,7 @@ export function encodeLiteral(text: string): string {
 
 /**
  * Throws on U+FFFD-U+FFFF: internal placeholders (`encodeEscapes`, `\uFFFE` in
- * `getParamRegexp`; U+FFFF is kept free for the next one), which a route
+ * `getParamRegexp`, `\uFFFF` before a `*` in `starGroups`), which a route
  * could otherwise write as syntax (`\uFFFD0` read as an escaped `:`).
  *
  * Throws when a `(...)` group in `route` never closes (`/files/(2024`, #199)
@@ -108,7 +108,8 @@ export function encodeLiteral(text: string): string {
  * a `^` / `$` / look-around in a group: the tree tests a segment on its own,
  * where they see its ends, and `routeToRegExp` inline, where they see the rest
  * of the path (#227), and on a capturing group inside a group (a stray
- * numbered or named param; only `(?:…)` is fine). Called by `addRoute` (and
+ * numbered or named param; only `(?:…)` is fine), also inside a class
+ * (`[(.*)]`, `[()]`: read as one). Called by `addRoute` (and
  * so by `routeToRegExp`). A stray `)` stays a literal.
  *
  * Escapes are dropped first (`\(` is no group; `\/` stays, the split cuts
@@ -127,7 +128,9 @@ export function checkConstraints(route: string): void {
   while (
     s !==
     (s = s.replace(/\([^()/]*\)/g, (group) => {
-      if (/[$^\0]|^\(\?<?[=!]/.test(group.replace(/\[[^\]]*\]/g, ""))) {
+      // A capture inside a class too (`[(.*)]`, `[()]`): read as one, and
+      // URLPattern rejects it
+      if (/[$^]|^\(\?<?[=!]/.test(group.replace(/\[[^\]]*\]/g, "")) || group.includes("\0")) {
         invalidSyntax(
           "an anchor, look-around, backreference or capturing group in a constraint",
           route,
@@ -220,7 +223,7 @@ export function invalidSyntax(what: string, route: string): never {
  * bundle size; see README).
  */
 export const MISPLACED_MODIFIER =
-  "misplaced `?` / `+` / `*`: `?` follows `:name` or `:name(…)`, `+` / `*` a whole-segment `:name`, none a catch-all (`*`, `(.*)`, `**:name`); escape a literal one with `\\`";
+  "misplaced `?` / `+` / `*`: `?` follows `:name` or `:name(…)`, `+` / `*` a whole-segment `:name`, none a catch-all (`(.*)` too); escape a literal one with `\\`";
 
 /**
  * A segment ending in a param's modifier: the text before the param, the

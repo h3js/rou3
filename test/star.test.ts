@@ -363,6 +363,9 @@ describe("`(.*)` and `:name(.*)` are a `*`", () => {
     ["/a/:p(.*){.png}?", "/a/*{.png}?", "p"],
     ["/a/:p(.*){/b}?", "/a/*{/b}?", "p"],
     ["/:x?/:p(.*)", "/:x?/*", "p"],
+    // A `(.*)` group right after a group (written after U+FFFF there)
+    ["/{a}?{(.*)}?", "/{a}?{*}?"],
+    ["/{b-}?{(.*)}?", "/{b-}?{*}?"],
     ["/:p(.*)", "/*", "p"],
     ["/a/:p(.*)", "/a/*", "p"],
     ["/:p(.*)/a", "/*/a", "p"],
@@ -509,6 +512,20 @@ describe("`(.*)` and `:name(.*)` are a `*`", () => {
       expect(() => addRoute(createRouter(), "GET", route), route).toThrowError(/^rou3: /);
       expect(() => routeToRegExp(route), route).toThrowError(/^rou3: /);
     }
+  });
+
+  it("throws for a capture inside a class in a constraint", () => {
+    // `[(.*)]` would be a class with a `(.*)` rewritten in it (`[*]`), and
+    // `[()]` compiled to `[(?<_0>)]`; URLPattern rejects these too
+    for (const route of ["/:x([(.*)])", "/:x([(a)])", "/:x([()])", "/a/([(.*)])", "/:x(a[(b)]c)"]) {
+      expect(() => addRoute(createRouter(), "GET", route), route).toThrowError(/^rou3: /);
+      expect(() => routeToRegExp(route), route).toThrowError(/^rou3: /);
+    }
+    // Escaped, they are class chars
+    const router = createRouter<string>();
+    addRoute(router, "GET", "/:x([\\(.*\\)]+)", "x");
+    expect(findRoute(router, "GET", "/(.)")?.params).toEqual({ x: "(.)" });
+    expect(findRoute(router, "GET", "/a")).toBeUndefined();
   });
 
   it("throws for a repeated name", () => {

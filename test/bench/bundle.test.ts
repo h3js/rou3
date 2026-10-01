@@ -207,14 +207,15 @@ describe("benchmark", () => {
     // +10B raw / +6B gzip: every segment of a `:name+` / `:name*` / `**:name`
     // needs a value, as in URLPattern (`emptyParam` tests the value for an
     // empty segment, not for `""` only; paths without one pay nothing new).
-    // +629B raw / +272B gzip: a `(.*)` group is a `*` and a `:name(.*)` a `*`
+    // +635B raw / +275B gzip: a `(.*)` group is a `*` and a `:name(.*)` a `*`
     // keyed by name, as in URLPattern (`starGroups` rewrites them up front,
     // behind an `includes("(.*)")` bail; a U+FFFF before a `*` that would
     // read as a modifier, kept by `joinGroup` / `getParamRegexp`; `captureKey`
     // declares the name; `matchesZero` / `emptyParam` read `empty`, not a
-    // digit name; the misplaced-modifier error names catch-alls).
-    expect(bytes).toBeLessThanOrEqual(13061); // <13.07kb
-    expect(gzipSize).toBeLessThanOrEqual(5613); // <5.62kb
+    // digit name; the misplaced-modifier error names catch-alls), and a
+    // capture inside a class in a constraint throws (`[(.*)]`).
+    expect(bytes).toBeLessThanOrEqual(13067); // <13.07kb
+    expect(gzipSize).toBeLessThanOrEqual(5616); // <5.62kb
   });
 });
 

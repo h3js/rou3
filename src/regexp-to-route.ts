@@ -514,6 +514,13 @@ function applyOptional(
         }
         return;
       }
+      // A named `*` (`[\s\S]*`, it may be empty) is `{/:name(.*)}?`: no
+      // `:name*`, which needs a value (0.11 emitted this for a `:name*`,
+      // which matched `""` there too). Inside a group it would nest.
+      if (STAR_BODY.test(g.body) && !inGroup) {
+        mergeGroup(segments, `/:${g.name}(.*)`, false, last);
+        return;
+      }
       // A single whole-segment param -> `:name?` / `:name*` / `:name(pat)?|*`.
       // A catch-all that needs a value is a `:name*` (`{/:name+}?`), and so is
       // one that may be empty, as older versions emitted it.
