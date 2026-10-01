@@ -1712,6 +1712,16 @@ describe("empty segments (compiled parity, sweep)", () => {
     "/a/**/:y",
     "/:x/**:r",
     "/a/:x/*",
+    // Constraints that also match the text `undefined` (a missing segment
+    // must never reach a regex) or `""`
+    "/:x([a-z]+)/*",
+    "/a/:x(\\w+)/*",
+    "/:x/(\\w*)/*",
+    "/a/(.*)",
+    "/a/(\\w+)/**",
+    "/(\\w*)/b",
+    "/a/:x([a-z]+)",
+    "/a/pre-*",
   ];
   const paths = ["/", "//"];
   for (let depth = 1, prev = [""]; depth <= 3; depth++) {
@@ -1723,9 +1733,9 @@ describe("empty segments (compiled parity, sweep)", () => {
     let seed = 7;
     const random = () => (seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648) / 2_147_483_648;
     const failures: string[] = [];
-    for (let n = 0; n < 150; n++) {
+    for (let n = 0; n < 300; n++) {
       const router = createEmptyRouter<string>();
-      const routes = pool.filter(() => random() < 0.25);
+      const routes = pool.filter(() => random() < 0.2);
       for (const route of routes) addRoute(router, random() < 0.3 ? "" : "GET", route, route);
       const jit = compileRouter(router);
       const jitAll = compileRouter(router, { matchAll: true });
@@ -1741,8 +1751,11 @@ describe("empty segments (compiled parity, sweep)", () => {
             failures.push(`${name} [${routes}] ${path}: ${JSON.stringify(match)} vs ${expected}`);
           }
         }
-        const all = findAllRoutes(router, "GET", path).map((m) => m.data);
-        const compiledAll = jitAll("GET", path).map((m) => m.data);
+        const all = findAllRoutes(router, "GET", path).map((m) => [m.data, m.params]);
+        const compiledAll = jitAll("GET", path).map((m: { data: unknown; params?: object }) => [
+          m.data,
+          m.params,
+        ]);
         if (JSON.stringify(all) !== JSON.stringify(compiledAll)) {
           failures.push(`matchAll [${routes}] ${path}: ${compiledAll} vs ${all}`);
         }

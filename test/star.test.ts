@@ -340,6 +340,11 @@ describe("trailing `*` is optional", () => {
     ["{/*}?", "/", {}],
     ["{/*}?", "//", { 0: "" }],
     ["{/*/:y?}?", "/", {}],
+    // A missing segment before it never reaches a constraint (`"undefined"`)
+    ["/:x([a-z]+)/*", "/", null],
+    ["/a/:x(\\w+)/*", "/a", null],
+    ["/:x/(\\w*)/*", "/a", null],
+    ["/a/:x(\\w+)/*", "/a/b", { x: "b" }],
     // Only where it ends the route, and only a whole segment
     ["/foo/*/x", "/foo/x", null],
     ["/foo-*", "/foo", null],

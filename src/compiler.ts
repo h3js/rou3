@@ -443,12 +443,14 @@ function compileFinalMatch(
     const lastParam = paramsMap[paramsMap.length - 1];
     if (currentIdx !== -1) {
       // A trailing `*` matches zero segments like a `**` (see `matchesZero`)
-      if (!lastParam[2] && (lastParam[1] as string) < ":") starWeight = 1;
-      else if (!lastParam[2]) {
+      const star = !lastParam[2] && (lastParam[1] as string) < ":";
+      if (star) starWeight = 1;
+      if (!lastParam[2] && !star) {
         // It needs a segment (a `**:name`)
         conditions.push(`l>${currentIdx}`);
       } else if (lastParam[0] < 0 && paramsMap.length > 1) {
-        // Optional `**` tail, but the required leading param(s) must be present
+        // Optional `**` / `*` tail, but the required leading param(s) must be
+        // present (a regex never tests a missing segment, `"undefined"`)
         conditions.push(`l>${currentIdx - 1}`);
         guardConditions++;
       }
