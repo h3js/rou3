@@ -715,6 +715,18 @@ describe("routeToRegExp: a `(` that does not close in its segment", () => {
   });
 });
 
+// URLPattern compiles constraints with the `v` flag, where `--` / `&&` in a
+// class are set operations (`[[a-z]--a]` is `b`-`z`); rou3's RegExp reads
+// them as plain chars, so they throw instead of silently matching otherwise.
+describe("a `--` / `&&` in a constraint class", () => {
+  it.each(["/([[a-z]--a])", "/([\\d&&[0-1]])", "/a/:x([a\\]--b])"])("%s throws", (route) => {
+    const message = `rou3: a \`--\` / \`&&\` in a class of a constraint (${route})`;
+    expect(() => addRoute(createRouter(), "", route)).toThrow(message);
+    expect(() => routeToRegExp(route)).toThrow(message);
+    expect(() => routeNodeKeys(route)).toThrow(message);
+  });
+});
+
 // Syntax with no meaning yet throws, so it can be given one later instead of
 // locking in what it happened to do (see `RESERVED_SYNTAX_ROUTES`).
 describe("reserved pattern syntax", () => {
@@ -785,6 +797,20 @@ describe("reserved pattern syntax", () => {
     "/a/:x(\\\\?=a)",
     "/a/:x(\\\\1)",
     "/a/:x([\\]$])",
+    // `--` / `&&` outside a class, or escaped in one (see
+    // `RESERVED_SYNTAX_ROUTES`), and as literal path text
+    "/a/:x(a--b)",
+    "/a/:x(a&&b)",
+    "/a/:x([a-z]--)",
+    "/a/:x([a]&&[b])",
+    "/a/:x([a\\-\\-b])",
+    "/a/:x([a\\--b])",
+    "/a/:x([a\\&\\&b])",
+    "/a/:x([\\[]--b)",
+    "/a/:x(\\[a--b\\])",
+    "/a--b/&&",
+    "/a/[x--y]/:z",
+    "/a/[x&&y]-:z",
   ])("%s is accepted", (route) => {
     expect(() => addRoute(createRouter(), "", route)).not.toThrow();
     // Accepted syntax whose regex is an alternation repeating a named group

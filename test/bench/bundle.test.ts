@@ -216,8 +216,12 @@ describe("benchmark", () => {
     // per-segment value check; the misplaced-modifier error names
     // catch-alls), and a capture inside a class in a constraint throws
     // (`[(.*)]`).
-    expect(bytes).toBeLessThanOrEqual(13068); // <13.07kb
-    expect(gzipSize).toBeLessThanOrEqual(5622); // <5.63kb
+    // +179B raw / +66B gzip: a `--` / `&&` in a class of a constraint throws
+    // (a `v`-flag set operation in URLPattern, plain chars in rou3's RegExp),
+    // behind a `/--|&&/` bail per group; `classSetOp` is shared with
+    // `regExpToRoute` (no second scanner).
+    expect(bytes).toBeLessThanOrEqual(13247); // <13.25kb
+    expect(gzipSize).toBeLessThanOrEqual(5688); // <5.69kb
   });
 });
 

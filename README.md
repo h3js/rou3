@@ -252,6 +252,7 @@ Every API sees the encoded text: `removeRoute`, `routeToRegExp`, `routeNodeKeys`
 - A character from U+FFFD to U+FFFF (used internally).
 - In a regex constraint:
   - a capturing group, also in a class (`/:x((a))`, `/:x([(a)])`): use `(?:…)`, or escape a class paren (`[\\(]`);
+  - a `--` or `&&` inside a class (`/([[a-z]--a])`, `/:x([\\w&&b])`): URLPattern reads it as a set operation (`v` flag), rou3's RegExp as plain chars. Escape a literal one (`[a\\-\\-b]`);
   - an anchor (`^`, `$`), a look-around or a numbered backreference (`\1`). The router tests a constraint against its segment alone, while `routeToRegExp` puts it inline, where it would see the rest of the path, so the two would match different paths.
 
 ### Differences from URLPattern
@@ -265,6 +266,7 @@ rou3 matches HTTP request paths segment by segment in a tree. That leads to a fe
 | Catch-alls per route                      | Any number (`/*/x/*`)                                       | One (more throw): write `/:a/x/*`                                                                       |
 | Modifiers on a catch-all (`*?`, `(.*)?`)  | Supported                                                   | Throw (a trailing `*` is optional anyway)                                                               |
 | Repeated groups (`{...}+`, `{...}*`)      | Supported                                                   | Throw                                                                                                   |
+| Class set operations (`/([[a-z]--a])`, `/([\\d&&[0-1]])`) | Difference / intersection (`v` flag)          | Throw: rou3 compiles without the `v` flag, where they would be plain chars. Escape a literal one (`[a\\-\\-b]`) |
 | Regexes that can match `/` (`(.+)`, `(.*?)`) | Can span segments                                        | Stay within their segment (`(.*)` is a `*`). `routeToRegExp` spans segments, see [Regular expressions](#regular-expressions) |
 | Optional segment after a catch-all (`/*/:x?` on `/x/y`) | The catch-all takes it: `{ 0: "x/y" }`        | Segments after a catch-all match from the end: `{ 0: "x", x: "y" }`                                    |
 | Optional segment before a trailing `*` (`/a/:x?/*` on `/a/b`) | The `*` takes it: `{ 0: "b" }` (as in rou3 0.11) | The optional segment takes it: `{ x: "b" }` (`routeToRegExp` too)                                       |

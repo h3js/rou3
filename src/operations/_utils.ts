@@ -109,7 +109,9 @@ export function encodeLiteral(text: string): string {
  * where they see its ends, and `routeToRegExp` inline, where they see the rest
  * of the path (#227), and on a capturing group inside a group (a stray
  * numbered or named param; only `(?:…)` is fine), also inside a class
- * (`[(.*)]`, `[()]`: read as one). Called by `addRoute` (and
+ * (`[(.*)]`, `[()]`: read as one), and on a `--` / `&&` in a class of a
+ * group: URLPattern's `v` flag reads it as a set operation (`[[a-z]--a]`,
+ * classes nested), rou3's RegExp as plain chars. Called by `addRoute` (and
  * so by `routeToRegExp`). A stray `)` stays a literal.
  *
  * Escapes are dropped first (`\(` is no group; `\/` stays, the split cuts
@@ -136,6 +138,9 @@ export function checkConstraints(route: string): void {
           route,
         );
       }
+      if (classSetOp(group)) {
+        invalidSyntax("a `--` / `&&` in a class of a constraint", route);
+      }
       // Only a `(?:…)` may sit inside a constraint (a look-around threw above)
       return group[1] === "?" && group[2] !== "<" ? "" : "\0";
     }))
@@ -151,6 +156,27 @@ export function checkConstraints(route: string): void {
   if (/[{}]/.test(s.replace(/\{[^{}]*\}/g, ""))) {
     invalidSyntax("unbalanced or nested `{}`", route);
   }
+}
+
+/**
+ * Whether regex source `s` (escapes dropped, so `\-` / `\[` / `\]` are no
+ * syntax) has a `--` / `&&` in a class: a set operation under URLPattern's
+ * `v` flag (`[[a-z]--a]` is `b`-`z`), plain chars in rou3's RegExp. Classes
+ * are read innermost-out, as the `v` flag nests them. Shared by
+ * `checkConstraints` and `regExpToRoute`.
+ */
+export function classSetOp(s: string): boolean {
+  let found = false;
+  while (
+    !found &&
+    /--|&&/.test(s) &&
+    s !==
+      (s = s.replace(/\[[^[\]]*\]/g, (k) => {
+        found ||= /--|&&/.test(k);
+        return "_";
+      }))
+  );
+  return found;
 }
 
 /**

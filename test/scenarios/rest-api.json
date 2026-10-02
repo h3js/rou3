@@ -285,6 +285,28 @@
       ]
     },
     {
+      "name": "regex constraint classes: slugs, hex ids, compare ranges",
+      "description": "README Invalid patterns: a `--` / `&&` inside a class is a set operation in URLPattern (`v` flag) and throws; a `-` in a class, `--` as literal text and escaped `\\-` stay valid",
+      "routes": [
+        { "path": "/posts/:slug([a-z0-9-]+)", "name": "post" },
+        { "path": "/colors/:hex([\\da-f]{6})", "name": "color" },
+        { "path": "/compare/:base([\\da-f]+)--:head([\\da-f]+)", "name": "compare" },
+        { "path": "/q/:expr([\\w\\-\\-&]+)", "name": "query" }
+      ],
+      "cases": [
+        { "path": "/posts/hello-world-2", "match": "post", "params": { "slug": "hello-world-2" } },
+        { "path": "/posts/Hello", "match": null },
+        { "path": "/colors/ff00aa", "match": "color", "params": { "hex": "ff00aa" } },
+        { "path": "/colors/FF00AA", "match": null },
+        { "path": "/colors/ff00a", "match": null },
+        { "path": "/compare/abc1--def2", "match": "compare", "params": { "base": "abc1", "head": "def2" } },
+        { "path": "/compare/abc1-def2", "match": null },
+        { "path": "/q/a-b&c_d", "match": "query", "params": { "expr": "a-b&c_d" } },
+        { "path": "/q/a.b", "match": null }
+      ],
+      "invalid": ["/posts/:slug([[a-z]--[aeiou]]+)", "/ids/([\\d&&[0-7]]+)", "/tags/:tag([\\w--_]+)", "/q/:expr([a\\]&&b])"]
+    },
+    {
       "name": "method-specific vs method-agnostic routes on the same paths",
       "description": "README 'Routes for any method': equally specific → the method's own route wins (and comes after the `\"\"` one); more specific `\"\"` routes beat less specific method routes; HEAD is not GET; method strings are case-sensitive",
       "routes": [

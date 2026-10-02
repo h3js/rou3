@@ -277,11 +277,6 @@ const KNOWN_DIFFS = diffs<Result | Split>({
   // `/bar`); rou3 reads them as literal segments
   "/foo/../bar → /bar [match]": null,
 
-  // `v`-flag set operations — rou3 compiles constraints without the `v` flag,
-  // so `--` / `&&` are plain class chars
-  "/([[a-z]--a]) → /z [match]": null,
-  "/([\\d&&[0-1]]) → /0 [match]": null,
-
   // Trailing slash on a no-match case — rou3 ignores one trailing `/`, so
   // `/foo/bar/` is `/foo/bar` (a second one is an empty last segment)
   "/foo/bar → /foo/bar/ [no match]": {},
@@ -294,7 +289,8 @@ const KNOWN_DIFFS = diffs<Result | Split>({
 // Valid URLPattern syntax rou3 has no meaning for (yet): every strategy
 // throws a `rou3:` error for these patterns instead of matching with a
 // different meaning (modifiers on `*` / an unnamed group, group repetition,
-// a `/` or a capturing group in a constraint, a `\/`, Unicode param names).
+// a `/`, a capturing group or a class set operation in a constraint, a `\/`,
+// Unicode param names).
 const RESERVED_PATTERNS = new Set([
   // Two catch-alls (`*`, `**`, `:x+`, `:x*`): rou3 allows one per route
   "*/*",
@@ -317,6 +313,10 @@ const RESERVED_PATTERNS = new Set([
   // A capturing group inside a constraint: it would be a stray param
   "/:foo((?<x>a))",
   "/foo/(bar(?<x>baz))",
+  // `v`-flag set operations: rou3 compiles constraints without the `v` flag,
+  // where `--` / `&&` in a class are plain chars
+  "/([[a-z]--a])",
+  "/([\\d&&[0-1]])",
   // Unicode param names: rou3 names are ASCII, and a non-ASCII char right
   // after one throws instead of ending it
   "/:café",
