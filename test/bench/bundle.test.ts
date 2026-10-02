@@ -223,8 +223,12 @@ describe("benchmark", () => {
     // +47B raw / +33B gzip: a tab / LF / CR in a pattern throws (URLPattern
     // drops it, the router encoded it), in `checkConstraints`' early bail and
     // sharing the U+FFFD-U+FFFF check and message.
-    expect(bytes).toBeLessThanOrEqual(13294); // <13.30kb
-    expect(gzipSize).toBeLessThanOrEqual(5721); // <5.73kb
+    // +496B raw / +204B gzip: `.` / `..` segments in a pattern are resolved
+    // like `new URL()` resolves a path, as in URLPattern (`dotSegments`,
+    // behind one `test`), and throw next to a param, catch-all or group
+    // (also inside a `{…}` group, checked per expansion).
+    expect(bytes).toBeLessThanOrEqual(13790); // <13.79kb
+    expect(gzipSize).toBeLessThanOrEqual(5925); // <5.93kb
   });
 });
 

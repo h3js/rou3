@@ -340,7 +340,7 @@ function parseSegments(src: string, atEnd: boolean, dot: boolean, inGroup = fals
   // after plain text, and compiled in place (this regex) after a capture
   // (not before more groups: `b:x?{.:y}?` is no route).
   return segments.map((segment) =>
-    segment.replace(/^([^{]+)\{(:[A-Za-z_]\w*(?:\([^)]*\))?)\}\?$/, "$1$2?"),
+    literalDots(segment).replace(/^([^{]+)\{(:[A-Za-z_]\w*(?:\([^)]*\))?)\}\?$/, "$1$2?"),
   );
 }
 
@@ -440,7 +440,7 @@ function reverseSegment(seg: string, part?: boolean): string {
     }
     i += literal(i);
   }
-  return out;
+  return part ? out : literalDots(out);
 }
 
 // Look-behind trailing-slash suffix `routeToRegExp` still emits for a few
@@ -793,4 +793,12 @@ function segmentEnd(src: string, start: number): number {
     }
   }
   return i;
+}
+
+/**
+ * A literal `.` / `..` segment (`%2e` too) escaped: unescaped, `addRoute`
+ * resolves it (`/a/../b` is `/b`, see `dotSegments`).
+ */
+function literalDots(segment: string): string {
+  return /^(?:\.|%2e){1,2}$/i.test(segment) ? segment.replace(/[.%]/g, "\\$&") : segment;
 }

@@ -2,6 +2,7 @@ import { expandGroupDelimiters } from "../_group-delimiters.ts";
 import type { RouterContext, Node } from "../types.ts";
 import {
   absolutePattern,
+  dotSegments,
   encodeEscapes,
   expandedRouteId,
   expandModifiers,
@@ -18,18 +19,20 @@ import {
  * It removes everything that call added (every variant of an optional pattern,
  * and duplicate registrations), and leaves other routes alone, even ones on the
  * same tree node (`/a/:id` and `/a/:name`). Pass the pattern as it was added:
- * only spellings the router can't tell apart are equivalent (`/a/` and `/a`).
+ * only spellings the router can't tell apart are equivalent (`/a/` and `/a`,
+ * `/docs/../api` and `/api`).
  *
  * @throws the `addRoute` error for a reserved group or modifier (`{...}+`,
- * `/a/pre-:x+`). Other malformed patterns remove nothing.
+ * `/a/pre-:x+`, `/:id/..`). Other malformed patterns remove nothing.
  */
 export function removeRoute<T>(ctx: RouterContext<T>, method: string = "", path: string): void {
   // Normalize exactly like `addRoute`, or removal targets a different route
   method = method.toUpperCase();
-  path = absolutePattern(path);
+  const input = absolutePattern(path);
+  path = dotSegments(input);
   const [route, named] = starGroups(path);
   // As in `addRoute`: a `:name(.*)` has an identity of its own
-  _removeRoute(ctx, method, route, named && expandedRouteId(path), path);
+  _removeRoute(ctx, method, route, named && expandedRouteId(path), input);
 }
 
 /**

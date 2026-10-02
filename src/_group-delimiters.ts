@@ -1,4 +1,10 @@
-import { absolutePattern, invalidSyntax, MISPLACED_MODIFIER } from "./operations/_utils.ts";
+import {
+  absolutePattern,
+  DOT_SEGMENT,
+  DOT_SEGMENT_NEXT_TO,
+  invalidSyntax,
+  MISPLACED_MODIFIER,
+} from "./operations/_utils.ts";
 
 /** `[pre, body, suf, mod]` split of a `{...}` group, or `undefined`. */
 export type GroupDelimiter = [pre: string, body: string, suf: string, mod: string | undefined];
@@ -98,6 +104,10 @@ export function expandGroupDelimiters(path: string, input: string = path): strin
 
   const full = joinGroup(joinGroup(pre, body, input), suf, input);
   const expanded = mod ? [full, joinGroup(pre, suf, input)] : [full];
+  // A `.` / `..` segment left after `dotSegments` is in a group or touches
+  // one (`/a{/..}?/b`, `/a/{.}./b`): URLPattern resolves the group's text on
+  // its own (`/a{/}?/b`), no path rule
+  if (expanded.some((e) => DOT_SEGMENT.test(e))) invalidSyntax(DOT_SEGMENT_NEXT_TO, input);
   if (pre) return expanded;
   // After a leading `{/…}?`: `/`, another `{/…}` group or nothing
   if (mod && body.charCodeAt(0) === 47 /* '/' */ && suf && !/^\{?\//.test(suf)) {

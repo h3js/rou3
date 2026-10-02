@@ -4,6 +4,7 @@ import { createRouter } from "./context.ts";
 import { addRoute, getParamRegexp, skipGroup, type Unnamed } from "./operations/add.ts";
 import {
   absolutePattern,
+  dotSegments,
   encodeEscapes,
   expandModifiers,
   PARAM_MODIFIER,
@@ -48,8 +49,9 @@ const STAR_SEGMENT = "*/";
  * for `*` and `**`, an optional trailing `*`), so it can guard a scope outside
  * the router. The one exception is a regex constraint that can match `/`
  * (`(.+)`): the router applies it to one segment, while the regex lets it span
- * several, so the regex matches more paths, never fewer. `.` and `..`
- * (`normalize`) and the empty path are not modeled.
+ * several, so the regex matches more paths, never fewer. `.` and `..` in the
+ * path (`normalize`) and the empty path are not modeled; in `route` they are
+ * resolved, as in `addRoute`.
  *
  * The output is PCRE-compatible (`grep -P`, PHP `preg_*`, Perl), and most routes
  * also work in RE2-family engines (RE2, Go, Rust `regex`). Some optional
@@ -72,8 +74,9 @@ export function routeToRegExp(route: string = "/"): RegExp {
   // Validate with the router itself: every pattern it rejects (see
   // `addRoute`) throws here with the same error.
   addRoute(createRouter(), "", route);
-  // `(.*)` is a `*`, `:name(.*)` one keyed by `name` (see `starGroups`)
-  const [path, unnamed] = starGroups(route);
+  // `(.*)` is a `*`, `:name(.*)` one keyed by `name` (see `starGroups`), after
+  // `.` / `..` segments are resolved
+  const [path, unnamed] = starGroups(dotSegments(route));
   return toRegExp(path, route, unnamed);
 }
 
