@@ -40,57 +40,27 @@ const STAR_BAIL = "*!";
 const STAR_SEGMENT = "*/";
 
 /**
- * Convert a rou3 route pattern into an anchored {@link RegExp}.
+ * Convert a route pattern into an anchored {@link RegExp}, with a named group
+ * per param (`_0`, `_1`, … for unnamed captures).
  *
- * The generated source targets a **PCRE-compatible** flavor: named groups use
- * the `(?<name>...)` form and no JS-only constructs are emitted, so the output
- * also compiles in PCRE2 engines (`grep -P`, `rg -P`, `pcre2grep`, PHP `preg_*`)
- * and Perl. Optional segments (`:name?`) and a single optional group ending a
- * segment (`{...}?`, also before more of the route) are compiled inline as
- * `(?:...)?` rather than an alternation, so a param is never emitted as a
- * duplicate named group — which PCRE2 rejects unless `PCRE2_DUPNAMES` is set,
- * and V8 before 12.5 (Node 22) rejects outright.
+ * The regex matches exactly the paths `findRoute` matches on a router holding
+ * only `route`, including its tolerances (one trailing slash, empty segments
+ * for `*` and `**`, an optional trailing `*`), so it can guard a scope outside
+ * the router. The one exception is a regex constraint that can match `/`
+ * (`(.+)`): the router applies it to one segment, while the regex lets it span
+ * several, so the regex matches more paths, never fewer. `.` and `..`
+ * (`normalize`) and the empty path are not modeled.
  *
- * The regex matches exactly the paths `findRoute()` matches for a router holding
- * only `route` — including the router's tolerances: one optional trailing slash,
- * empty segments for `*` / `**` (a `:name` needs a value, and so does each
- * segment of a `:name+` / `:name*`: `[^/]+(?:/[^/]+)*`, as in URLPattern),
- * and a trailing `*` that takes nothing after the stripped slash
- * (`/a/*` matches `/a/`, not `/a`) — so it can stand in for the router as a
- * guard or scope check. Not modeled: param
- * constraints that can match `/` (`(.+)`: the tree splits on `/` first, so
- * the regex matches more paths, never fewer; a `(.*)` is no constraint but a
- * `*`, exact), the empty path, and `normalize: true`.
+ * The output is PCRE-compatible (`grep -P`, PHP `preg_*`, Perl), and most routes
+ * also work in RE2-family engines (RE2, Go, Rust `regex`). Some optional
+ * combinations (several groups, `/media/*{.webp}?`) compile to an alternation
+ * with duplicate named groups, which needs a JS engine that supports them (V8
+ * 12.5+) or `PCRE2_DUPNAMES`. Without them (Node.js 22), `routeToRegExp` throws
+ * a `rou3:` `SyntaxError` for these routes.
  *
- * Most routes also compile to RE2-compatible output (RE2, Go, Rust `regex`):
- * the trailing-slash rule is encoded without look-behinds, except for the few
- * endings `withTrailingSlash` lists (e.g. a constraint that can end in `/`, or a
- * required segment whose constraint can match empty).
- *
- * Note: other optionals (several groups, `/media/*{.webp}?`) still fall back to
- * alternation and may contain duplicate named groups (valid in Perl and in JS
- * engines that support them, V8 12.5+; they need `PCRE2_DUPNAMES` for strict
- * PCRE2 engines). On an engine without them (Node 22), `routeToRegExp` throws a
- * `rou3:` `SyntaxError` for these routes.
- *
- * @throws a `rou3:` error when one expansion of `route` declares the same param
- * name twice (`/files/:path/**:path`, `/a/:x{/b/:x}?`); the resulting duplicate
- * named group would compile on some engines and not on others.
- *
- * A `*` is a catch-all (`[\s\S]*`), also inside a segment (`/*.png` matches
- * `/a/b.png`), and so is a `(.*)` group (a `:name(.*)` is one keyed by name). Segments after a catch-all (`/**\/_payload.json`, `/*\/edit`,
- * and a `:name+` / `:name*` before the last segment) follow it in the regex,
- * so they match at the end of the path as in the router. Where the route has
- * one optional segment after it, the catch-all is lazy or greedy to pick the
- * route the router picks (see `lazyCatchAll`); with several, it matches the
- * same paths but may capture like another of the routes the pattern
- * registers.
- *
- * @throws a `rou3:` error, the one `addRoute` throws, for every pattern
- * `addRoute` rejects: more than one catch-all (`/**\/**`, `/*\/x/*`,
- * `/a/:x+/b/:y+`), a `(
- * that does not close in its own segment (`/files/(2024`, `/a/:id([^/]+)`),
- * and syntax with no meaning yet (see `addRoute`).
+ * @throws the `addRoute` error for an invalid pattern, and a `rou3:` error for
+ * a pattern that declares the same param name twice in one variant
+ * (`/files/:path/**:path`, `/a/:x{/b/:x}?`).
  *
  * @example
  * routeToRegExp("/users/:id(\\d+)"); // /^\/users\/(?<id>\d+)\/?$/

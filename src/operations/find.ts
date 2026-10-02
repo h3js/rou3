@@ -4,7 +4,17 @@ import { hasSuffixMatch } from "./_suffix.ts";
 import { getMatchParams, matchesZero, normalizePath, splitPath } from "./_utils.ts";
 
 /**
- * Find a route by path.
+ * Find the most specific route that matches `path`.
+ *
+ * `method` must be uppercase; routes added for `""` match every method. `path`
+ * must start with `/` and be percent-encoded, as `new URL().pathname` gives it:
+ * lookup paths are never decoded. One trailing slash is ignored.
+ *
+ * Options: `params: false` skips building `params`, and `normalize: true`
+ * resolves `.` and `..` segments first.
+ *
+ * @returns the route's `data` and `params` (no `params` for a static route), or
+ * `undefined` when no route matches.
  */
 export function findRoute<T = unknown>(
   ctx: RouterContext<T>,

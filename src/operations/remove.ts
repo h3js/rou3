@@ -13,14 +13,15 @@ import {
 } from "./_utils.ts";
 
 /**
- * Remove a route from the router context.
+ * Remove the route added by `addRoute(ctx, method, path)`.
  *
- * Removal is by registration: every entry that `addRoute(ctx, method, path)`
- * created (all optional/group expansions, duplicate registrations) is removed,
- * and same-node siblings registered under other patterns (`/a/:id` vs
- * `/a/:userId`) are left alone. The pattern must be the registered one — it
- * may differ in spelling only where the tree cannot tell the difference
- * (trailing slashes, escaped statics).
+ * It removes everything that call added (every variant of an optional pattern,
+ * and duplicate registrations), and leaves other routes alone, even ones on the
+ * same tree node (`/a/:id` and `/a/:name`). Pass the pattern as it was added:
+ * only spellings the router can't tell apart are equivalent (`/a/` and `/a`).
+ *
+ * @throws the `addRoute` error for a reserved group or modifier (`{...}+`,
+ * `/a/pre-:x+`). Other malformed patterns remove nothing.
  */
 export function removeRoute<T>(ctx: RouterContext<T>, method: string = "", path: string): void {
   // Normalize exactly like `addRoute`, or removal targets a different route

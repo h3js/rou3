@@ -14,22 +14,12 @@ type Seen = [Map<unknown, Set<string>>, Map<unknown, Set<string>>];
 export type RouteComparison = "disjoint" | "equal" | "superset" | "subset" | "partial";
 
 /**
- * Whether two route patterns can match a common concrete path (their match-sets
- * intersect). Pure and router-free.
+ * Whether at least one path matches both patterns.
  *
- * Overlap means "there exists a concrete path matched by both patterns" — it is
- * *not* subset containment. Patterns are expanded through rou3's own pipeline,
- * so groups (`{s}?`), optional/repeat modifiers (`:x?`/`:x+`/`:x*`), escaping,
- * and wildcard segment-count rules match `findRoute`/`findAllRoutes` exactly.
- *
- * Segment-count rules: bare `**` matches zero-or-more segments, `*` and
- * `**:name` one-or-more (a trailing `*` zero-or-more, like `**`), and `:name`
- * exactly one.
- *
- * Regex-constrained segments are handled precisely against static literals
- * (`/user/:id(\d+)` vs `/user/42`), but two dynamic segments where at least one
- * is constrained are over-approximated to "overlaps" (the safe conservative
- * default; exact regex intersection is undecidable).
+ * Patterns are read the same way `addRoute` reads them, so the answer agrees
+ * with `findRoute`. Two dynamic segments where at least one has a regex
+ * constraint are assumed to overlap (`/u/:id(\d+)` and `/u/:s([a-z]+)` give
+ * `true`), so `true` can be a false positive, but `false` is always exact.
  *
  * @example
  * routesOverlap("/**", "/protected/feed/**"); // true
@@ -41,48 +31,29 @@ export function routesOverlap(patternA: string, patternB: string): boolean {
 }
 
 /**
- * Compare two route patterns by the sets of concrete paths they match. Pure
- * and router-free, like {@link routesOverlap}, but answers containment as well
- * as intersection:
+ * Compare the sets of paths two patterns match. Reads as "`patternA` is … of
+ * `patternB`":
  *
- * - `"disjoint"` — no concrete path matches both (proven).
- * - `"equal"` — both match exactly the same paths (proven; param *names*
- *   don't matter: `/a/:x` equals `/a/:y`, `/u/:id(\d+)` equals `/u/:x(\d+)`).
- * - `"superset"` — `patternA` provably matches every path `patternB` matches,
- *   and the reverse could not be proven (strict unless equality is
- *   undecidable).
- * - `"subset"` — the mirror image (`patternA` ⊆ `patternB`).
- * - `"partial"` — neither containment could be proven and the match-sets
- *   *may* intersect.
+ * - `"equal"`: both match the same paths (param names don't matter).
+ * - `"superset"`: `patternA` matches every path `patternB` matches, and more.
+ * - `"subset"`: `patternB` matches every path `patternA` matches, and more.
+ * - `"disjoint"`: no path matches both.
+ * - `"partial"`: none of the above could be proven. The patterns may share
+ *   some paths.
  *
- * Every verdict's containment claims are proofs; what is *not* guaranteed is
- * exhaustiveness of the undecidable directions, which always degrade toward a
- * weaker verdict, never a wrong claim:
+ * Every other verdict is proven. When something can't be decided, the answer
+ * is a weaker verdict, never a wrong one: two different regex constraints
+ * compare as `"partial"` even when they are equivalent (`/u/:id(\d+)` and
+ * `/u/:id([0-9]+)`), and an equal pair that is provable in one direction only
+ * is a `"superset"` or `"subset"` (`/u/:id(42)` and `/u/42`).
  *
- * - Two regex-constrained segments are only proven equal by source equality
- *   (modulo param names), and a regex only proven to cover a literal via
- *   `test()` — so `/u/:id(\d+)` vs `/u/:id([0-9]+)` reports `"partial"` even
- *   though the sets are equal.
- * - Strictness of `"superset"`/`"subset"` is best-effort: when a pair is
- *   actually equal but equality is only provable in one direction, the proven
- *   containment is reported — `/u/:id(42)` vs `/u/42` is `"superset"`, not
- *   `"equal"`.
- * - `"partial"`'s intersection half is over-approximated (like
- *   {@link routesOverlap}): a `"partial"` pair of disjoint regex constraints,
- *   e.g. `/u/:a(\d+)` vs `/u/:b([a-z]+)`, may in fact share no path.
- * - Containment of one multi-shape pattern (optional groups/modifiers) in
- *   another is proven shape-by-shape, so a subset split across several of the
- *   other pattern's alternatives may also degrade to `"partial"`.
- *
- * Patterns are expanded through rou3's own `addRoute` pipeline (groups,
- * modifiers, escaping), so the verdict is consistent with
- * `findRoute`/`findAllRoutes` by construction — e.g. `/a/:x*` is `"equal"` to
- * `/a{/**:y}?` but a `"subset"` of `/a/**` (only `**` takes the empty segment
- * of `/a//`), and `/a/*` a `"subset"` of `/a/**` (only `**` matches `/a`).
+ * Patterns are read the same way `addRoute` reads them, so the answer agrees
+ * with `findRoute`: `/a/*` is `"equal"` to `/a/**`, and `/a/:x*` is a
+ * `"subset"` of `/a/**` (only `**` takes the empty segment of `/a//`).
  *
  * @example
  * compareRoutes("/api/**", "/api/admin/**"); // "superset"
- * compareRoutes("/a/:x/c", "/a/b/*"); // "partial" (ambiguous specificity)
+ * compareRoutes("/a/:x/c", "/a/b/*"); // "partial"
  * compareRoutes("/a/**", "/b/**"); // "disjoint"
  */
 export function compareRoutes(patternA: string, patternB: string): RouteComparison {
@@ -97,26 +68,17 @@ export function compareRoutes(patternA: string, patternB: string): RouteComparis
 }
 
 /**
- * Find every registered route whose match-set intersects the given pattern
- * (scope). Like {@link findAllRoutes}, but the query is a *pattern* instead of a
- * concrete path.
+ * Find every registered route that can match a path `pattern` matches. Like
+ * {@link findAllRoutes}, but takes a pattern instead of a path.
  *
- * Results are ordered least- to most-specific (same traversal order as
- * `findAllRoutes`; a route with segments after `**` comes right after the bare
- * `**` it follows, as a scope has no last segment to rank from) and method
- * handling mirrors `findAllRoutes`: routes registered for `method` and
- * method-agnostic (`""`) ones are both reported, the `""` ones first on a
- * shared node. Overlap semantics are identical to {@link routesOverlap}.
+ * Results are in the same least to most specific order, with the same method
+ * handling, and follow the overlap rules of {@link routesOverlap}. A route with
+ * segments after a `**` comes right after the bare `**` it follows.
  *
- * Returned matches carry only `data` — a pattern describes a whole scope rather
- * than one concrete path, so no `params` can be resolved. A route registered
- * with optional/group syntax expands into several tree entries; those are
- * collapsed to a single match. Distinct routes (a different pattern or
- * method) are always reported separately, even when they share one `data`
- * reference or an equal primitive value (or none — `addRoute` stores `null`
- * when no data is given). A route registered again for the same method with
- * the same data (the same route for `removeRoute`: `/a` and `/a/` included)
- * is reported once.
+ * Matches only have `data` (there is no single path to read params from). A
+ * route added with optional syntax, or added again with the same data, is
+ * reported once. Different routes (another pattern or method) are always
+ * reported separately, even when they share the same `data`.
  */
 export function findOverlappingRoutes<T>(
   ctx: RouterContext<T>,

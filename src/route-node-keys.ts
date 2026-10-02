@@ -3,44 +3,30 @@ import { addRoute } from "./operations/add.ts";
 import type { Node } from "./types.ts";
 
 /**
- * The route-tree node keys a route pattern registers on.
+ * The route-tree nodes a pattern lands on, each named by a pattern.
  *
- * rou3 buckets registrations by **tree node**, not by pattern text: every route
- * ending on one node shares that node's `methods[]` buckets, and its entries
- * compete as same-node siblings (one of them wins a `findRoute`). Consumers
- * that key their own per-route metadata by pattern text cannot see which
- * registrations compete.
+ * Routes on the same node compete: for a given path, `findRoute` returns at most
+ * one of them. `/users/:id` and `/users/:name` share a node, and so do
+ * `/users/*` and `/users/**:rest`. Key per-route metadata by these keys instead
+ * of the pattern text to group it per node.
  *
- * The returned keys make node identity observable:
+ * - `routeNodeKeys(a)` and `routeNodeKeys(b)` share a key if and only if `a`
+ *   and `b` share a node.
+ * - A param segment is keyed `:_0`, `:_1`, …, and a catch-all `**`.
+ * - A pattern with optional syntax (`:x?`, `:x*`, `{...}?`) lands on several
+ *   nodes, so the result is an array (deduplicated, outermost first).
+ * - Each key is a valid pattern for its own node: `routeNodeKeys(key)` is
+ *   `[key]`.
+ * - Invalid patterns throw like `addRoute`.
  *
- * > `routeNodeKeys(a)` and `routeNodeKeys(b)` intersect **iff** `a` and `b`
- * > share a tree node (hence one `methods[]` bucket).
- *
- * Sound in both directions *as a statement about nodes*. It is deliberately
- * **not** a statement about match-sets — the key erases regex constraints and
- * widens `**:name` and `*` to `**`, so `/u/:id(\d+)` and `/u/:slug([a-z]+)`
- * share the key `/u/:_0` while matching disjoint paths. Use {@link compareRoutes} for
- * match-set relations; the two properties are independent (node identity is
- * syntactic, match-set containment is semantic).
- *
- * Over-merging is the fail-closed direction here: a shared key means "these may
- * collide, keep them in one bucket", which is the safe default for the metadata
- * bucketing this is meant for.
- *
- * A pattern with optional syntax (`:x?`, `:x*`, `{...}?`) registers on several
- * nodes, so the result is a deduplicated **array**, ordered outermost-first.
- * Keys are themselves valid route patterns reaching exactly the node they name
- * (`routeNodeKeys(k)` is `[k]`), so they can be used directly as bucket ids.
- *
- * Invalid patterns throw exactly as `addRoute` does.
- *
- * Keys name a param segment `:_0`, `:_1`, … (in key order) and a catch-all
- * (`*`, `**`, `**:name`) `**`.
+ * Sharing a node doesn't mean matching the same paths: keys drop regex
+ * constraints, so `/u/:id(\d+)` and `/u/:slug([a-z]+)` share `/u/:_0` but never
+ * match the same path. Use {@link compareRoutes} to compare matched paths.
  *
  * @example
  * routeNodeKeys("/users/:id"); // ["/users/:_0"]
- * routeNodeKeys("/users/:name"); // ["/users/:_0"]  (same node -> same bucket)
- * routeNodeKeys("/admin/*"); // ["/admin/**"]  (the node of `/admin/**`)
+ * routeNodeKeys("/users/:name"); // ["/users/:_0"] (same node)
+ * routeNodeKeys("/admin/*"); // ["/admin/**"] (the node of `/admin/**`)
  * routeNodeKeys("/**:path/_payload.json"); // ["/**\/_payload.json"]
  * routeNodeKeys("/a/:x?"); // ["/a", "/a/:_0"]
  */

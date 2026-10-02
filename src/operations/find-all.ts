@@ -10,7 +10,10 @@ import {
 } from "./_utils.ts";
 
 /**
- * Find all route patterns that match the given path.
+ * Find every route that matches `path`, from the least to the most specific.
+ * This order is part of the public API (see README "Result ordering").
+ *
+ * Takes the same `method`, `path` and options as {@link findRoute}.
  */
 export function findAllRoutes<T>(
   ctx: RouterContext<T>,

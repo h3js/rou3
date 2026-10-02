@@ -19,15 +19,14 @@ import { encodeLiteral } from "./operations/_utils.ts";
 const ROUTE_SPECIAL = new Set([":", "(", ")", "*", "\\", "+", "|", "$", "[", "]"]);
 
 /**
- * Convert an anchored {@link RegExp} (or its source string) produced by
- * {@link routeToRegExp} back into a rou3 route pattern.
+ * Convert a {@link RegExp} (or its source) from {@link routeToRegExp} back into
+ * a route pattern. Every regex `routeToRegExp` emits round-trips:
+ * `routeToRegExp(regExpToRoute(re)).source === re.source`. Looser forms that
+ * older versions emitted are read too.
  *
- * Throws a `rou3:` error for input it can't represent exactly: a regex not
- * anchored with `^` and `$`, the flags `i`/`m`/`s`/`u`/`v` (`g`/`y`/`d` are
- * ignored) and constructs outside the dialect `routeToRegExp` emits. An
- * unnamed `[^/]*` (a single-segment `*` before 0.12) reads as `([^\x2f]*)`.
- * A named `[\s\S]*` where `routeToRegExp` puts a `*` is a `:name(.*)` (a `*`
- * keyed by name), and an unnamed one right after a name or group a `(.*)`.
+ * @throws a `rou3:` error for anything it can't convert exactly: a regex not
+ * anchored with `^` and `$`, the flags `i`, `m`, `s`, `u` and `v` (`g`, `y` and
+ * `d` are ignored), and constructs `routeToRegExp` doesn't emit.
  *
  * @example
  * regExpToRoute(/^\/users\/(?<id>\d+)\/?$/); // "/users/:id(\\d+)"

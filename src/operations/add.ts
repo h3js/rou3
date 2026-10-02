@@ -25,39 +25,28 @@ import {
 export type { Unnamed };
 
 /**
- * Add a route to the router context.
+ * Add a route to the router. `data` is returned when the route matches.
  *
- * Param names are `[A-Za-z_]\w*`: a `-` ends one (`:test-id` is `:test` and a
- * literal `-id`), and so does a group's `{` / `}` (`/:a{b}?` is `:a` and an
- * optional `b`; `/{:a}(\\d+)` is `:a` and an unnamed `(\\d+)`, not its
- * constraint), as in URLPattern. Also as there, a `:name` sharing its
- * segment takes as little as it can (`/:a-:b` on `/x-y-z` is `x` and `y-z`),
- * and a `?` on one after text makes only the param optional (`/pre-:x?`
- * matches `/pre-` and `/pre-a`; `/{pre-:x}?` drops the segment). After a
- * capture the segment is one regex, so a greedy capture takes what it can
- * (`/*-:x?` on `/--` is `{ 0: "-" }`, `/:a(\\d+):b?` on `/12` `{ a: "12" }`).
+ * `method` is an HTTP method (upper-cased), or `""` for every method. `path` is
+ * a route pattern (see README "Route patterns"):
  *
- * A `(.*)` group is a `*` (the same token in URLPattern), and a `:name(.*)` a
- * `*` keyed by `name`, which may be `""` (see `starGroups`).
+ * - `:name` matches one segment, `:name(regex)` one the regex matches, and an
+ *   unnamed `(regex)` captures into a numbered key (`"0"`, `"1"`, …).
+ * - `:name?`, `:name+` and `:name*` match zero or one, one or more, and zero or
+ *   more segments.
+ * - `*` (or `(.*)`) matches the rest of the path, `/` included, and is optional
+ *   at the end of a route. `**` matches zero or more segments, `**:name` one or
+ *   more into `name`.
+ * - `{...}` groups text, and `{...}?` makes it optional.
  *
- * A pattern without a leading `/` gets one (`foo/:id`). One starting with a
- * group gets it per expansion (`absolutePattern`): `{/:a}?/b` is absolute, as
- * in URLPattern (`/:a/b` or `/b`), while `{a}?/b` is `/a/b` or `/b`. Text
- * right after a leading `{/…}?` throws (`{/a}?b`: without the group the route
- * would be relative).
+ * Literal text is percent-encoded (`/café` is `/caf%C3%A9`), and a pattern
+ * without a leading `/` gets one.
  *
- * @throws a `rou3:` error for pattern syntax with no meaning (yet), quoting
- * the pattern: an unclosed `(`, unbalanced or nested `{}`, `{…}+` / `{…}*`,
- * a `?` / `+` / `*` anywhere but after a whole-segment `:name` (`?` also
- * after `:name(regex)` and in a mixed segment; never after a group's `{` /
- * `}`: `/{:a}{*}`, `/{:a}?*`), a raw `?` after plain text
- * (`/foo?`), a `**` in the middle of a segment (`/a**b`), an empty or `(?`
- * group, a `:` without a valid name (`/:0`, `/:café`, `/:id$`), more after `**:name`
- * in its segment, a repeated param name, more than one catch-all (`*`,
- * `**`, `(.*)`, `:name(.*)`, `:name+`, `:name*`), a `\` that
- * escapes no char of its segment (`\/`), an anchor, look-around,
- * backreference or capturing group in a constraint (`/:x((a))`; use `(?:…)`),
- * and a U+FFFD-U+FFFF char (internal placeholders).
+ * @throws a `rou3:` error quoting the pattern when its syntax has no meaning
+ * (see README "Invalid patterns"): for example an unclosed `(` or `{`, a
+ * misplaced modifier (`*?`, `/foo?`), an invalid or repeated param name (`/:0`,
+ * `/a/:x/:x`), a second catch-all (`/*\/x/*`), or a capturing group, anchor,
+ * look-around or backreference in a regex constraint.
  */
 export function addRoute<T>(
   ctx: RouterContext<T>,
