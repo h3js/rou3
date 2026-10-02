@@ -1,6 +1,6 @@
 import { ESCAPED_GROUP_PREFIX, fromGroupName, UNNAMED_GROUP_PREFIX } from "./_group-names.ts";
 import { NullProtoObj } from "./object.ts";
-import { reverseVariants } from "./operations/_utils.ts";
+import { reverseVariants } from "./_match.ts";
 import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 
 /** A compiled single-match lookup (`compileRouter(router)`), like `findRoute`. */
@@ -1149,7 +1149,7 @@ function propKey(name: string): string {
 
 /**
  * The condition under which param `map` (read as `param`) has a value, where
- * it needs one (mirrors `emptyParam` in operations/_utils.ts): a `:name`'s
+ * it needs one (mirrors `emptyParam` in _match.ts): a `:name`'s
  * segment is not empty, and neither is any segment a `**:name` (`:name+`,
  * `:name*`) takes (a `**` and a `*` may capture `""`): `s[c]` to `s[l-n-1]`,
  * where its `**` starts at `s[c]` and `n` segments follow it, checked by the

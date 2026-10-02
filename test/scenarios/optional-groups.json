@@ -2,8 +2,8 @@
   "$schema": "./_schema.json",
   "description": "Optional syntax (`:x?`, `{...}?`, `:x*`, in-segment `?`), in-segment params and the pattern mistakes developers make",
   "sources": [
-    "README: Route patterns (table, Params, Param naming rules, Wildcards, Groups, Invalid patterns, Differences from URLPattern)",
-    "README: Matching (Trailing slashes and empty segments, Result ordering incl. the optional-syntax carve-out A1)",
+    "README and docs/reference.md: Route patterns (table, Params, Param naming rules, Wildcards, Groups, Invalid patterns, Differences from URLPattern)",
+    "README and docs/reference.md: Matching (Trailing slashes and empty segments, Result ordering incl. the optional-syntax carve-out A1)",
     ".agents/syntax.md: Leading `/`, Group delimiters, Params sharing a segment, Reserved syntax",
     ".agents/matching.md: findAllRoutes ordering, Greedy `*`"
   ],
@@ -32,7 +32,7 @@
     },
     {
       "name": "unconstrained optional language at the root",
-      "description": "`{/:lang}?` alone matches `/` and `/en` (README Groups); a static route beats the param on its path",
+      "description": "`{/:lang}?` alone matches `/` and `/en` (docs/reference.md Groups); a static route beats the param on its path",
       "routes": [
         { "path": "{/:lang}?", "name": "home" },
         { "path": "{/:lang}?/about", "name": "about" },
@@ -72,7 +72,7 @@
     },
     {
       "name": "leading groups: optional prefix, empty first segment, relative group",
-      "description": "README Groups: `{/:lang}?/docs`, `/{/:lang}?/legacy` (a route starting with an empty segment) and `{v2}?/api` (a leading group without `/` gets one)",
+      "description": "docs/reference.md Groups: `{/:lang}?/docs`, `/{/:lang}?/legacy` (a route starting with an empty segment) and `{v2}?/api` (a leading group without `/` gets one)",
       "routes": [
         { "path": "{/:lang}?/docs", "name": "docs" },
         { "path": "/{/:lang}?/legacy", "name": "legacy" },
@@ -338,7 +338,7 @@
     },
     {
       "name": "optional segment before a trailing star",
-      "description": "README Differences: `/a/:x?/*` gives a lone segment to the optional param and the `*` is optional",
+      "description": "docs/reference.md Differences: `/a/:x?/*` gives a lone segment to the optional param and the `*` is optional",
       "routes": [{ "path": "/cdn/:version?/*", "name": "cdn" }],
       "cases": [
         { "path": "/cdn", "match": "cdn", "params": {} },
@@ -383,7 +383,7 @@
     },
     {
       "name": "optional extension group after a star",
-      "description": "README Differences: `/media/*{.webp}?`, the route with the group wins (`/a.webp` gives `{ 0: \"a\" }`)",
+      "description": "docs/reference.md Differences: `/media/*{.webp}?`, the route with the group wins (`/a.webp` gives `{ 0: \"a\" }`)",
       "routes": [{ "path": "/media/*{.webp}?", "name": "media" }],
       "cases": [
         { "path": "/media/a.webp", "match": "media", "params": { "0": "a" } },
@@ -394,7 +394,7 @@
       ]
     },
     {
-      "name": "params sharing a segment (README Params)",
+      "name": "params sharing a segment (docs/reference.md Several captures)",
       "description": "Lazy `:name`s split at the first separator, a `*` is greedy across `/`, and `-` ends a param name",
       "routes": [
         { "path": "/pair/:a-:b", "name": "pair" },
@@ -425,7 +425,7 @@
     },
     {
       "name": "common pattern mistakes",
-      "description": "README Invalid patterns and Param naming rules: each throws a `rou3:` error instead of matching something unexpected; the fixed spellings work",
+      "description": "docs/reference.md Invalid patterns and Param naming rules: each throws a `rou3:` error instead of matching something unexpected; the fixed spellings work",
       "routes": [
         { "path": "/u/:user_id", "name": "user-id" },
         { "path": "/v/:v2/:_0", "name": "names" },

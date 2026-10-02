@@ -2,7 +2,7 @@
   "$schema": "./_schema.json",
   "description": "Security-relevant routing: guard coverage, path confusion, constraint bypass, priority surprises and reserved syntax",
   "sources": [
-    "README: Route patterns, Wildcards, Percent-encoding, Invalid patterns, Matching (Routes for any method, Trailing slashes and empty segments, Path normalization, Result ordering)",
+    "README and docs/reference.md: Route patterns, Wildcards, Percent-encoding, Invalid patterns, Matching (Routes for any method, Trailing slashes and empty segments, Path normalization, Result ordering)",
     ".agents/matching.md: Method-agnostic entries (the `methods[method] || methods[\"\"]` fail-open), Empty segments and normalization",
     "OWASP: Path Traversal (`..`, `%2e%2e`, encoded `/`)",
     "Orange Tsai, Breaking Parser Logic (Black Hat USA 2018): `;` and `..;/` path confusion between proxy and app"
@@ -594,7 +594,7 @@
       ],
       "guards": { "account-guard": ["profile", "profile-tab"] },
       "cases": [
-        { "path": "/account/profile", "match": "profile", "params": {}, "all": ["account-guard", "profile", "profile-tab"], "note": "`:tab?` also registers `/account/profile`: registration order decides (README carve-out)" },
+        { "path": "/account/profile", "match": "profile", "params": {}, "all": ["account-guard", "profile", "profile-tab"], "note": "`:tab?` also registers `/account/profile`: registration order decides (docs/reference.md carve-out)" },
         { "path": "/en/account/profile", "match": "profile", "params": { "lang": "en" }, "all": ["account-guard", "profile"] },
         { "path": "/account/profile/billing", "match": "profile-tab", "params": { "tab": "billing" }, "all": ["account-guard", "profile-tab"] },
         { "path": "/account/profile/bil-ling", "match": "account-guard", "params": { "0": "profile/bil-ling" } },

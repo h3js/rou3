@@ -101,13 +101,13 @@ const CASES: [
   ["/**.md", "/a.md", { 0: "a" }],
   ["/**.md", "/x/a.md", { 0: "x/a" }],
   ["/**.md", "/.md", { 0: "" }],
-  // README differences: no segment is left after the stripped trailing slash
+  // docs/reference.md differences: no segment is left after the stripped trailing slash
   // for a `*` inside one (only a whole-segment `*` takes nothing there)
   ["/a/*:x?", "/a/", null, true],
   ["/a/*:x?", "/a//", { 0: "" }, true],
   ["/a/*(\\d*)", "/a/", null, true],
   ["/a/*(\\d*)", "/a//", { 0: "", 1: "" }, true],
-  // README differences: segments after a catch-all match from the end, and
+  // docs/reference.md differences: segments after a catch-all match from the end, and
   // the route with an optional one wins
   ["/*/:x?", "/x/y", { 0: "x", x: "y" }, true],
   ["/a/*{/b}?", "/a/x/b", { 0: "x" }, true],
@@ -672,7 +672,7 @@ describe("`*` vs `**` priority and ordering", () => {
       [["/:slug", "/blog-*"], "/other", "/:slug", { slug: "other" }],
       [["/x/:id", "/x/v*"], "/x/v1", "/x/v*", { 0: "1" }],
       [["/x/:file", "/x/*.png"], "/x/a.png", "/x/*.png", { 0: "a" }],
-      // The route with the group wins (README)
+      // The route with the group wins (docs/reference.md)
       [["/:a{-*}?"], "/a-b", "/:a{-*}?", { a: "a", 0: "b" }],
     ] as const) {
       for (const order of [[...routes], [...routes].reverse()]) {
@@ -734,7 +734,7 @@ describe("`*` vs `**` priority and ordering", () => {
     }
   });
 
-  it("an optional segment before a static one (README differences)", () => {
+  it("an optional segment before a static one (docs/reference.md differences)", () => {
     // The static `a` wins over `:x`, so the route without `:x` does; the
     // regex (and URLPattern) match left to right. Same paths, other captures.
     const router = createRouter<string>();

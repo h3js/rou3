@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { addRoute, createRouter, findRoute } from "../src/index.ts";
 import { compileRouter, compileRouterToString } from "../src/compiler.ts";
-import { getParamRegexp } from "../src/operations/add.ts";
-import { encodeEscapes } from "../src/operations/_utils.ts";
-import { linearRegExp } from "../src/operations/_linear.ts";
+import { getParamRegexp, linearRegExp } from "../src/_segment-regexp.ts";
+import { encodeEscapes } from "../src/_pattern.ts";
 
 // Several captures in one segment (`:year-:month-:day.html`) used to try
 // every split of a segment that doesn't match: cubic in its length with three

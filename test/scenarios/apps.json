@@ -2,7 +2,7 @@
   "$schema": "./_schema.json",
   "description": "Whole-application route tables (30-80 routes each) where precedence between many siblings matters: framework file routes, route rules, middleware scopes and reserved names translated into rou3 patterns",
   "sources": [
-    "README: Route patterns, Wildcards, Groups, Matching, Result ordering (detailed rules), Routes for any method, Trailing slashes and empty segments, Path normalization",
+    "README and docs/reference.md: Route patterns, Wildcards, Groups, Matching, Result ordering (detailed rules), Routes for any method, Trailing slashes and empty segments, Path normalization",
     ".agents/matching.md: same-node siblings, method-agnostic entries, segments after a catch-all (rankFromEnd), empty segments",
     "Nuxt pages/ + server/ + routeRules conventions (nuxt.com/docs/guide/concepts/rendering#route-rules), Nitro /**/_payload.json",
     "GitHub web URL layout (github.com/:owner/:repo/{tree,blob,raw}/:ref/:path, issues, pull, compare, releases, archive)",
@@ -192,7 +192,7 @@
         { "path": "/h3js/rou3.git/info/refs", "match": "git-info-refs", "params": { "owner": "h3js", "repo": "rou3" } },
         { "method": "POST", "path": "/h3js/rou3.git/git-upload-pack", "match": "git-upload-pack", "params": { "owner": "h3js", "repo": "rou3" } },
         { "path": "/explore", "match": "explore" },
-        { "path": "/settings/r/archive/x.zip", "match": "repo-archive-zip", "params": { "owner": "settings", "repo": "r", "0": "x" }, "all": ["settings-auth", "repo-archive-zip"], "note": "from-end ranking: the suffix route pins the last segment, so it beats the reserved /settings/** scope (README: Segments after a catch-all)" },
+        { "path": "/settings/r/archive/x.zip", "match": "repo-archive-zip", "params": { "owner": "settings", "repo": "r", "0": "x" }, "all": ["settings-auth", "repo-archive-zip"], "note": "from-end ranking: the suffix route pins the last segment, so it beats the reserved /settings/** scope (docs/reference.md: Segments after a catch-all)" },
         { "path": "/settings/r/archive", "match": "settings-auth", "params": { "0": "r/archive" } }
       ]
     },

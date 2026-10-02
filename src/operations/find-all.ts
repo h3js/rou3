@@ -8,7 +8,7 @@ import {
   normalizePath,
   reverseVariants,
   splitPath,
-} from "./_utils.ts";
+} from "../_match.ts";
 
 /**
  * Find every route that matches `path`, from the least to the most specific.

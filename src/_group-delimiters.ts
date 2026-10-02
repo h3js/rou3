@@ -4,7 +4,7 @@ import {
   DOT_SEGMENT_NEXT_TO,
   invalidSyntax,
   MISPLACED_MODIFIER,
-} from "./operations/_utils.ts";
+} from "./_pattern.ts";
 
 /** `[pre, body, suf, mod]` split of a `{...}` group, or `undefined`. */
 export type GroupDelimiter = [pre: string, body: string, suf: string, mod: string | undefined];

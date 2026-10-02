@@ -2,7 +2,7 @@
   "$schema": "./_schema.json",
   "description": "REST / RPC APIs and HTTP methods as developers write them: CRUD tables, nested resources, versioned APIs, method-agnostic middleware and findAllRoutes ordering",
   "sources": [
-    "README: Route patterns (Params, Wildcards, Groups), Matching (Methods and paths, Routes for any method, Trailing slashes and empty segments, Path normalization, Result ordering incl. carve-outs)",
+    "README and docs/reference.md: Route patterns (Params, Wildcards, Groups), Matching (Methods and paths, Routes for any method, Trailing slashes and empty segments, Path normalization, Result ordering incl. carve-outs)",
     ".agents/matching.md: same-node siblings, method-agnostic entries, findAllRoutes ordering",
     "GitHub REST API v3 route shapes (docs.github.com/rest), Stripe API v1 route shapes (docs.stripe.com/api)",
     "Rails resource routing conventions (guides.rubyonrails.org/routing.html)",
@@ -286,7 +286,7 @@
     },
     {
       "name": "regex constraint classes: slugs, hex ids, compare ranges",
-      "description": "README Invalid patterns: a `--` / `&&` inside a class is a set operation in URLPattern (`v` flag) and throws; a `-` in a class, `--` as literal text and escaped `\\-` stay valid",
+      "description": "docs/reference.md Invalid patterns: a `--` / `&&` inside a class is a set operation in URLPattern (`v` flag) and throws; a `-` in a class, `--` as literal text and escaped `\\-` stay valid",
       "routes": [
         { "path": "/posts/:slug([a-z0-9-]+)", "name": "post" },
         { "path": "/colors/:hex([\\da-f]{6})", "name": "color" },
@@ -402,7 +402,7 @@
     },
     {
       "name": "catch-all flavours on one node: `**` < `*` < `**:name`",
-      "description": "README detailed ordering: on a shared node a `**` comes before a trailing `*` (same paths), before a `**:name` (needs a value); ties keep registration order with `\"\"` first",
+      "description": "docs/reference.md detailed ordering: on a shared node a `**` comes before a trailing `*` (same paths), before a `**:name` (needs a value); ties keep registration order with `\"\"` first",
       "routes": [
         { "method": "", "path": "/api/**", "name": "api-any" },
         { "path": "/api/**", "name": "api-get" },
@@ -615,7 +615,7 @@
     },
     {
       "name": "optional format suffix, pagination and optional trailing params",
-      "description": "`{.:format(json|csv)}?`, `{/page/:page(\\d+)}?`, and README carve-out A1 (`/admin` + `/admin/:page?`)",
+      "description": "`{.:format(json|csv)}?`, `{/page/:page(\\d+)}?`, and docs/reference.md carve-out A1 (`/admin` + `/admin/:page?`)",
       "routes": [
         { "path": "/reports/:id{.:format(json|csv)}?", "name": "report" },
         { "path": "/posts{/page/:page(\\d+)}?", "name": "posts" },
@@ -637,7 +637,7 @@
         { "path": "/posts/page", "match": "post", "params": { "slug": "page" } },
         { "path": "/posts/page/two", "match": null },
         { "path": "/posts/hello", "match": "post", "params": { "slug": "hello" } },
-        { "path": "/admin", "match": "admin", "all": ["admin", "admin-page"], "note": "README carve-out A1: the broader pattern comes last" },
+        { "path": "/admin", "match": "admin", "all": ["admin", "admin-page"], "note": "docs/reference.md carve-out A1: the broader pattern comes last" },
         { "path": "/admin/users", "match": "admin-page", "params": { "page": "users" }, "all": ["admin-page"] },
         { "path": "/admin//", "match": null },
         { "path": "/search", "match": "search", "params": {} },
@@ -673,7 +673,7 @@
     },
     {
       "name": "format suffix catch-all ranked from the end (`/**.json` vs `/api/users/:id`)",
-      "description": "README 'Segments after a catch-all': on paths a suffix route matches, results rank from the last segment backwards, so `*.json` beats a plain `:id` there",
+      "description": "docs/reference.md 'Segments after a catch-all': on paths a suffix route matches, results rank from the last segment backwards, so `*.json` beats a plain `:id` there",
       "routes": [
         { "method": "", "path": "/api/**", "name": "api-mw" },
         { "path": "/api/users/:id", "name": "user" },
@@ -692,7 +692,7 @@
       ]
     },
     {
-      "name": "README carve-out B: `:name+` before a param and a catch-all",
+      "name": "docs/reference.md carve-out B: `:name+` before a param and a catch-all",
       "description": "`/p/:id/**` contains `/p/:path+` but wildcards list first, so the narrower route comes first and findRoute picks the broader",
       "routes": [
         { "path": "/p/:id/**", "name": "id-rest" },

@@ -7,10 +7,10 @@
 // Hand-written regexes that follow the same conventions convert too;
 // constructs outside the dialect throw.
 
-import { expandGroupDelimiters, scanFirstGroup } from "./_group-delimiters.ts";
-import { fromGroupName } from "./_group-names.ts";
-import { classSetOp, encodeLiteral } from "./operations/_utils.ts";
-import { undeterminize } from "./_regexp-linear.ts";
+import { expandGroupDelimiters, scanFirstGroup } from "../_group-delimiters.ts";
+import { fromGroupName } from "../_group-names.ts";
+import { classSetOp, encodeLiteral } from "../_pattern.ts";
+import { undeterminize } from "./_determinize.ts";
 
 // Chars a literal is backslash-escaped as so `routeToRegExp` re-emits them
 // verbatim: rou3 route syntax (`: ( ) * \`), `+` (a modifier after a param)
@@ -472,7 +472,7 @@ function applyOptional(
   if (inner.startsWith("\\/")) {
     const rest = inner.slice(2);
     // `:x*` and a lone optional last segment in one group (see
-    // `pushCatchAll` in regexp.ts): `(?:/(?:(?<x>[\s\S]+)/)?(?<y>[^/]*))?`
+    // `pushCatchAll` in route-to-regexp.ts): `(?:/(?:(?<x>[\s\S]+)/)?(?<y>[^/]*))?`
     // (`[\s\S]*` in older versions, also for a `**`).
     const nested = NESTED_CATCH_ALL.exec(rest);
     // An unnamed catch-all is no `:_N*` (see the unnamed capture below), and

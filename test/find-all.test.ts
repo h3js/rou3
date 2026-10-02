@@ -11,7 +11,7 @@ import {
 import { compileRouter, compileRouterToString } from "../src/compiler.ts";
 import { _findRanked } from "../src/operations/find-all.ts";
 import type { MethodData } from "../src/types.ts";
-import { splitPath } from "../src/operations/_utils.ts";
+import { splitPath } from "../src/_match.ts";
 import { format } from "oxfmt";
 
 // Helper to make snapsots more readable
@@ -403,7 +403,7 @@ const SWEEP_PATHS = (() => {
 })();
 
 /**
- * Documented carve-outs (README, `.agents/matching.md`), as
+ * Documented carve-outs (docs/reference.md, `.agents/matching.md`), as
  * `<registration order> @ <path>`: the broader pattern comes last.
  */
 const KNOWN_CARVE_OUTS = [
@@ -551,7 +551,7 @@ function segmentsOf(path: string): string[] {
 
 describe("matcher: ordering contract: optional-syntax carve-out", () => {
   // Pins the *known-divergent* half of the ordering contract, documented in
-  // README "Result ordering" (the "Carve-out — optional syntax" bullet).
+  // docs/reference.md "Detailed ordering rules" (the "Carve-out: optional syntax" bullet).
   // `findAllRoutes` orders tree entries (post-`expandModifiers`); `compareRoutes`
   // compares whole patterns. A pattern with `:name?`/`:name*`/`{...}?` registers
   // several entries, so a pattern-level superset can be ordered last. These

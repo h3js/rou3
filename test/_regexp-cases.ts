@@ -1407,7 +1407,7 @@ export const regexpCases: Record<string, RegExpCase> = {
 // Fixtures whose regex still ends in the look-behind trailing-slash suffix
 // `(?:(?<=\/)\/|(?<!\/)\/?)`, which RE2-family engines (Go, Rust `regex`,
 // RE2) reject. Every other fixture gets a look-behind-free ending (see
-// src/_trailing-slash.ts); the sweep corpus has more look-behind routes,
+// src/regexp/_trailing-slash.ts); the sweep corpus has more look-behind routes,
 // pinned in SWEEP_LOOKBEHIND_PATTERNS. The suffix remains for a required
 // last segment whose constraint can match empty (its non-empty part isn't
 // derived), for optional siblings where an earlier one can be empty and a
@@ -1423,7 +1423,7 @@ export const LOOKBEHIND_ROUTES: ReadonlySet<string> = new Set([
 
 // Fixtures whose regex holds a capture with a look-ahead (a constraint
 // extended by an optional group in its own segment, see `mergeCapture` in
-// src/regexp.ts; a `:name` there is lazy and needs none, and a group right
+// src/regexp/route-to-regexp.ts; a `:name` there is lazy and needs none, and a group right
 // after a `*` falls back to alternation). RE2-family engines reject them and
 // `regExpToRoute` can't read them back.
 export const LOOKAHEAD_ROUTES: ReadonlySet<string> = new Set([]);
@@ -1434,7 +1434,7 @@ export const LOOKAHEAD_ROUTES: ReadonlySet<string> = new Set([]);
 // engines reject it unless PCRE2_DUPNAMES is set.
 //
 // A trailing single optional group is normally compiled inline as `(?:...)?`
-// (see inlineOptionalGroup in src/regexp.ts), which avoids duplicate names. But
+// (see inlineOptionalGroup in src/regexp/route-to-regexp.ts), which avoids duplicate names. But
 // an optional part after a greedy capture (a `*`) cannot be inlined safely
 // (the capture would swallow the optional literal), so it falls back to
 // alternation and reuses the capture name across branches. These routes exercise

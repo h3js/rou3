@@ -1,5 +1,5 @@
 import type { MethodData, Node } from "../types.ts";
-import { methodEntries, reverseVariants } from "./_utils.ts";
+import { methodEntries, reverseVariants } from "../_match.ts";
 
 /**
  * Collect the routes of a wildcard's `suffix` trie that match `segments`,

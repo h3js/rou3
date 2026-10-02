@@ -27,9 +27,9 @@
 //   an in-place optional one (`:x?`) none but first (`[^/][^/c]*`). Each try
 //   of the `*` then fails within the next few `c`s.
 //
-// Other shapes keep the lazy form (see README "What routeToRegExp doesn't
-// model"): a constraint next to a param, separators of several kinds (or chars)
-// after a `*`, a lazy `*`, a constraint that can match `/`.
+// Other shapes keep the lazy form (see docs/reference.md "What routeToRegExp
+// doesn't model"): a constraint next to a param, separators of several kinds
+// (or chars) after a `*`, a lazy `*`, a constraint that can match `/`.
 
 // One literal char of the emitted source: an escaped one (not `\/`), or one
 // with no regex meaning

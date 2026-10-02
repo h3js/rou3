@@ -9,7 +9,7 @@ import {
   routeToRegExp,
 } from "../src/index.ts";
 import { compileRouter, compileRouterToString } from "../src/compiler.ts";
-import { getMatchParams, normalizePath } from "../src/operations/_utils.ts";
+import { getMatchParams, normalizePath } from "../src/_match.ts";
 import { _findRanked } from "../src/operations/find-all.ts";
 import { format } from "oxfmt";
 import { isDeepStrictEqual } from "node:util";
@@ -728,7 +728,7 @@ describe.skipIf(typeof (globalThis as any).URLPattern !== "function")(
 // the `{:x}?` → `:x?` rewrite (only for a group ending its segment) and
 // `joinGroup` (a regex group after a param is an unnamed capture) meet: two
 // routes, which every matcher and `routeToRegExp` pick alike, as URLPattern
-// does unless a greedy capture before the group could take its text (README
+// does unless a greedy capture before the group could take its text (docs/reference.md
 // "Differences from URLPattern": the route with the group wins).
 describe("a param group before a regex group in its segment", () => {
   const segments: string[] = [];

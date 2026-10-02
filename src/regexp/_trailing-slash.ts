@@ -1,4 +1,4 @@
-import { CATCH_ALL, canBeEmpty, parseLevel } from "./_regexp-scan.ts";
+import { CATCH_ALL, canBeEmpty, parseLevel } from "./_scan.ts";
 
 // Trailing-slash suffix for `routeToRegExp()` bodies (raw `/`, before `RegExp`
 // escaping).
@@ -8,7 +8,7 @@ import { CATCH_ALL, canBeEmpty, parseLevel } from "./_regexp-scan.ts";
 // `/a/b` but `/a/b//` does not, and when the body match itself ends in `/` (an
 // empty last segment: `/a//` reaches `/a/**` with `0: ""`) exactly one more
 // must follow. (A trailing `*`, which also takes nothing after the stripped
-// slash, gets its own ending: see `ending` in regexp.ts.) The general encoding needs look-behinds, which RE2-family
+// slash, gets its own ending: see `ending` in route-to-regexp.ts.) The general encoding needs look-behinds, which RE2-family
 // engines (Go, Rust `regex`, RE2) reject, so the common endings are rewritten
 // look-behind free and only the rest fall back to `LOOKBEHIND_SUFFIX`.
 const LOOKBEHIND_SUFFIX = "(?:(?<=/)/|(?<!/)/?)$";

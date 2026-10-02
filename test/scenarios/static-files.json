@@ -2,9 +2,9 @@
   "$schema": "./_schema.json",
   "description": "Static assets, file serving and SSR/SSG frameworks: exact files vs extension routes vs SPA fallbacks, Nuxt/Nitro payloads and route rules, Next.js/SvelteKit catch-alls, dotfiles, traversal and encoded file names",
   "sources": [
-    "README: Route patterns (Params, Wildcards, Percent-encoding, Invalid patterns, Differences from URLPattern)",
-    "README: Matching (Trailing slashes and empty segments, Path normalization, Result ordering incl. 'Segments after a catch-all')",
-    "README: Regular expressions (regex ≡ router, used as a guard)",
+    "README and docs/reference.md: Route patterns (Params, Wildcards, Percent-encoding, Invalid patterns, Differences from URLPattern)",
+    "README and docs/reference.md: Matching (Trailing slashes and empty segments, Path normalization, Result ordering incl. 'Segments after a catch-all')",
+    "README and docs/reference.md: Regular expressions (regex ≡ router, used as a guard)",
     ".agents/matching.md: greedy `*`, segments after a catch-all, empty segments",
     "Nitro route rules / Nuxt payload extraction (`/**/_payload.json`, `/_ipx/**`, `/api/_content/**`), Nuxt OG image",
     "Next.js dynamic routes (`[...slug]`, `[[...slug]]`), SvelteKit rest params and matchers, Vite dev server URLs (`/@fs/`, `/@id/`, `/node_modules/.vite/deps/`)"
@@ -206,7 +206,7 @@
     },
     {
       "name": "nuxt payloads, OG images and IPX",
-      "description": "The README 'Segments after a catch-all' example extended with a `/**` fallback, OG images under any blog path and the IPX image proxy.",
+      "description": "The docs/reference.md 'Segments after a catch-all' example extended with a `/**` fallback, OG images under any blog path and the IPX image proxy.",
       "routes": [
         { "path": "/**", "name": "spa" },
         { "path": "/blog/**", "name": "blog" },
@@ -481,7 +481,7 @@
     },
     {
       "name": "optional file extensions",
-      "description": "`{.ext}?` groups after a `*` and after a name: the route with the group wins (README 'Differences from URLPattern').",
+      "description": "`{.ext}?` groups after a `*` and after a name: the route with the group wins (docs/reference.md 'Differences from URLPattern').",
       "routes": [
         { "path": "/media/*{.webp}?", "name": "media" },
         { "path": "/img/:name{.:ext}?", "name": "img" }

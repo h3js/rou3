@@ -2,7 +2,7 @@
   "$schema": "./_schema.json",
   "description": "Percent-encoding contract: literal pattern text is encoded once at insert, lookup paths are never decoded or encoded",
   "sources": [
-    "README: Percent-encoding, Escaping, Invalid patterns, Path normalization, Methods and paths",
+    "README and docs/reference.md: Percent-encoding, Escaping, Invalid patterns, Path normalization, Methods and paths",
     ".agents/syntax.md: Escapes, Percent-encoding",
     "WHATWG URL: path percent-encode set (what `new URL().pathname` gives)"
   ],
@@ -30,7 +30,7 @@
     },
     {
       "name": "routes written already percent-encoded",
-      "description": "README: `%` is never encoded, so an existing `%xx` stays as written (hex case included) and a lone `%` is literal",
+      "description": "docs/reference.md: `%` is never encoded, so an existing `%xx` stays as written (hex case included) and a lone `%` is literal",
       "routes": [
         { "path": "/caf%C3%A9/menu", "name": "upper" },
         { "path": "/b%c3%a4r", "name": "lower" },
@@ -56,7 +56,7 @@
     },
     {
       "name": "one route in two spellings",
-      "description": "README: `/café` and `/caf%C3%A9` are the same route, as are `/café-:id` and `/caf%C3%A9-:id`; on a tie registration order decides",
+      "description": "docs/reference.md: `/café` and `/caf%C3%A9` are the same route, as are `/café-:id` and `/caf%C3%A9-:id`; on a tie registration order decides",
       "routes": [
         { "path": "/café", "name": "raw" },
         { "path": "/caf%C3%A9", "name": "enc" },
@@ -104,7 +104,7 @@
     },
     {
       "name": "escaped syntax characters",
-      "description": "README Escaping: `\\x` is a literal `x`; an escaped `?`, `{` or `}` is then encoded like other literal text",
+      "description": "README and docs/reference.md Escaping: `\\x` is a literal `x`; an escaped `?`, `{` or `}` is then encoded like other literal text",
       "routes": [
         { "path": "/static\\:path/\\*\\*", "name": "colon-stars" },
         { "path": "/files/\\(2024\\)", "name": "parens" },
@@ -225,7 +225,7 @@
     },
     {
       "name": "lone surrogates and control characters",
-      "description": "README: a lone surrogate is encoded as U+FFFD (`%EF%BF%BD`); a raw tab, LF or CR throws (URLPattern strips it), so write it as `%09` / `%0A` / `%0D`",
+      "description": "docs/reference.md: a lone surrogate is encoded as U+FFFD (`%EF%BF%BD`); a raw tab, LF or CR throws (URLPattern strips it), so write it as `%09` / `%0A` / `%0D`",
       "routes": [
         { "path": "/x\ud800y", "name": "high" },
         { "path": "/z/\udc00", "name": "low" },
@@ -291,14 +291,14 @@
     },
     {
       "name": "invalid patterns around encoding and escapes",
-      "description": "README Invalid patterns: a non-ASCII char or `$` right after a param name, U+FFFD-U+FFFF (internal), `\\/`, a trailing `\\`, an unescaped `?`",
+      "description": "docs/reference.md Invalid patterns: a non-ASCII char or `$` right after a param name, U+FFFD-U+FFFF (internal), `\\/`, a trailing `\\`, an unescaped `?`",
       "routes": [{ "path": "/ok/:caf\\é", "name": "ok" }],
       "cases": [{ "path": "/ok/x%C3%A9", "match": "ok", "params": { "caf": "x" } }],
       "invalid": ["/:café", "/x/:id$", "/a/�", "/a￿", "/a￾/b", "/a\\/b", "/a\\", "/what?", "/:x(é", "/tag/{oops"]
     },
     {
       "name": "`.` / `..` segments in patterns",
-      "description": "README Path normalization: a pattern's `.` / `..` segments (`%2e` too) are resolved like `new URL()` resolves a path, as in URLPattern; an escaped one is text; next to a param, catch-all or group they throw",
+      "description": "docs/reference.md Dot segments: a pattern's `.` / `..` segments (`%2e` too) are resolved like `new URL()` resolves a path, as in URLPattern; an escaped one is text; next to a param, catch-all or group they throw",
       "routes": [
         { "path": "/docs/../api/:id", "name": "api" },
         { "path": "/static/./assets/*", "name": "assets" },

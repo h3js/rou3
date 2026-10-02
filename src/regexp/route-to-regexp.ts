@@ -1,7 +1,6 @@
-import { expandGroupDelimiters, joinGroup, scanFirstGroup } from "./_group-delimiters.ts";
-import { toGroupName } from "./_group-names.ts";
-import { createRouter } from "./context.ts";
-import { addRoute, getParamRegexp, skipGroup, type Unnamed } from "./operations/add.ts";
+import { expandGroupDelimiters, joinGroup, scanFirstGroup } from "../_group-delimiters.ts";
+import { toGroupName } from "../_group-names.ts";
+import { createRouter } from "../context.ts";
 import {
   absolutePattern,
   dotSegments,
@@ -11,11 +10,13 @@ import {
   segmentKey,
   splitRoute,
   starGroups,
-} from "./operations/_utils.ts";
-import { appendsCleanly } from "./_optional-append.ts";
-import { canBeEmpty, isOptionalGroups } from "./_regexp-scan.ts";
+  type Unnamed,
+} from "../_pattern.ts";
+import { getParamRegexp } from "../_segment-regexp.ts";
+import { addRoute, skipGroup } from "../operations/add.ts";
+import { appendsCleanly, canBeEmpty, isOptionalGroups } from "./_scan.ts";
 import { ANY_TAIL, openOptionals, withTrailingSlash } from "./_trailing-slash.ts";
-import { determinize } from "./_regexp-linear.ts";
+import { determinize } from "./_determinize.ts";
 
 // Catch-all body. The router splits paths on `/` only, so a catch-all takes
 // any char, line terminators included; `.` would not (JS excludes `\n`, `\r`,
@@ -64,7 +65,7 @@ const STAR_SEGMENT = "*/";
  * Params sharing a segment are spelled out where their split is forced
  * (`/:a-:b` is `(?<a>[^/][^/-]*)-(?<b>[^/]+?)`), so the regex fails a path in
  * linear time instead of retrying every split; a few shapes still backtrack
- * quadratically in a long failing segment (see README).
+ * quadratically in a long failing segment (see docs/reference.md "Backtracking").
  *
  * @throws the `addRoute` error for an invalid pattern, and a `rou3:` error for
  * a pattern that declares the same param name twice in one variant

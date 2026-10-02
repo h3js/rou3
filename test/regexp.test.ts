@@ -11,8 +11,8 @@ import {
 import { withoutAlias } from "./_utils.ts";
 import { fromGroupName } from "../src/_group-names.ts";
 import { expandGroupDelimiters } from "../src/_group-delimiters.ts";
-import { expandModifiers, splitRoute } from "../src/operations/_utils.ts";
-import { canBeEmpty, canEndInSlash } from "../src/_regexp-scan.ts";
+import { expandModifiers, splitRoute } from "../src/_pattern.ts";
+import { canBeEmpty, canEndInSlash } from "../src/regexp/_scan.ts";
 import {
   type Captures,
   DUPLICATE_NAMED_GROUPS,
@@ -1135,7 +1135,7 @@ const OPTIONAL_BEFORE_WILDCARD: CaptureDiff = {
 // Several optional segments after a catch-all (or a `:x*` before a `*`):
 // the router ranks the routes the pattern registers from the end of the
 // path, per path, while the regex's catch-all is lazy or greedy as a whole
-// (see `lazyCatchAll` in src/regexp.ts) and a `:x*` expansion tries its
+// (see `lazyCatchAll` in src/regexp/route-to-regexp.ts) and a `:x*` expansion tries its
 // branches in order. Exact captures would need an alternation of every
 // route, with duplicate group names (which PCRE2 and RE2 reject). The regex
 // still takes one of those routes: its captures are the params that route

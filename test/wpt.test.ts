@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { routeToRegExp, createRouter, addRoute, findRoute } from "../src/index.ts";
 import { compileRouter } from "../src/compiler.ts";
 import { fromGroupName } from "../src/_group-names.ts";
-import { normalizePath } from "../src/operations/_utils.ts";
+import { normalizePath } from "../src/_match.ts";
 import { withoutAlias } from "./_utils.ts";
 import { DUPLICATE_NAMED_GROUPS, needsDuplicateNames } from "./_regexp-cases.ts";
 

@@ -11,7 +11,7 @@ import {
   splitRoute,
   splitStar,
   starGroups,
-} from "./_utils.ts";
+} from "../_pattern.ts";
 
 /**
  * Remove the route added by `addRoute(ctx, method, path)`.

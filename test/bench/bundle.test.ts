@@ -245,8 +245,11 @@ describe("benchmark", () => {
     // before `linearRegExp`; `MethodData.rank` adds a fraction of a point in
     // every matcher), so `/f/:name.png` and `/f/:name.:ext(png|jpg)` beat
     // `/f/:name.:ext` in either order.
+    // +0B raw / +12B gzip: `src/` regrouped by concept (`_pattern.ts`,
+    // `_match.ts`, `_segment-regexp.ts`); the same code in another module
+    // order.
     expect(bytes).toBeLessThanOrEqual(15099); // <15.10kb
-    expect(gzipSize).toBeLessThanOrEqual(6489); // <6.49kb
+    expect(gzipSize).toBeLessThanOrEqual(6501); // <6.51kb
   });
 });
 

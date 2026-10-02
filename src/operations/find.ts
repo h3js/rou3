@@ -1,7 +1,7 @@
 import type { RouterContext, MatchedRoute, Node, MethodData } from "../types.ts";
 import { _findRanked } from "./find-all.ts";
 import { hasSuffixMatch } from "./_suffix.ts";
-import { getMatchParams, matchesZero, normalizePath, splitPath } from "./_utils.ts";
+import { getMatchParams, matchesZero, normalizePath, splitPath } from "../_match.ts";
 
 /**
  * Find the most specific route that matches `path`.
