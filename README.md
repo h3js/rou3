@@ -26,6 +26,8 @@ npx nypm install rou3
 
 rou3 is ESM only. It runs on Node.js 20.19+, Bun, Deno and modern browsers.
 
+Upgrading from 0.9 or older? See the [migration guide](./docs/migration.md).
+
 ## Quick start
 
 ```js
