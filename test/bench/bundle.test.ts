@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { build } from "esbuild";
+import { build, type Plugin } from "esbuild";
 import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
 
@@ -251,10 +251,27 @@ describe("benchmark", () => {
     expect(bytes).toBeLessThanOrEqual(15099); // <15.10kb
     expect(gzipSize).toBeLessThanOrEqual(6501); // <6.51kb
   });
+
+  it("unused exports of the single-file build leave no code behind", async () => {
+    // `dist/index.mjs` is one module, so `sideEffects: false` can't drop the
+    // module-level code of features it bundles: it must be pure or lazy.
+    const lib = await build({
+      entryPoints: [fileURLToPath(new URL("../../src/index.ts", import.meta.url))],
+      bundle: true,
+      write: false,
+      format: "esm",
+    });
+    const { bytes } = await getBundleSize(
+      /* js */ `import { NullProtoObj } from "rou3"; new NullProtoObj();`,
+      lib.outputFiles[0].text,
+    );
+    expect(bytes).toBeLessThanOrEqual(150);
+  });
 });
 
-async function getBundleSize(code: string) {
+async function getBundleSize(code: string, rou3?: string) {
   const res = await build({
+    plugins: rou3 ? [virtualModule("rou3", rou3)] : [],
     bundle: true,
     metafile: true,
     write: false,
@@ -272,4 +289,14 @@ async function getBundleSize(code: string) {
   const { bytes } = res.metafile.outputs["index.mjs"];
   const gzipSize = zlib.gzipSync(res.outputFiles[0].text).byteLength;
   return { bytes, gzipSize };
+}
+
+function virtualModule(name: string, contents: string): Plugin {
+  return {
+    name,
+    setup(build) {
+      build.onResolve({ filter: new RegExp(`^${name}$`) }, () => ({ path: name, namespace: name }));
+      build.onLoad({ filter: /.*/, namespace: name }, () => ({ contents, loader: "js" }));
+    },
+  };
 }

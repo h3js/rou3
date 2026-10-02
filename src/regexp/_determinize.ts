@@ -31,41 +31,9 @@
 // doesn't model"): a constraint next to a param, separators of several kinds
 // (or chars) after a `*`, a lazy `*`, a constraint that can match `/`.
 
-// One literal char of the emitted source: an escaped one (not `\/`), or one
-// with no regex meaning
-const LIT = String.raw`(?:\\[^\w\s/]|[^\\()[\]{}|?*+.^$/\s])`;
-// The same char in a class (see `not`)
-const CLS = String.raw`(?:\\[[\]\\^]|[^\\[\]\s/^])`;
-const SLASH = String.raw`\\?\/`;
-// A lazy param (`[^/]+?`)
-const LAZY = String.raw`\(\?<(\w+)>\[\^${SLASH}\]\+\?\)`;
-const ANY_LAZY = String.raw`\(\?<\w+>\[\^${SLASH}\]\+\?\)`;
-// What may follow a segment: its end (`\/`, `$`, an optional segment, the
-// look-behind ending), after closing groups
-const SEGMENT_END = String.raw`(?:\)\??\??)*(?:${SLASH}|\$|\(\?:${SLASH}|\(\?:\(\?<=)`;
-// Params that can take any text: lazy, in-place optional, a `*` (also its
-// `ANY_TAIL` ending), and the last param of a `*`'s chain (in the chain only)
-const ABSORB = [
-  ANY_LAZY,
-  String.raw`\(\?:${ANY_LAZY}\)\?`,
-  String.raw`\(\?<\w+>\[\\s\\S\]\*`,
-  String.raw`\(\?<\w+>\(\?:\[\\s\\S\]\*\[\^${SLASH}\]\)\?`,
-  String.raw`\(\?<\w+>(?:${LIT}\?)?\[\^${SLASH}${CLS}\]\*\[\^${SLASH}\]\)`,
-  String.raw`\(\?<\w+>\[\^${SLASH}\]\)`,
-  String.raw`\(\?:\(\?<\w+>\[\^${SLASH}\](?:\[\^${SLASH}${CLS}\]\*)?\)\)\?`,
-].join("|");
-const FIRST = new RegExp(`${LAZY}(${LIT}*)(?=${ABSORB})`, "g");
-const BEFORE_OPTIONAL = new RegExp(
-  String.raw`${LAZY}(?=\(\?:(${LIT})${ANY_LAZY}\)\?(?!\?)${SEGMENT_END})`,
-  "g",
-);
-const STAR_CHAIN = new RegExp(
-  String.raw`(\(\?<\w+>\[\\s\\S\]\*\))(${LIT}?)((?:${ANY_LAZY}\2)*)(?:${LAZY}|\(\?:${LAZY}\)\?(?!\?))(${LIT}*)(?=${SEGMENT_END})`,
-  "g",
-);
-
 /** `source` with the shapes above in their linear form. */
 export function determinize(source: string): string {
+  const { FIRST, BEFORE_OPTIONAL, STAR_CHAIN } = shapes();
   return source
     .replace(
       STAR_CHAIN,
@@ -105,15 +73,9 @@ export function undeterminize(source: string): string {
     lazy += `${source.slice(from, match.index)}(?<${match[1]}>[^/]+?)`;
     from = end + 1;
   }
-  lazy = (lazy + source.slice(from)).replace(STAR_LAST, "(?<$1>[^/]+?)");
+  lazy = (lazy + source.slice(from)).replace(shapes().STAR_LAST, "(?<$1>[^/]+?)");
   return lazy !== source && determinize(lazy) === source ? lazy : source;
 }
-
-// The last param of a `*`'s chain, as `determinize` emits it
-const STAR_LAST = new RegExp(
-  String.raw`\(\?<(\w+)>(?:${LIT}\?)?\[\^${SLASH}${CLS}\]\*\[\^${SLASH}\]\)`,
-  "g",
-);
 
 /**
  * The linear body of a lazy param before the literal chars `lit` and a param
@@ -166,4 +128,55 @@ function closingParen(source: string, at: number): number {
     else if (c === ")" && --depth === 0) return i;
   }
   return -1;
+}
+
+type Shapes = Record<"FIRST" | "BEFORE_OPTIONAL" | "STAR_CHAIN" | "STAR_LAST", RegExp>;
+
+let _shapes: Shapes | undefined;
+
+/**
+ * The regexps `determinize` and `undeterminize` find shapes with, built on
+ * first use: module-level code would stay in a single-file bundle (`dist`)
+ * that doesn't use them.
+ */
+function shapes(): Shapes {
+  if (_shapes) return _shapes;
+  // One literal char of the emitted source: an escaped one (not `\/`), or one
+  // with no regex meaning
+  const LIT = String.raw`(?:\\[^\w\s/]|[^\\()[\]{}|?*+.^$/\s])`;
+  // The same char in a class (see `not`)
+  const CLS = String.raw`(?:\\[[\]\\^]|[^\\[\]\s/^])`;
+  const SLASH = String.raw`\\?\/`;
+  // A lazy param (`[^/]+?`)
+  const LAZY = String.raw`\(\?<(\w+)>\[\^${SLASH}\]\+\?\)`;
+  const ANY_LAZY = String.raw`\(\?<\w+>\[\^${SLASH}\]\+\?\)`;
+  // What may follow a segment: its end (`\/`, `$`, an optional segment, the
+  // look-behind ending), after closing groups
+  const SEGMENT_END = String.raw`(?:\)\??\??)*(?:${SLASH}|\$|\(\?:${SLASH}|\(\?:\(\?<=)`;
+  // Params that can take any text: lazy, in-place optional, a `*` (also its
+  // `ANY_TAIL` ending), and the last param of a `*`'s chain (in the chain only)
+  const ABSORB = [
+    ANY_LAZY,
+    String.raw`\(\?:${ANY_LAZY}\)\?`,
+    String.raw`\(\?<\w+>\[\\s\\S\]\*`,
+    String.raw`\(\?<\w+>\(\?:\[\\s\\S\]\*\[\^${SLASH}\]\)\?`,
+    String.raw`\(\?<\w+>(?:${LIT}\?)?\[\^${SLASH}${CLS}\]\*\[\^${SLASH}\]\)`,
+    String.raw`\(\?<\w+>\[\^${SLASH}\]\)`,
+    String.raw`\(\?:\(\?<\w+>\[\^${SLASH}\](?:\[\^${SLASH}${CLS}\]\*)?\)\)\?`,
+  ].join("|");
+  const FIRST = new RegExp(`${LAZY}(${LIT}*)(?=${ABSORB})`, "g");
+  const BEFORE_OPTIONAL = new RegExp(
+    String.raw`${LAZY}(?=\(\?:(${LIT})${ANY_LAZY}\)\?(?!\?)${SEGMENT_END})`,
+    "g",
+  );
+  const STAR_CHAIN = new RegExp(
+    String.raw`(\(\?<\w+>\[\\s\\S\]\*\))(${LIT}?)((?:${ANY_LAZY}\2)*)(?:${LAZY}|\(\?:${LAZY}\)\?(?!\?))(${LIT}*)(?=${SEGMENT_END})`,
+    "g",
+  );
+  // The last param of a `*`'s chain, as `determinize` emits it
+  const STAR_LAST = new RegExp(
+    String.raw`\(\?<(\w+)>(?:${LIT}\?)?\[\^${SLASH}${CLS}\]\*\[\^${SLASH}\]\)`,
+    "g",
+  );
+  return (_shapes = { FIRST, BEFORE_OPTIONAL, STAR_CHAIN, STAR_LAST });
 }
