@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "rou3 scenario fixtures (test/scenarios.test.ts)",
+  "type": "object",
+  "required": ["scenarios"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "description": { "type": "string" },
+    "sources": {
+      "type": "array",
+      "description": "Where the cases come from (spec section, upstream suite + license, advisory)",
+      "items": { "type": "string" }
+    },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "routes", "cases"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "routes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path", "name"],
+              "additionalProperties": false,
+              "properties": {
+                "method": { "type": "string", "description": "Default GET; \"\" = any method" },
+                "path": { "type": "string" },
+                "name": { "type": "string", "description": "Unique per scenario; stored as data { name }" },
+                "regexp": {
+                  "enum": ["exact", "paths", "overmatch"],
+                  "description": "routeToRegExp vs router: exact (default) = same paths and captures, paths = same paths, overmatch = regex ⊇ router (constraint that can match /)"
+                }
+              }
+            }
+          },
+          "cases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path", "match"],
+              "additionalProperties": false,
+              "properties": {
+                "method": { "type": "string", "description": "Default GET" },
+                "path": { "type": "string" },
+                "normalize": { "type": "boolean" },
+                "match": { "type": ["string", "null"], "description": "findRoute's route name, null = no match" },
+                "params": {
+                  "type": "object",
+                  "additionalProperties": { "type": "string" },
+                  "description": "findRoute params (without the deprecated `_` alias)"
+                },
+                "all": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "findAllRoutes names, least to most specific"
+                },
+                "note": { "type": "string" },
+                "bug": { "type": "string", "description": "Known bug: actual must differ from this expectation" }
+              }
+            }
+          },
+          "invalid": { "type": "array", "items": { "type": "string" } },
+          "guards": {
+            "type": "object",
+            "additionalProperties": { "type": "array", "items": { "type": "string" } },
+            "description": "guard route name -> route names it must cover on every probe"
+          },
+          "probes": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

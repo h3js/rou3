@@ -1,0 +1,703 @@
+{
+  "$schema": "./_schema.json",
+  "description": "Security-relevant routing: guard coverage, path confusion, constraint bypass, priority surprises and reserved syntax",
+  "sources": [
+    "README: Route patterns, Wildcards, Percent-encoding, Invalid patterns, Matching (Routes for any method, Trailing slashes and empty segments, Path normalization, Result ordering)",
+    ".agents/matching.md: Method-agnostic entries (the `methods[method] || methods[\"\"]` fail-open), Empty segments and normalization",
+    "OWASP: Path Traversal (`..`, `%2e%2e`, encoded `/`)",
+    "Orange Tsai, Breaking Parser Logic (Black Hat USA 2018): `;` and `..;/` path confusion between proxy and app"
+  ],
+  "scenarios": [
+    {
+      "name": "admin area behind a method-agnostic `/admin/**` guard",
+      "description": "h3 `use()`-style auth on `/admin/**`, handlers at varied depth, a public catch-all page at the root. Every probe must hit the guard whenever an admin handler matches.",
+      "routes": [
+        { "method": "", "path": "/admin/**", "name": "admin-auth" },
+        { "path": "/admin", "name": "admin-home" },
+        { "path": "/admin/users", "name": "admin-users" },
+        { "path": "/admin/users/:id", "name": "admin-user" },
+        { "method": "DELETE", "path": "/admin/users/:id", "name": "admin-user-delete" },
+        { "path": "/admin/settings/**", "name": "admin-settings" },
+        { "path": "/public/**", "name": "public" },
+        { "path": "/:page", "name": "page" }
+      ],
+      "guards": { "admin-auth": ["admin-home", "admin-users", "admin-user", "admin-user-delete", "admin-settings"] },
+      "cases": [
+        { "path": "/admin", "match": "admin-home", "params": {}, "all": ["page", "admin-auth", "admin-home"] },
+        { "path": "/admin/", "match": "admin-home", "all": ["page", "admin-auth", "admin-home"] },
+        { "path": "/admin/users", "match": "admin-users", "all": ["admin-auth", "admin-users"] },
+        { "path": "/admin/users/42", "match": "admin-user", "params": { "id": "42" }, "all": ["admin-auth", "admin-user"] },
+        { "method": "DELETE", "path": "/admin/users/42", "match": "admin-user-delete", "all": ["admin-auth", "admin-user-delete"] },
+        { "method": "PATCH", "path": "/admin/users/42", "match": "admin-auth", "params": { "0": "users/42" }, "all": ["admin-auth"] },
+        { "path": "/admin//users", "match": "admin-auth", "params": { "0": "/users" }, "all": ["admin-auth"], "note": "a middle empty segment is real: no handler, but the guard still runs" },
+        { "path": "//admin/users", "match": null, "all": [] },
+        { "path": "/admin/users%2F42", "match": "admin-auth", "params": { "0": "users%2F42" }, "all": ["admin-auth"], "note": "%2F is never a separator" },
+        { "path": "/admin%2Fusers", "match": "page", "params": { "page": "admin%2Fusers" }, "all": ["page"] },
+        { "path": "/ADMIN", "match": "page", "params": { "page": "ADMIN" }, "note": "case-sensitive: the public page, never an admin handler" },
+        { "path": "/Admin/users", "match": null },
+        { "path": "/public/../admin/users", "match": "public", "params": { "0": "../admin/users" }, "all": ["public"] },
+        { "path": "/public/../admin/users", "normalize": true, "match": "admin-users", "all": ["admin-auth", "admin-users"] },
+        { "path": "/public/%2e%2e/admin/users", "normalize": true, "match": "public", "params": { "0": "%2e%2e/admin/users" }, "note": "normalize resolves only literal dot segments" },
+        { "path": "/admin/./users", "match": "admin-auth", "params": { "0": "./users" } },
+        { "path": "/admin/./users", "normalize": true, "match": "admin-users", "all": ["admin-auth", "admin-users"] },
+        { "path": "/admin/users/42/..", "normalize": true, "match": "admin-users" },
+        { "path": "/admin/..", "normalize": true, "match": null, "all": [] },
+        { "path": "/admin;/users", "match": null, "all": [] },
+        { "path": "/admin..;/users", "match": null },
+        { "path": "/admin/users;x=1", "match": "admin-auth", "params": { "0": "users;x=1" }, "all": ["admin-auth"] },
+        { "path": "/admin\\users", "match": "page", "params": { "page": "admin\\users" } },
+        { "path": "/admin/users%00", "match": "admin-auth", "params": { "0": "users%00" } },
+        { "path": "/admin/users%0A", "match": "admin-auth", "params": { "0": "users%0A" } },
+        { "path": "/%D0%B0dmin/users", "match": null, "note": "Cyrillic a" },
+        { "path": "/admin/settings", "match": "admin-settings", "params": {}, "all": ["admin-auth", "admin-settings"] },
+        { "path": "/admin/settings/a/b", "match": "admin-settings", "params": { "0": "a/b" }, "all": ["admin-auth", "admin-settings"] },
+        { "method": "POST", "path": "/admin/settings/a", "match": "admin-auth", "params": { "0": "settings/a" } }
+      ],
+      "probes": ["/admin/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z", "/admin/users/42/../../settings/x"]
+    },
+    {
+      "name": "the same scope guarded in every catch-all spelling",
+      "description": "Teams write the same auth scope as `**`, `*`, `**:rest`, `:rest*` and `:p(.*)`. All of them must cover the handlers below; their order on the shared node is `**` < `*` = `:p(.*)` < `**:name`.",
+      "routes": [
+        { "method": "", "path": "/a/**", "name": "g-starstar" },
+        { "method": "", "path": "/a/*", "name": "g-star" },
+        { "method": "", "path": "/a/**:rest", "name": "g-named" },
+        { "method": "", "path": "/a/:rest*", "name": "g-opt" },
+        { "method": "", "path": "/a/:p(.*)", "name": "g-named-group" },
+        { "path": "/a/x", "name": "h1" },
+        { "path": "/a/x/:id", "name": "h2" },
+        { "path": "/a/x/:id(\\d+)/edit", "name": "h3" },
+        { "path": "/a/:org/settings{/:tab}?", "name": "h4" }
+      ],
+      "guards": {
+        "g-starstar": ["h1", "h2", "h3", "h4"],
+        "g-star": ["h1", "h2", "h3", "h4"],
+        "g-named": ["h1", "h2", "h3", "h4"],
+        "g-opt": ["h1", "h2", "h3", "h4"],
+        "g-named-group": ["h1", "h2", "h3", "h4"]
+      },
+      "cases": [
+        { "path": "/a", "match": "g-opt", "params": {}, "all": ["g-starstar", "g-star", "g-named-group", "g-opt"] },
+        { "path": "/a/", "match": "g-opt", "params": {}, "all": ["g-starstar", "g-star", "g-named-group", "g-opt"] },
+        { "path": "/a/x", "match": "h1", "params": {}, "all": ["g-starstar", "g-star", "g-named-group", "g-named", "g-opt", "h1"] },
+        { "path": "/a/x/7", "match": "h2", "params": { "id": "7" }, "all": ["g-starstar", "g-star", "g-named-group", "g-named", "g-opt", "h2"] },
+        { "path": "/a/x/7/edit", "match": "h3", "params": { "id": "7" }, "all": ["g-starstar", "g-star", "g-named-group", "g-named", "g-opt", "h3"] },
+        { "path": "/a/x/7x/edit", "match": "g-named", "params": { "rest": "x/7x/edit" }, "all": ["g-starstar", "g-star", "g-named-group", "g-named", "g-opt"] },
+        { "method": "POST", "path": "/a/x", "match": "g-named", "params": { "rest": "x" } },
+        { "path": "/a//x", "match": "g-star", "params": { "0": "/x" }, "all": ["g-starstar", "g-star", "g-named-group"], "note": "`**:rest` / `:rest*` need a value in every segment" },
+        { "path": "/a/x//", "match": "g-star", "params": { "0": "x/" }, "all": ["g-starstar", "g-star", "g-named-group"] },
+        { "path": "/a/acme/settings/billing", "match": "h4", "params": { "org": "acme", "tab": "billing" }, "all": ["g-starstar", "g-star", "g-named-group", "g-named", "g-opt", "h4"] },
+        { "path": "/a/acme/settings/", "match": "h4", "params": { "org": "acme" } },
+        { "path": "/a/x/settings", "match": "h2", "params": { "id": "settings" }, "all": ["g-starstar", "g-star", "g-named-group", "g-named", "g-opt", "h4", "h2"], "note": "static `x` wins over `:org`" },
+        { "path": "/A/x", "match": null, "all": [] },
+        { "path": "/a%2Fx", "match": null },
+        { "path": "/a/x%2F7", "match": "g-named", "params": { "rest": "x%2F7" } }
+      ]
+    },
+    {
+      "name": "`:path*` guard skips paths with empty segments",
+      "description": "A dashboard guard written as `:path*` (URLPattern: every segment needs a value) does not cover a `*` file handler on paths with an empty segment. Write guards as `**` / `*`.",
+      "routes": [
+        { "method": "", "path": "/dashboard/:path*", "name": "dash-auth" },
+        { "path": "/dashboard", "name": "dash-home" },
+        { "path": "/dashboard/:widget", "name": "widget" },
+        { "path": "/dashboard/files/*", "name": "dash-files" }
+      ],
+      "guards": { "dash-auth": ["dash-home", "widget"] },
+      "cases": [
+        { "path": "/dashboard", "match": "dash-home", "params": {}, "all": ["dash-auth", "dash-home"] },
+        { "path": "/dashboard/stats", "match": "widget", "params": { "widget": "stats" }, "all": ["dash-auth", "widget"] },
+        { "path": "/dashboard/stats/", "match": "widget" },
+        { "path": "/dashboard/files/a/b", "match": "dash-files", "params": { "0": "a/b" }, "all": ["dash-auth", "dash-files"] },
+        { "path": "/dashboard/files//etc/passwd", "match": "dash-files", "params": { "0": "/etc/passwd" }, "all": ["dash-files"], "note": "documented: `:path*` takes no empty segment, so this guard is skipped" },
+        { "path": "/dashboard/files/a//b", "match": "dash-files", "params": { "0": "a//b" }, "all": ["dash-files"] },
+        { "path": "/dashboard//stats", "match": null, "all": [] },
+        { "path": "/dashboard/stats//", "match": null, "all": [] },
+        { "method": "POST", "path": "/dashboard/x/y", "match": "dash-auth", "params": { "path": "x/y" } },
+        { "method": "POST", "path": "/dashboard", "match": "dash-auth", "params": {} }
+      ]
+    },
+    {
+      "name": "numeric id constraint bypass attempts",
+      "description": "`:id(\\d+)` must match a whole ASCII-digit segment only; anything else falls through to the `/users/**` middleware.",
+      "routes": [
+        { "method": "", "path": "/users/**", "name": "users-mw" },
+        { "path": "/users/me", "name": "me" },
+        { "path": "/users/:id(\\d+)", "name": "user" },
+        { "method": "DELETE", "path": "/users/:id(\\d+)", "name": "user-delete" }
+      ],
+      "guards": { "users-mw": ["me", "user", "user-delete"] },
+      "cases": [
+        { "path": "/users/42", "match": "user", "params": { "id": "42" }, "all": ["users-mw", "user"] },
+        { "path": "/users/007", "match": "user", "params": { "id": "007" } },
+        { "path": "/users/42/", "match": "user", "params": { "id": "42" } },
+        { "path": "/users/42//", "match": "users-mw", "params": { "0": "42/" }, "all": ["users-mw"] },
+        { "path": "/users/1%0A", "match": "users-mw", "params": { "0": "1%0A" }, "all": ["users-mw"] },
+        { "path": "/users/1\n", "match": "users-mw", "params": { "0": "1\n" }, "all": ["users-mw"], "note": "raw newline: a `$` that matched before a final \\n would let it through" },
+        { "path": "/users/\n1", "match": "users-mw", "params": { "0": "\n1" } },
+        { "path": "/users/1\u0000", "match": "users-mw", "params": { "0": "1\u0000" } },
+        { "path": "/users/1%00", "match": "users-mw", "params": { "0": "1%00" } },
+        { "path": "/users/1/2", "match": "users-mw", "params": { "0": "1/2" }, "all": ["users-mw"] },
+        { "path": "/users/１２", "match": "users-mw", "params": { "0": "１２" }, "note": "fullwidth digits are not \\d" },
+        { "path": "/users/%EF%BC%91%EF%BC%92", "match": "users-mw" },
+        { "path": "/users/+1", "match": "users-mw" },
+        { "path": "/users/-1", "match": "users-mw" },
+        { "path": "/users/0x1", "match": "users-mw" },
+        { "path": "/users/1e3", "match": "users-mw" },
+        { "path": "/users/1.0", "match": "users-mw" },
+        { "path": "/users/%31", "match": "users-mw", "params": { "0": "%31" } },
+        { "path": "/users/%201", "match": "users-mw" },
+        { "path": "/users/12abc", "match": "users-mw" },
+        { "path": "/users/abc12", "match": "users-mw" },
+        { "path": "/users/", "match": "users-mw", "params": {}, "all": ["users-mw"] },
+        { "path": "/users//", "match": "users-mw", "params": { "0": "" }, "all": ["users-mw"] },
+        { "path": "/users/me", "match": "me", "all": ["users-mw", "me"] },
+        { "path": "/users/ME", "match": "users-mw", "params": { "0": "ME" } },
+        { "method": "DELETE", "path": "/users/42", "match": "user-delete", "params": { "id": "42" }, "all": ["users-mw", "user-delete"] },
+        { "method": "DELETE", "path": "/users/me", "match": "users-mw", "params": { "0": "me" } },
+        { "method": "DELETE", "path": "/users/4%32", "match": "users-mw" }
+      ]
+    },
+    {
+      "name": "enum and mid-segment constraints are anchored per segment",
+      "description": "File extensions and formats allow-listed with alternations; a constraint must match its whole piece of the segment, never a prefix or suffix, and never across `/`.",
+      "routes": [
+        { "path": "/assets/:file.:ext(png|jpg)", "name": "image" },
+        { "path": "/assets/**", "name": "assets-fallback" },
+        { "path": "/export/:name.:ext(json)", "name": "export-json" },
+        { "path": "/export/:fmt(csv|xlsx)", "name": "export-fmt" },
+        { "path": "/img/v:ver(\\d+)/:id", "name": "img" },
+        { "path": "/p/:id(\\d+)-:slug", "name": "post" }
+      ],
+      "cases": [
+        { "path": "/assets/logo.png", "match": "image", "params": { "file": "logo", "ext": "png" }, "all": ["assets-fallback", "image"] },
+        { "path": "/assets/logo.jpg", "match": "image", "params": { "file": "logo", "ext": "jpg" } },
+        { "path": "/assets/logo.pngx", "match": "assets-fallback", "params": { "0": "logo.pngx" }, "all": ["assets-fallback"] },
+        { "path": "/assets/logo.xpng", "match": "assets-fallback" },
+        { "path": "/assets/logo.jpgpng", "match": "assets-fallback" },
+        { "path": "/assets/logo.png/x", "match": "assets-fallback", "params": { "0": "logo.png/x" } },
+        { "path": "/assets/logo.png.exe", "match": "assets-fallback" },
+        { "path": "/assets/logo.exe.png", "match": "image", "params": { "file": "logo.exe", "ext": "png" }, "note": "double extension: the last one is checked" },
+        { "path": "/assets/.png", "match": "assets-fallback", "note": "`:file` needs a value" },
+        { "path": "/assets/a.PNG", "match": "assets-fallback" },
+        { "path": "/assets/a.png%00", "match": "assets-fallback" },
+        { "path": "/assets/a.png%2Fx", "match": "assets-fallback" },
+        { "path": "/assets/a.jpg;.png", "match": "image", "params": { "file": "a.jpg;", "ext": "png" } },
+        { "path": "/assets/a%2Fb.png", "match": "image", "params": { "file": "a%2Fb", "ext": "png" } },
+        { "path": "/export/report.json", "match": "export-json", "params": { "name": "report", "ext": "json" } },
+        { "path": "/export/report.jsonp", "match": null, "all": [] },
+        { "path": "/export/report.xjson", "match": null },
+        { "path": "/export/csv", "match": "export-fmt", "params": { "fmt": "csv" } },
+        { "path": "/export/xlsx", "match": "export-fmt", "params": { "fmt": "xlsx" } },
+        { "path": "/export/csvx", "match": null, "note": "an unanchored `^csv|xlsx$` would accept it" },
+        { "path": "/export/xxlsx", "match": null },
+        { "path": "/export/csv|xlsx", "match": null },
+        { "path": "/export/json", "match": null },
+        { "path": "/img/v2/abc", "match": "img", "params": { "ver": "2", "id": "abc" } },
+        { "path": "/img/v/abc", "match": null },
+        { "path": "/img/vv2/abc", "match": null },
+        { "path": "/img/v2x/abc", "match": null },
+        { "path": "/img/V2/abc", "match": null },
+        { "path": "/p/42-hello", "match": "post", "params": { "id": "42", "slug": "hello" } },
+        { "path": "/p/1-2-3", "match": "post", "params": { "id": "1", "slug": "2-3" } },
+        { "path": "/p/42-", "match": null },
+        { "path": "/p/-hello", "match": null },
+        { "path": "/p/4a-hello", "match": null },
+        { "path": "/p/x42-hello", "match": null }
+      ]
+    },
+    {
+      "name": "static self-service routes next to protected param routes",
+      "description": "`/users/me/*` is self-service, `/users/:id/*` is admin-only behind a guard. Static `me` wins, so `me` can never reach an admin handler, while the param guards still run on `me` paths.",
+      "routes": [
+        { "method": "", "path": "/users/:id", "name": "user-guard" },
+        { "path": "/users/:id", "name": "user" },
+        { "path": "/users/me", "name": "me" },
+        { "path": "/users/:id/roles", "name": "user-roles" },
+        { "method": "", "path": "/users/:id/**", "name": "user-sub-guard" },
+        { "path": "/users/me/:action", "name": "self-action" }
+      ],
+      "guards": { "user-sub-guard": ["user-roles", "user", "me"], "user-guard": ["user"] },
+      "cases": [
+        { "path": "/users/42", "match": "user", "params": { "id": "42" }, "all": ["user-sub-guard", "user-guard", "user"] },
+        { "path": "/users/me", "match": "me", "all": ["user-sub-guard", "user-guard", "user", "me"] },
+        { "path": "/users/me/", "match": "me" },
+        { "method": "POST", "path": "/users/42", "match": "user-guard", "params": { "id": "42" }, "all": ["user-sub-guard", "user-guard"] },
+        { "path": "/users/42/roles", "match": "user-roles", "params": { "id": "42" }, "all": ["user-sub-guard", "user-roles"] },
+        { "path": "/users/me/roles", "match": "self-action", "params": { "action": "roles" }, "all": ["user-sub-guard", "user-roles", "self-action"], "note": "static `me` wins: the admin handler is never picked for `me`" },
+        { "path": "/users/me/roles/", "match": "self-action" },
+        { "method": "PUT", "path": "/users/me/roles", "match": "user-sub-guard", "params": { "id": "me", "0": "roles" } },
+        { "path": "/users/me%2Froles", "match": "user", "params": { "id": "me%2Froles" }, "all": ["user-sub-guard", "user-guard", "user"] },
+        { "path": "/users//roles", "match": null, "all": [] },
+        { "path": "/users/Me/roles", "match": "user-roles", "params": { "id": "Me" } }
+      ]
+    },
+    {
+      "name": "internal deny-all with a public health check",
+      "description": "Everything under `/internal` is denied for any method except `GET /internal/health`.",
+      "routes": [
+        { "method": "", "path": "/internal/**", "name": "internal-deny" },
+        { "path": "/internal/health", "name": "health" },
+        { "path": "/internal/metrics/:name(\\w+)", "name": "metric" }
+      ],
+      "guards": { "internal-deny": ["health", "metric"] },
+      "cases": [
+        { "path": "/internal/health", "match": "health", "all": ["internal-deny", "health"] },
+        { "path": "/internal/health/", "match": "health" },
+        { "method": "HEAD", "path": "/internal/health", "match": "internal-deny", "params": { "0": "health" }, "note": "HEAD is not mapped to GET" },
+        { "method": "POST", "path": "/internal/health", "match": "internal-deny" },
+        { "path": "/internal//health", "match": "internal-deny", "params": { "0": "/health" } },
+        { "path": "/internal/health/x", "match": "internal-deny", "params": { "0": "health/x" } },
+        { "path": "/internal/health//", "match": "internal-deny", "params": { "0": "health/" } },
+        { "path": "/internal/health/..", "match": "internal-deny", "params": { "0": "health/.." } },
+        { "path": "/internal/health/../secrets", "normalize": true, "match": "internal-deny", "params": { "0": "secrets" } },
+        { "path": "/internal/metrics/cpu", "match": "metric", "params": { "name": "cpu" }, "all": ["internal-deny", "metric"] },
+        { "path": "/internal/metrics/cpu-load", "match": "internal-deny", "params": { "0": "metrics/cpu-load" } },
+        { "path": "/internal/metrics/", "match": "internal-deny", "params": { "0": "metrics" } },
+        { "path": "/internal", "match": "internal-deny", "params": {}, "all": ["internal-deny"] },
+        { "path": "/Internal/health", "match": null }
+      ]
+    },
+    {
+      "name": "method-specific deny loses to a more specific method-agnostic route",
+      "description": "`DELETE /api/**` reads like a deny-all for deletes, but specificity beats method: a deeper `\"\"` route wins `findRoute`. Both stay in `findAllRoutes`.",
+      "routes": [
+        { "method": "DELETE", "path": "/api/**", "name": "no-delete" },
+        { "method": "", "path": "/api/:resource/:id", "name": "resource" },
+        { "path": "/api/:resource/:id(\\d+)", "name": "resource-get" }
+      ],
+      "cases": [
+        { "method": "DELETE", "path": "/api/users/1", "match": "resource", "params": { "resource": "users", "id": "1" }, "all": ["no-delete", "resource"] },
+        { "method": "DELETE", "path": "/api/users", "match": "no-delete", "params": { "0": "users" } },
+        { "method": "DELETE", "path": "/api/users/1/x", "match": "no-delete", "params": { "0": "users/1/x" } },
+        { "method": "DELETE", "path": "/api//1", "match": "no-delete", "params": { "0": "/1" }, "all": ["no-delete"] },
+        { "path": "/api/users/1", "match": "resource-get", "params": { "resource": "users", "id": "1" }, "all": ["resource", "resource-get"] },
+        { "path": "/api/users/x", "match": "resource", "params": { "resource": "users", "id": "x" }, "all": ["resource"] },
+        { "method": "", "path": "/api/users/1", "match": "resource", "all": ["resource"] },
+        { "method": "DELETE", "path": "/api", "match": "no-delete", "params": {} },
+        { "path": "/api", "match": null }
+      ]
+    },
+    {
+      "name": "method-agnostic guard on the same node as a constrained handler (fail-open regression)",
+      "description": "A `\"\"` guard must still match when the method's own entry on that node fails its constraint (never `methods[method] || methods[\"\"]`). A constrained `\"\"` entry outranks the method's plain one.",
+      "routes": [
+        { "method": "", "path": "/files/:name", "name": "file-guard" },
+        { "path": "/files/:name(\\d+)", "name": "file-get" },
+        { "method": "", "path": "/p/:id(\\d+)", "name": "p-guard" },
+        { "path": "/p/:id", "name": "p-get" }
+      ],
+      "guards": { "file-guard": ["file-get"] },
+      "cases": [
+        { "path": "/files/12", "match": "file-get", "params": { "name": "12" }, "all": ["file-guard", "file-get"] },
+        { "path": "/files/abc", "match": "file-guard", "params": { "name": "abc" }, "all": ["file-guard"], "note": "the GET entry fails its regex: fall through to the `\"\"` one" },
+        { "method": "POST", "path": "/files/12", "match": "file-guard" },
+        { "method": "", "path": "/files/12", "match": "file-guard", "all": ["file-guard"] },
+        { "method": "get", "path": "/files/12", "match": "file-guard", "all": ["file-guard"], "note": "methods are not normalized: lowercase sees only `\"\"` routes" },
+        { "path": "/files/", "match": null },
+        { "path": "/p/5", "match": "p-guard", "params": { "id": "5" }, "all": ["p-get", "p-guard"] },
+        { "path": "/p/x", "match": "p-get", "params": { "id": "x" }, "all": ["p-get"] },
+        { "method": "POST", "path": "/p/x", "match": null, "all": [] },
+        { "method": "POST", "path": "/p/5", "match": "p-guard" }
+      ]
+    },
+    {
+      "name": "deny by default with GET allow-list",
+      "description": "A `\"\"` `/**` deny-all, with a few GET routes allowed. Anything that misses the allow-list must land on the deny route, never on nothing.",
+      "routes": [
+        { "method": "", "path": "/**", "name": "deny" },
+        { "path": "/", "name": "home" },
+        { "path": "/health", "name": "health" },
+        { "path": "/public/**", "name": "public" }
+      ],
+      "guards": { "deny": ["home", "health", "public"] },
+      "cases": [
+        { "path": "/", "match": "home", "all": ["deny", "home"] },
+        { "method": "POST", "path": "/", "match": "deny", "params": {} },
+        { "path": "/health", "match": "health", "all": ["deny", "health"] },
+        { "method": "HEAD", "path": "/health", "match": "deny", "params": { "0": "health" } },
+        { "path": "/public/a.css", "match": "public", "params": { "0": "a.css" }, "all": ["deny", "public"] },
+        { "path": "/public", "match": "public", "params": {}, "all": ["deny", "public"] },
+        { "method": "POST", "path": "/public/a.css", "match": "deny", "params": { "0": "public/a.css" } },
+        { "path": "/publicx", "match": "deny", "params": { "0": "publicx" } },
+        { "path": "/PUBLIC/a", "match": "deny" },
+        { "path": "//public/a", "match": "deny", "params": { "0": "/public/a" }, "all": ["deny"] },
+        { "path": "/public/../admin", "normalize": true, "match": "deny", "params": { "0": "admin" } },
+        { "path": "/x/../public/a", "normalize": true, "match": "public", "params": { "0": "a" } },
+        { "path": "/x/../public/a", "match": "deny", "params": { "0": "x/../public/a" } },
+        { "path": "/public%2F..%2Fadmin", "match": "deny" },
+        { "path": "/health;", "match": "deny" },
+        { "path": "//", "match": "deny", "params": { "0": "" } }
+      ]
+    },
+    {
+      "name": "dotfile and source-map deny rules after a catch-all",
+      "description": "Static file server with `\"\"` deny rules anchored at the end of the path (`/**/.env`, `/**/.git/config`, `/static/*.map`). From-end ranking makes the deny win wherever it matches.",
+      "routes": [
+        { "path": "/static/**", "name": "static" },
+        { "method": "", "path": "/**/.env", "name": "deny-env" },
+        { "method": "", "path": "/**/.git/config", "name": "deny-git-config" },
+        { "method": "", "path": "/static/*.map", "name": "deny-map" }
+      ],
+      "cases": [
+        { "path": "/static/app.js", "match": "static", "params": { "0": "app.js" }, "all": ["static"] },
+        { "path": "/static/.env", "match": "deny-env", "params": { "0": "static" }, "all": ["static", "deny-env"] },
+        { "path": "/.env", "match": "deny-env", "params": {}, "all": ["deny-env"] },
+        { "path": "/static/a/b/.env", "match": "deny-env", "params": { "0": "static/a/b" } },
+        { "path": "/static/.env/", "match": "deny-env" },
+        { "path": "/static/.env//", "match": "static", "params": { "0": ".env/" }, "all": ["static"], "note": "only one trailing slash is ignored: a file server that strips more must not trust this route" },
+        { "path": "/static/.ENV", "match": "static" },
+        { "path": "/static/%2eenv", "match": "static" },
+        { "path": "/static/.env%00", "match": "static" },
+        { "path": "/static/.env.bak", "match": "static" },
+        { "path": "/static/.git/config", "match": "deny-git-config", "params": { "0": "static" }, "all": ["static", "deny-git-config"] },
+        { "path": "/.git/config", "match": "deny-git-config", "params": {} },
+        { "path": "/static/.git//config", "match": "static", "params": { "0": ".git//config" }, "note": "middle empty segment: not the deny route" },
+        { "path": "/static/.git/./config", "match": "static", "params": { "0": ".git/./config" } },
+        { "path": "/static/.git/./config", "normalize": true, "match": "deny-git-config" },
+        { "path": "/static/app.js.map", "match": "deny-map", "params": { "0": "app.js" }, "all": ["static", "deny-map"] },
+        { "path": "/static/js/app.js.map", "match": "deny-map", "params": { "0": "js/app.js" } },
+        { "path": "/static/.map", "match": "deny-map", "params": { "0": "" } },
+        { "path": "/static/x.map/", "match": "deny-map" },
+        { "path": "/static/x.map.", "match": "static" },
+        { "path": "/static/x.map%3F", "match": "static" },
+        { "path": "/static/x.MAP", "match": "static" }
+      ],
+      "invalid": ["/**/.git/:file+", "/static/**/*.map", "/**/.env/**"]
+    },
+    {
+      "name": "org scope with optional segments and a nested guard",
+      "description": "Tenant routes with an optional team segment and an optional invoice; the org guard and the billing guard must cover every variant.",
+      "routes": [
+        { "method": "", "path": "/org/:org/**", "name": "org-member" },
+        { "path": "/org/:org{/team/:team}?/members", "name": "members" },
+        { "path": "/org/:org/billing/:invoice?", "name": "billing" },
+        { "method": "", "path": "/org/:org/billing/**", "name": "billing-admin" },
+        { "path": "/org/:org/files/:path+", "name": "files" }
+      ],
+      "guards": { "org-member": ["members", "billing", "files"], "billing-admin": ["billing"] },
+      "cases": [
+        { "path": "/org/acme/members", "match": "members", "params": { "org": "acme" }, "all": ["org-member", "members"] },
+        { "path": "/org/acme/team/core/members", "match": "members", "params": { "org": "acme", "team": "core" }, "all": ["org-member", "members"] },
+        { "path": "/org/acme/team//members", "match": "org-member", "params": { "org": "acme", "0": "team//members" }, "all": ["org-member"] },
+        { "path": "/org//members", "match": null, "all": [] },
+        { "path": "/org/acme/billing", "match": "billing", "params": { "org": "acme" }, "all": ["org-member", "billing-admin", "billing"] },
+        { "path": "/org/acme/billing/inv_1", "match": "billing", "params": { "org": "acme", "invoice": "inv_1" }, "all": ["org-member", "billing-admin", "billing"] },
+        { "path": "/org/acme/billing/inv_1/pdf", "match": "billing-admin", "params": { "org": "acme", "0": "inv_1/pdf" }, "all": ["org-member", "billing-admin"] },
+        { "path": "/org/acme/billing//", "match": "billing-admin", "params": { "org": "acme", "0": "" } },
+        { "path": "/org/acme/files/a/b", "match": "files", "params": { "org": "acme", "path": "a/b" }, "all": ["org-member", "files"] },
+        { "path": "/org/acme/files/a//b", "match": "org-member", "params": { "org": "acme", "0": "files/a//b" }, "all": ["org-member"] },
+        { "path": "/org/acme/files/../../other/billing", "normalize": true, "match": "billing", "params": { "org": "other" } },
+        { "path": "/org/acme/files/../../other/billing", "match": "files", "params": { "org": "acme", "path": "../../other/billing" } },
+        { "path": "/org/acme%2F..%2Fother/billing", "match": "billing", "params": { "org": "acme%2F..%2Fother" } }
+      ]
+    },
+    {
+      "name": "versioned API admin guard with a static legacy route",
+      "description": "The admin guard is written with a `:version` param; a constrained and a static legacy handler sit under it next to an API-wide 404 catch-all.",
+      "routes": [
+        { "method": "", "path": "/api/:version/admin/**", "name": "admin-guard" },
+        { "path": "/api/:version(v\\d+)/admin/users", "name": "admin-users" },
+        { "path": "/api/v1/admin/users", "name": "legacy-admin-users" },
+        { "path": "/api/:version/**", "name": "api-any" }
+      ],
+      "guards": { "admin-guard": ["admin-users", "legacy-admin-users"] },
+      "cases": [
+        { "path": "/api/v1/admin/users", "match": "legacy-admin-users", "params": {}, "all": ["api-any", "admin-guard", "admin-users", "legacy-admin-users"] },
+        { "path": "/api/v2/admin/users", "match": "admin-users", "params": { "version": "v2" }, "all": ["api-any", "admin-guard", "admin-users"] },
+        { "path": "/api/x/admin/users", "match": "admin-guard", "params": { "version": "x", "0": "users" }, "all": ["api-any", "admin-guard"] },
+        { "path": "/api/v2/Admin/users", "match": "api-any", "params": { "version": "v2", "0": "Admin/users" } },
+        { "path": "/api/v2//admin/users", "match": "api-any", "params": { "version": "v2", "0": "/admin/users" }, "all": ["api-any"] },
+        { "path": "/api/v1/admin//users", "match": "admin-guard", "params": { "version": "v1", "0": "/users" }, "all": ["api-any", "admin-guard"] },
+        { "path": "/api/v1/admin/users/..", "normalize": true, "match": "admin-guard", "params": { "version": "v1" } },
+        { "path": "/api/v1/x/../admin/users", "normalize": true, "match": "legacy-admin-users" },
+        { "path": "/api/v1%2Fadmin/users", "match": "api-any", "params": { "version": "v1%2Fadmin", "0": "users" } }
+      ]
+    },
+    {
+      "name": "`/api/*` scope covers the scope root",
+      "description": "README `use(\"/api/*\")`: a trailing `*` is optional, so the guard covers `/api` and `/api/` too; extra slashes stay inside its capture.",
+      "routes": [
+        { "method": "", "path": "/api/*", "name": "api-auth" },
+        { "path": "/api", "name": "api-root" },
+        { "path": "/api/health", "name": "health" },
+        { "path": "/api/users/:id", "name": "user" }
+      ],
+      "guards": { "api-auth": ["api-root", "health", "user"] },
+      "cases": [
+        { "path": "/api", "match": "api-root", "all": ["api-auth", "api-root"] },
+        { "path": "/api/", "match": "api-root", "all": ["api-auth", "api-root"] },
+        { "method": "POST", "path": "/api", "match": "api-auth", "params": {} },
+        { "method": "POST", "path": "/api/", "match": "api-auth", "params": { "0": "" } },
+        { "path": "/api//", "match": "api-auth", "params": { "0": "" }, "all": ["api-auth"] },
+        { "path": "/api/health", "match": "health", "all": ["api-auth", "health"] },
+        { "path": "/api/users/1", "match": "user", "params": { "id": "1" }, "all": ["api-auth", "user"] },
+        { "path": "/api/users/1/", "match": "user" },
+        { "path": "/api/users/", "match": "api-auth", "params": { "0": "users" } },
+        { "path": "/api/users//1", "match": "api-auth", "params": { "0": "users//1" } },
+        { "path": "/api/users/1//", "match": "api-auth", "params": { "0": "users/1/" } },
+        { "path": "/apix", "match": null },
+        { "path": "/api%2Fhealth", "match": null }
+      ]
+    },
+    {
+      "name": "method handling around a guarded scope",
+      "description": "Method strings are not normalized: lowercase or unknown methods see only `\"\"` routes; a method-specific deny ties a `\"\"` guard on its node and wins `findRoute`.",
+      "routes": [
+        { "method": "", "path": "/admin/**", "name": "admin-auth" },
+        { "method": "DELETE", "path": "/admin/**", "name": "admin-delete-deny" },
+        { "path": "/admin/users", "name": "admin-list" },
+        { "method": "POST", "path": "/admin/users", "name": "admin-create" }
+      ],
+      "guards": { "admin-auth": ["admin-list", "admin-create", "admin-delete-deny"] },
+      "cases": [
+        { "path": "/admin/users", "match": "admin-list", "all": ["admin-auth", "admin-list"] },
+        { "method": "POST", "path": "/admin/users", "match": "admin-create", "all": ["admin-auth", "admin-create"] },
+        { "method": "DELETE", "path": "/admin/users", "match": "admin-delete-deny", "params": { "0": "users" }, "all": ["admin-auth", "admin-delete-deny"] },
+        { "method": "get", "path": "/admin/users", "match": "admin-auth", "params": { "0": "users" }, "all": ["admin-auth"] },
+        { "method": "", "path": "/admin/users", "match": "admin-auth", "all": ["admin-auth"] },
+        { "method": "HEAD", "path": "/admin/users", "match": "admin-auth" },
+        { "method": "OPTIONS", "path": "/admin/users", "match": "admin-auth" },
+        { "method": "GET ", "path": "/admin/users", "match": "admin-auth" },
+        { "method": "delete", "path": "/admin/users", "match": "admin-auth" }
+      ]
+    },
+    {
+      "name": "percent-encoding and lookalike characters",
+      "description": "Literal pattern text is encoded once at insert; lookup paths are never decoded, so encoded, lowercase-hex, NFD and lookalike spellings never reach a route.",
+      "routes": [
+        { "method": "", "path": "/admin/**", "name": "admin-guard" },
+        { "path": "/admin", "name": "admin" },
+        { "path": "/café/:id", "name": "cafe" },
+        { "path": "/docs/hello world", "name": "docs-space" },
+        { "path": "/a%2Fb", "name": "encoded-slash-literal" },
+        { "path": "/files/\\(2024\\)", "name": "paren-literal" },
+        { "path": "/search\\?q", "name": "literal-question" }
+      ],
+      "guards": { "admin-guard": ["admin"] },
+      "cases": [
+        { "path": "/admin", "match": "admin", "all": ["admin-guard", "admin"] },
+        { "path": "/%D0%B0dmin", "match": null, "note": "Cyrillic a" },
+        { "path": "/аdmin", "match": null },
+        { "path": "/%61dmin", "match": null },
+        { "path": "/ａdmin", "match": null },
+        { "path": "/%EF%BD%81dmin", "match": null },
+        { "path": "/admin%20", "match": null },
+        { "path": "/admin%09", "match": null },
+        { "path": "/admin%00", "match": null },
+        { "path": "/admin%2F", "match": null },
+        { "path": "/admin%2F..%2Fx", "match": null },
+        { "path": "/caf%C3%A9/1", "match": "cafe", "params": { "id": "1" } },
+        { "path": "/café/1", "match": null },
+        { "path": "/cafe%CC%81/1", "match": null },
+        { "path": "/caf%c3%a9/1", "match": null },
+        { "path": "/docs/hello%20world", "match": "docs-space" },
+        { "path": "/docs/hello world", "match": null },
+        { "path": "/docs/hello+world", "match": null },
+        { "path": "/a%2Fb", "match": "encoded-slash-literal" },
+        { "path": "/a/b", "match": null },
+        { "path": "/a%2fb", "match": null },
+        { "path": "/files/(2024)", "match": "paren-literal" },
+        { "path": "/files/2024", "match": null },
+        { "path": "/files/%282024%29", "match": null },
+        { "path": "/search%3Fq", "match": "literal-question" },
+        { "path": "/search?q", "match": null }
+      ]
+    },
+    {
+      "name": "deep and long paths",
+      "description": "A root deny-all guard over deep static, many-param and catch-all-with-suffix routes; long segments and long paths must neither match wrongly nor escape the guard.",
+      "routes": [
+        { "method": "", "path": "/**", "name": "root-guard" },
+        { "path": "/a/b/c/d/e/f/g/h/i/j", "name": "deep" },
+        { "path": "/x/:a/:b/:c/:d/:e/:f/:g/:h", "name": "deep-params" },
+        { "path": "/tree/**:path/leaf", "name": "leaf" }
+      ],
+      "guards": { "root-guard": ["deep", "deep-params", "leaf"] },
+      "cases": [
+        { "path": "/a/b/c/d/e/f/g/h/i/j", "match": "deep", "all": ["root-guard", "deep"] },
+        { "path": "/a/b/c/d/e/f/g/h/i/j/k", "match": "root-guard", "params": { "0": "a/b/c/d/e/f/g/h/i/j/k" } },
+        { "path": "/a/b/c/d/e/f/g/h/i", "match": "root-guard", "params": { "0": "a/b/c/d/e/f/g/h/i" } },
+        { "path": "/a/b/c/d/e//f/g/h/i/j", "match": "root-guard", "all": ["root-guard"] },
+        { "path": "/x/1/2/3/4/5/6/7/8", "match": "deep-params", "params": { "a": "1", "b": "2", "c": "3", "d": "4", "e": "5", "f": "6", "g": "7", "h": "8" }, "all": ["root-guard", "deep-params"] },
+        { "path": "/x/1/2/3/4/5/6/7", "match": "root-guard" },
+        { "path": "/x/1/2/3/4//6/7/8", "match": "root-guard", "all": ["root-guard"] },
+        { "path": "/tree/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/leaf", "match": "leaf", "params": { "path": "a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p" }, "all": ["root-guard", "leaf"] },
+        { "path": "/tree/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/leaf", "match": "leaf", "params": { "path": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e%2e-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" } },
+        { "path": "/tree/leaf", "match": "root-guard", "params": { "0": "tree/leaf" }, "all": ["root-guard"] },
+        { "path": "/tree/a//b/leaf", "match": "root-guard", "all": ["root-guard"] },
+        { "path": "/tree/../tree/x/leaf", "normalize": true, "match": "leaf", "params": { "path": "x" } },
+        { "path": "/tree/x/leaf/leaf", "match": "leaf", "params": { "path": "x/leaf" } }
+      ],
+      "probes": ["/s0/s1/s2/s3/s4/s5/s6/s7/s8/s9/s10/s11/s12/s13/s14/s15/s16/s17/s18/s19/s20/s21/s22/s23/s24/s25/s26/s27/s28/s29/s30/s31/s32/s33/s34/s35/s36/s37/s38/s39/s40/s41/s42/s43/s44/s45/s46/s47/s48/s49/s50/s51/s52/s53/s54/s55/s56/s57/s58/s59/s60/s61/s62/s63/s64/s65/s66/s67/s68/s69/s70/s71/s72/s73/s74/s75/s76/s77/s78/s79/s80/s81/s82/s83/s84/s85/s86/s87/s88/s89/s90/s91/s92/s93/s94/s95/s96/s97/s98/s99/s100/s101/s102/s103/s104/s105/s106/s107/s108/s109/s110/s111/s112/s113/s114/s115/s116/s117/s118/s119", "/tree/s0/s1/s2/s3/s4/s5/s6/s7/s8/s9/s10/s11/s12/s13/s14/s15/s16/s17/s18/s19/s20/s21/s22/s23/s24/s25/s26/s27/s28/s29/s30/s31/s32/s33/s34/s35/s36/s37/s38/s39/s40/s41/s42/s43/s44/s45/s46/s47/s48/s49/s50/s51/s52/s53/s54/s55/s56/s57/s58/s59/leaf"]
+    },
+    {
+      "name": "constraint footguns: unescaped dot and constraints that could span segments",
+      "description": "An unescaped `.` in a constraint matches any character; `(.+)` / `([^.]*)` stay within their segment in the router while `routeToRegExp` spans segments (over-match, never under-match).",
+      "routes": [
+        { "path": "/download/:file([\\w-]+.pdf)", "name": "pdf" },
+        { "method": "", "path": "/download/**", "name": "download-guard" },
+        { "path": "/proxy/:target(.+)", "name": "proxy", "regexp": "overmatch" },
+        { "path": "/raw/:name([^.]*)", "name": "raw", "regexp": "overmatch" }
+      ],
+      "guards": { "download-guard": ["pdf"] },
+      "cases": [
+        { "path": "/download/report.pdf", "match": "pdf", "params": { "file": "report.pdf" }, "all": ["download-guard", "pdf"] },
+        { "path": "/download/reportxpdf", "match": "pdf", "params": { "file": "reportxpdf" }, "note": "the `.` in the constraint is unescaped" },
+        { "path": "/download/a/b.pdf", "match": "download-guard", "params": { "0": "a/b.pdf" } },
+        { "path": "/download/.pdf", "match": "download-guard" },
+        { "path": "/download/a.pdf.exe", "match": "download-guard" },
+        { "path": "/download/a.pdf%00", "match": "download-guard" },
+        { "path": "/proxy/example.com", "match": "proxy", "params": { "target": "example.com" } },
+        { "path": "/proxy/example.com/admin", "match": null, "note": "`(.+)` stays within its segment" },
+        { "path": "/proxy/http:%2F%2Fevil", "match": "proxy", "params": { "target": "http:%2F%2Fevil" } },
+        { "path": "/proxy//", "match": null },
+        { "path": "/raw/abc", "match": "raw", "params": { "name": "abc" } },
+        { "path": "/raw/a.b", "match": null },
+        { "path": "/raw/a/b", "match": null },
+        { "path": "/raw/", "match": null },
+        { "path": "/raw//", "match": "raw", "params": { "name": "" }, "note": "a constraint may take an empty segment" }
+      ]
+    },
+    {
+      "name": "edit actions guarded from the end of the path",
+      "description": "`\"\" /**/edit` guards edit actions at any depth; segments after a catch-all match from the end and outrank a plain catch-all viewer.",
+      "routes": [
+        { "method": "", "path": "/**/edit", "name": "edit-guard" },
+        { "path": "/wiki/**", "name": "wiki-view" },
+        { "path": "/wiki/:page/edit", "name": "wiki-edit" },
+        { "method": "POST", "path": "/wiki/**:path/edit", "name": "nested-edit" }
+      ],
+      "guards": { "edit-guard": ["wiki-edit", "nested-edit"] },
+      "cases": [
+        { "path": "/wiki/home", "match": "wiki-view", "params": { "0": "home" }, "all": ["wiki-view"] },
+        { "path": "/wiki/home/edit", "match": "wiki-edit", "params": { "page": "home" }, "all": ["wiki-view", "edit-guard", "wiki-edit"] },
+        { "path": "/wiki/home/edit/", "match": "wiki-edit" },
+        { "method": "POST", "path": "/wiki/a/b/edit", "match": "nested-edit", "params": { "path": "a/b" }, "all": ["edit-guard", "nested-edit"] },
+        { "method": "POST", "path": "/wiki//edit", "match": "edit-guard", "params": { "0": "wiki/" }, "all": ["edit-guard"] },
+        { "path": "/wiki/home/edit//", "match": "wiki-view", "params": { "0": "home/edit/" }, "all": ["wiki-view"] },
+        { "path": "/wiki/home/EDIT", "match": "wiki-view" },
+        { "path": "/wiki/home/edit%2F", "match": "wiki-view" },
+        { "path": "/wiki/home/edit;x", "match": "wiki-view" },
+        { "path": "/edit", "match": "edit-guard", "params": {}, "all": ["edit-guard"] },
+        { "path": "/wiki/edit", "match": "edit-guard", "params": { "0": "wiki" }, "all": ["wiki-view", "edit-guard"] },
+        { "path": "/wiki/home/edit/..", "normalize": true, "match": "wiki-view", "params": { "0": "home" } }
+      ]
+    },
+    {
+      "name": "optional locale prefix on a guarded account area",
+      "description": "Both the guard and the handler start with a leading `{/:lang}?` group; every locale variant must stay covered.",
+      "routes": [
+        { "method": "", "path": "{/:lang}?/account/**", "name": "account-guard" },
+        { "path": "{/:lang}?/account/profile", "name": "profile" },
+        { "path": "/account/profile/:tab(\\w+)?", "name": "profile-tab" }
+      ],
+      "guards": { "account-guard": ["profile", "profile-tab"] },
+      "cases": [
+        { "path": "/account/profile", "match": "profile", "params": {}, "all": ["account-guard", "profile", "profile-tab"], "note": "`:tab?` also registers `/account/profile`: registration order decides (README carve-out)" },
+        { "path": "/en/account/profile", "match": "profile", "params": { "lang": "en" }, "all": ["account-guard", "profile"] },
+        { "path": "/account/profile/billing", "match": "profile-tab", "params": { "tab": "billing" }, "all": ["account-guard", "profile-tab"] },
+        { "path": "/account/profile/bil-ling", "match": "account-guard", "params": { "0": "profile/bil-ling" } },
+        { "path": "/en/account/../../account/profile", "normalize": true, "match": "profile", "params": {} },
+        { "path": "//account/profile", "match": null, "all": [] },
+        { "path": "/en/fr/account/profile", "match": null },
+        { "path": "/account", "match": "account-guard", "params": {} },
+        { "path": "/en/account", "match": "account-guard", "params": { "lang": "en" } }
+      ]
+    },
+    {
+      "name": "extension guard written with a `*` inside a segment",
+      "description": "`\"\" /api/*.json` guards every JSON endpoint at any depth below `/api` (the `*` spans segments); named handlers must stay covered and win where they match.",
+      "routes": [
+        { "method": "", "path": "/api/*.json", "name": "json-guard" },
+        { "path": "/api/:resource.json", "name": "list-json" },
+        { "path": "/api/:resource/:id.json", "name": "item-json" },
+        { "path": "/api/**", "name": "api-catch" }
+      ],
+      "guards": { "json-guard": ["list-json", "item-json"] },
+      "cases": [
+        { "path": "/api/users.json", "match": "list-json", "params": { "resource": "users" }, "all": ["api-catch", "json-guard", "list-json"] },
+        { "path": "/api/users/1.json", "match": "item-json", "params": { "resource": "users", "id": "1" }, "all": ["api-catch", "json-guard", "item-json"] },
+        { "path": "/api/a/b/c.json", "match": "json-guard", "params": { "0": "a/b/c" }, "all": ["api-catch", "json-guard"] },
+        { "path": "/api/.json", "match": "json-guard", "params": { "0": "" }, "all": ["api-catch", "json-guard"] },
+        { "path": "/api//x.json", "match": "json-guard", "params": { "0": "/x" }, "all": ["api-catch", "json-guard"] },
+        { "path": "/api/users.json/", "match": "list-json" },
+        { "path": "/api/users.json//", "match": "api-catch", "params": { "0": "users.json/" }, "all": ["api-catch"] },
+        { "path": "/api/users.JSON", "match": "api-catch" },
+        { "path": "/api/users.json%00", "match": "api-catch" },
+        { "path": "/api/users.json;.txt", "match": "api-catch" },
+        { "path": "/api/users%2F1.json", "match": "list-json", "params": { "resource": "users%2F1" } },
+        { "method": "POST", "path": "/api/users.json", "match": "json-guard", "params": { "0": "users" }, "all": ["json-guard"] },
+        { "method": "POST", "path": "/api/users/1.json", "match": "json-guard", "params": { "0": "users/1" } }
+      ]
+    },
+    {
+      "name": "tenant admin guard with a `*` before more of the route",
+      "description": "`\"\" /tenants/*/admin` matches `admin` under any tenant path (the `*` takes one segment or more, from the end); handlers with params must stay covered.",
+      "routes": [
+        { "method": "", "path": "/tenants/*/admin", "name": "tenant-admin-guard" },
+        { "path": "/tenants/:t/admin", "name": "tenant-admin" },
+        { "path": "/tenants/:t/projects/:p/admin", "name": "project-admin" },
+        { "path": "/tenants/**", "name": "tenants-any" }
+      ],
+      "guards": { "tenant-admin-guard": ["tenant-admin", "project-admin"] },
+      "cases": [
+        { "path": "/tenants/acme/admin", "match": "tenant-admin", "params": { "t": "acme" }, "all": ["tenants-any", "tenant-admin-guard", "tenant-admin"] },
+        { "path": "/tenants/acme/projects/x/admin", "match": "project-admin", "params": { "t": "acme", "p": "x" }, "all": ["tenants-any", "tenant-admin-guard", "project-admin"] },
+        { "path": "/tenants/admin", "match": "tenants-any", "params": { "0": "admin" }, "all": ["tenants-any"] },
+        { "path": "/tenants//admin", "match": "tenant-admin-guard", "params": { "0": "" }, "all": ["tenants-any", "tenant-admin-guard"] },
+        { "path": "/tenants/acme/admin/", "match": "tenant-admin" },
+        { "path": "/tenants/acme/admin//", "match": "tenants-any", "params": { "0": "acme/admin/" }, "all": ["tenants-any"] },
+        { "path": "/tenants/acme/Admin", "match": "tenants-any" },
+        { "path": "/tenants/acme/admin%2F", "match": "tenants-any" },
+        { "path": "/tenants/acme%2Fadmin", "match": "tenants-any" },
+        { "method": "POST", "path": "/tenants/a/b/admin", "match": "tenant-admin-guard", "params": { "0": "a/b" }, "all": ["tenant-admin-guard"] },
+        { "path": "/tenants/acme/x/../admin", "normalize": true, "match": "tenant-admin", "params": { "t": "acme" } }
+      ]
+    },
+    {
+      "name": "plausible patterns that must throw",
+      "description": "Patterns a developer might write for an auth rule that would otherwise silently match something unexpected.",
+      "routes": [{ "path": "/admin/:id", "name": "admin-item" }],
+      "cases": [
+        { "path": "/admin/1", "match": "admin-item", "params": { "id": "1" } },
+        { "path": "/admin", "match": null }
+      ],
+      "invalid": [
+        "/admin/*/edit/*",
+        "/admin/**/users/**",
+        "/files/:path+/:rest+",
+        "/admin/(.*)/(.*)",
+        "/admin/:p(.*)/*",
+        "/admin?",
+        "/admin/users?",
+        "/admin/:id?/:id",
+        "/users/:id(\\d+",
+        "/users/:id(^\\d+$)",
+        "/users/:id(\\d+$)",
+        "/users/:id(\\d+|admin/x)",
+        "/users/:id((\\d+))",
+        "/users/:id((?<admin>a))",
+        "/users/:id(?=admin)",
+        "/users/:id((?!admin).*)",
+        "/users/:id(\\1)",
+        "/users/:id()",
+        "/users/\\/x",
+        "/a**b",
+        "/admin/x**",
+        "/admin/:path(.*)?",
+        "/admin/*?",
+        "/admin/**+",
+        "/files/:name.png?",
+        "/:0",
+        "/:user$",
+        "/:café",
+        "{/admin}?x",
+        "/admin{/x}+",
+        "/api/{v1{/x}}",
+        "/admin/{x",
+        "/admin/￿"
+      ]
+    }
+  ]
+}

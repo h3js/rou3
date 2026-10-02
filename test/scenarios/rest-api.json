@@ -1,0 +1,738 @@
+{
+  "$schema": "./_schema.json",
+  "description": "REST / RPC APIs and HTTP methods as developers write them: CRUD tables, nested resources, versioned APIs, method-agnostic middleware and findAllRoutes ordering",
+  "sources": [
+    "README: Route patterns (Params, Wildcards, Groups), Matching (Methods and paths, Routes for any method, Trailing slashes and empty segments, Path normalization, Result ordering incl. carve-outs)",
+    ".agents/matching.md: same-node siblings, method-agnostic entries, findAllRoutes ordering",
+    "GitHub REST API v3 route shapes (docs.github.com/rest), Stripe API v1 route shapes (docs.stripe.com/api)",
+    "Rails resource routing conventions (guides.rubyonrails.org/routing.html)",
+    "Google AIP-136 custom methods (`/books/{id}:archive`), tRPC / Connect / Twirp / JSON-RPC URL shapes"
+  ],
+  "scenarios": [
+    {
+      "name": "users resource with numeric ids and an admin guard",
+      "routes": [
+        { "method": "", "path": "/api/**", "name": "api-mw" },
+        { "path": "/api/users", "name": "list" },
+        { "method": "POST", "path": "/api/users", "name": "create" },
+        { "path": "/api/users/:id(\\d+)", "name": "show" },
+        { "method": "DELETE", "path": "/api/users/:id(\\d+)", "name": "delete" },
+        { "path": "/api/users/me", "name": "me" },
+        { "method": "", "path": "/api/admin/*", "name": "admin-auth" },
+        { "path": "/api/admin/users/:id", "name": "admin-user" }
+      ],
+      "guards": { "admin-auth": ["admin-user"], "api-mw": ["list", "create", "show", "delete", "me", "admin-user"] },
+      "cases": [
+        { "path": "/api/users", "match": "list", "all": ["api-mw", "list"] },
+        { "path": "/api/users/", "match": "list" },
+        { "method": "POST", "path": "/api/users", "match": "create" },
+        { "path": "/api/users/42", "match": "show", "params": { "id": "42" }, "all": ["api-mw", "show"] },
+        { "path": "/api/users/me", "match": "me", "all": ["api-mw", "me"] },
+        { "path": "/api/users/4x2", "match": "api-mw", "params": { "0": "users/4x2" } },
+        { "method": "DELETE", "path": "/api/users/42", "match": "delete", "params": { "id": "42" } },
+        { "method": "PUT", "path": "/api/users/42", "match": "api-mw" },
+        { "path": "/api/admin/users/7", "match": "admin-user", "params": { "id": "7" }, "all": ["api-mw", "admin-auth", "admin-user"] },
+        { "path": "/api/admin//users/7", "match": "admin-auth", "params": { "0": "/users/7" } },
+        { "path": "/api/admin/users/7", "method": "POST", "match": "admin-auth", "params": { "0": "users/7" } },
+        { "path": "/api/admin/users/../../users/7", "normalize": true, "match": "show", "params": { "id": "7" } },
+        { "path": "/api", "match": "api-mw", "params": {} },
+        { "path": "/api/admin", "match": "admin-auth", "params": {}, "all": ["api-mw", "admin-auth"] },
+        { "path": "/api/admin/", "match": "admin-auth", "params": { "0": "" } }
+      ],
+      "invalid": ["/api/users/:id/:id", "/api/users/:id(\\d+"]
+    },
+    {
+      "name": "Rails-style posts resource (index/new/create/show/edit/update/destroy)",
+      "description": "The seven RESTful actions on one resource: static `new` beats `:id`, and `/posts/new/edit` backtracks to `:id`",
+      "routes": [
+        { "path": "/posts", "name": "index" },
+        { "method": "POST", "path": "/posts", "name": "create" },
+        { "path": "/posts/new", "name": "new" },
+        { "path": "/posts/:id", "name": "show" },
+        { "path": "/posts/:id/edit", "name": "edit" },
+        { "method": "PUT", "path": "/posts/:id", "name": "update" },
+        { "method": "PATCH", "path": "/posts/:id", "name": "patch" },
+        { "method": "DELETE", "path": "/posts/:id", "name": "destroy" }
+      ],
+      "cases": [
+        { "path": "/posts", "match": "index", "all": ["index"] },
+        { "path": "/posts/", "match": "index" },
+        { "path": "/posts//", "match": null },
+        { "method": "POST", "path": "/posts", "match": "create", "all": ["create"] },
+        { "method": "PUT", "path": "/posts", "match": null, "all": [] },
+        { "path": "/posts/new", "match": "new", "all": ["show", "new"] },
+        { "method": "POST", "path": "/posts/new", "match": null },
+        { "path": "/posts/42", "match": "show", "params": { "id": "42" }, "all": ["show"] },
+        { "path": "/posts/42/", "match": "show", "params": { "id": "42" } },
+        { "path": "/posts/42/edit", "match": "edit", "params": { "id": "42" } },
+        { "path": "/posts/42/edit/", "match": "edit", "params": { "id": "42" } },
+        { "path": "/posts/new/edit", "match": "edit", "params": { "id": "new" }, "all": ["edit"] },
+        { "method": "PUT", "path": "/posts/42", "match": "update", "params": { "id": "42" } },
+        { "method": "PATCH", "path": "/posts/42", "match": "patch", "params": { "id": "42" } },
+        { "method": "DELETE", "path": "/posts/42", "match": "destroy", "params": { "id": "42" }, "all": ["destroy"] },
+        { "method": "DELETE", "path": "/posts/42/edit", "match": null },
+        { "method": "HEAD", "path": "/posts/42", "match": null, "all": [] },
+        { "method": "get", "path": "/posts/42", "match": null, "all": [] },
+        { "method": "delete", "path": "/posts/42", "match": null },
+        { "method": "", "path": "/posts/42", "match": null, "all": [] },
+        { "path": "/Posts/42", "match": null },
+        { "path": "/posts/a%2Fb", "match": "show", "params": { "id": "a%2Fb" } },
+        { "path": "/posts/hello%20world", "match": "show", "params": { "id": "hello%20world" } },
+        { "path": "/posts/42/comments", "match": null },
+        { "path": "/posts//edit", "match": null },
+        { "path": "/posts/42/../new", "normalize": true, "match": "new" },
+        { "path": "/posts/42/../new", "match": null }
+      ]
+    },
+    {
+      "name": "GitHub-like REST API slice (35 routes)",
+      "description": "Nested owner/repo resources, numeric issue numbers, static siblings of params (`releases/latest`, `issues/comments`), `:path*` contents, `**:ref` git refs, `:base...:head` compare, and a method-agnostic repo-access middleware",
+      "routes": [
+        { "path": "/user", "name": "me" },
+        { "path": "/user/repos", "name": "my-repos" },
+        { "method": "POST", "path": "/user/repos", "name": "create-my-repo" },
+        { "path": "/users/:username", "name": "user" },
+        { "path": "/users/:username/repos", "name": "user-repos" },
+        { "path": "/orgs/:org", "name": "org" },
+        { "path": "/orgs/:org/repos", "name": "org-repos" },
+        { "method": "POST", "path": "/orgs/:org/repos", "name": "create-org-repo" },
+        { "path": "/orgs/:org/members/:username", "name": "org-member" },
+        { "path": "/search/repositories", "name": "search-repos" },
+        { "path": "/search/issues", "name": "search-issues" },
+        { "path": "/rate_limit", "name": "rate-limit" },
+        { "method": "", "path": "/repos/:owner/:repo/**", "name": "repo-access" },
+        { "path": "/repos/:owner/:repo", "name": "get-repo" },
+        { "method": "PATCH", "path": "/repos/:owner/:repo", "name": "update-repo" },
+        { "method": "DELETE", "path": "/repos/:owner/:repo", "name": "delete-repo" },
+        { "path": "/repos/:owner/:repo/issues", "name": "issues" },
+        { "method": "POST", "path": "/repos/:owner/:repo/issues", "name": "create-issue" },
+        { "path": "/repos/:owner/:repo/issues/:number(\\d+)", "name": "issue" },
+        { "method": "PATCH", "path": "/repos/:owner/:repo/issues/:number(\\d+)", "name": "update-issue" },
+        { "path": "/repos/:owner/:repo/issues/:number(\\d+)/comments", "name": "issue-comments" },
+        { "method": "POST", "path": "/repos/:owner/:repo/issues/:number(\\d+)/comments", "name": "create-issue-comment" },
+        { "path": "/repos/:owner/:repo/issues/comments/:comment_id(\\d+)", "name": "issue-comment" },
+        { "path": "/repos/:owner/:repo/issues/:number(\\d+)/labels", "name": "issue-labels" },
+        { "method": "DELETE", "path": "/repos/:owner/:repo/issues/:number(\\d+)/labels/:name", "name": "remove-label" },
+        { "path": "/repos/:owner/:repo/pulls/:pull_number(\\d+)/files", "name": "pull-files" },
+        { "method": "PUT", "path": "/repos/:owner/:repo/pulls/:pull_number(\\d+)/merge", "name": "merge-pull" },
+        { "path": "/repos/:owner/:repo/contents/:path*", "name": "contents" },
+        { "path": "/repos/:owner/:repo/git/refs/**:ref", "name": "git-ref" },
+        { "path": "/repos/:owner/:repo/releases/latest", "name": "release-latest" },
+        { "path": "/repos/:owner/:repo/releases/tags/:tag", "name": "release-by-tag" },
+        { "path": "/repos/:owner/:repo/releases/:release_id(\\d+)", "name": "release" },
+        { "path": "/repos/:owner/:repo/compare/:base...:head", "name": "compare" },
+        { "path": "/repos/:owner/:repo/commits/:ref", "name": "commit" },
+        { "path": "/repos/:owner/:repo/collaborators/:username/permission", "name": "collaborator-permission" },
+        { "path": "/repos/:owner/:repo/actions/runs/:run_id(\\d+)/logs", "name": "run-logs" },
+        { "method": "POST", "path": "/repos/:owner/:repo/actions/workflows/:workflow_id/dispatches", "name": "dispatch-workflow" }
+      ],
+      "guards": {
+        "repo-access": [
+          "get-repo", "update-repo", "delete-repo", "issues", "create-issue", "issue", "update-issue", "issue-comments",
+          "create-issue-comment", "issue-comment", "issue-labels", "remove-label", "pull-files", "merge-pull", "contents",
+          "git-ref", "release-latest", "release-by-tag", "release", "compare", "commit", "collaborator-permission",
+          "run-logs", "dispatch-workflow"
+        ]
+      },
+      "cases": [
+        { "path": "/user", "match": "me", "all": ["me"] },
+        { "path": "/user/repos", "match": "my-repos" },
+        { "method": "POST", "path": "/user/repos", "match": "create-my-repo" },
+        { "path": "/users/pi0", "match": "user", "params": { "username": "pi0" } },
+        { "path": "/users/user", "match": "user", "params": { "username": "user" } },
+        { "path": "/users", "match": null },
+        { "path": "/users/pi0/repos", "match": "user-repos", "params": { "username": "pi0" } },
+        { "path": "/orgs/h3js/repos", "match": "org-repos", "params": { "org": "h3js" } },
+        { "method": "POST", "path": "/orgs/h3js/repos", "match": "create-org-repo", "params": { "org": "h3js" } },
+        { "path": "/orgs/h3js/members/pi0", "match": "org-member", "params": { "org": "h3js", "username": "pi0" } },
+        { "path": "/search/issues", "match": "search-issues" },
+        { "path": "/search/code", "match": null },
+        { "path": "/rate_limit", "match": "rate-limit" },
+        { "path": "/repos/h3js/rou3", "match": "get-repo", "params": { "owner": "h3js", "repo": "rou3" }, "all": ["repo-access", "get-repo"] },
+        { "method": "PATCH", "path": "/repos/h3js/rou3", "match": "update-repo", "params": { "owner": "h3js", "repo": "rou3" } },
+        { "method": "DELETE", "path": "/repos/h3js/rou3", "match": "delete-repo", "all": ["repo-access", "delete-repo"] },
+        { "method": "PUT", "path": "/repos/h3js/rou3", "match": "repo-access", "params": { "owner": "h3js", "repo": "rou3" } },
+        { "path": "/repos/h3js", "match": null },
+        { "path": "/repos/h3js/rou3/issues", "match": "issues", "all": ["repo-access", "issues"] },
+        { "method": "POST", "path": "/repos/h3js/rou3/issues", "match": "create-issue" },
+        { "path": "/repos/h3js/rou3/issues/42", "match": "issue", "params": { "owner": "h3js", "repo": "rou3", "number": "42" }, "all": ["repo-access", "issue"] },
+        { "method": "PATCH", "path": "/repos/h3js/rou3/issues/42", "match": "update-issue", "params": { "owner": "h3js", "repo": "rou3", "number": "42" } },
+        { "method": "DELETE", "path": "/repos/h3js/rou3/issues/42", "match": "repo-access", "params": { "owner": "h3js", "repo": "rou3", "0": "issues/42" } },
+        { "path": "/repos/h3js/rou3/issues/abc", "match": "repo-access", "params": { "owner": "h3js", "repo": "rou3", "0": "issues/abc" }, "all": ["repo-access"] },
+        { "path": "/repos/h3js/rou3/issues/-1", "match": "repo-access" },
+        { "path": "/repos/h3js/rou3/issues/42/comments", "match": "issue-comments", "params": { "owner": "h3js", "repo": "rou3", "number": "42" } },
+        { "method": "POST", "path": "/repos/h3js/rou3/issues/42/comments", "match": "create-issue-comment" },
+        { "path": "/repos/h3js/rou3/issues/comments/7", "match": "issue-comment", "params": { "owner": "h3js", "repo": "rou3", "comment_id": "7" }, "all": ["repo-access", "issue-comment"] },
+        { "path": "/repos/h3js/rou3/issues/comments", "match": "repo-access", "params": { "owner": "h3js", "repo": "rou3", "0": "issues/comments" } },
+        { "path": "/repos/h3js/rou3/issues/42/labels", "match": "issue-labels" },
+        { "method": "DELETE", "path": "/repos/h3js/rou3/issues/42/labels/good%20first%20issue", "match": "remove-label", "params": { "owner": "h3js", "repo": "rou3", "number": "42", "name": "good%20first%20issue" } },
+        { "path": "/repos/h3js/rou3/issues/42/labels/bug", "match": "repo-access" },
+        { "path": "/repos/h3js/rou3/pulls/12/files", "match": "pull-files", "params": { "owner": "h3js", "repo": "rou3", "pull_number": "12" } },
+        { "method": "PUT", "path": "/repos/h3js/rou3/pulls/12/merge", "match": "merge-pull", "all": ["repo-access", "merge-pull"] },
+        { "path": "/repos/h3js/rou3/pulls/12/merge", "match": "repo-access" },
+        { "path": "/repos/h3js/rou3/contents", "match": "contents", "params": { "owner": "h3js", "repo": "rou3" }, "all": ["repo-access", "contents"] },
+        { "path": "/repos/h3js/rou3/contents/src/index.ts", "match": "contents", "params": { "owner": "h3js", "repo": "rou3", "path": "src/index.ts" } },
+        { "path": "/repos/h3js/rou3/contents/docs/my%20file.md", "match": "contents", "params": { "owner": "h3js", "repo": "rou3", "path": "docs/my%20file.md" } },
+        { "path": "/repos/h3js/rou3/contents/src//index.ts", "match": "repo-access", "params": { "owner": "h3js", "repo": "rou3", "0": "contents/src//index.ts" }, "all": ["repo-access"] },
+        { "path": "/repos/h3js/rou3/git/refs/heads/main", "match": "git-ref", "params": { "owner": "h3js", "repo": "rou3", "ref": "heads/main" } },
+        { "path": "/repos/h3js/rou3/git/refs/heads/feat/x", "match": "git-ref", "params": { "owner": "h3js", "repo": "rou3", "ref": "heads/feat/x" } },
+        { "path": "/repos/h3js/rou3/git/refs", "match": "repo-access", "params": { "owner": "h3js", "repo": "rou3", "0": "git/refs" } },
+        { "path": "/repos/h3js/rou3/releases/latest", "match": "release-latest", "all": ["repo-access", "release-latest"] },
+        { "path": "/repos/h3js/rou3/releases/123", "match": "release", "params": { "owner": "h3js", "repo": "rou3", "release_id": "123" } },
+        { "path": "/repos/h3js/rou3/releases/tags/v1.0.0", "match": "release-by-tag", "params": { "owner": "h3js", "repo": "rou3", "tag": "v1.0.0" } },
+        { "path": "/repos/h3js/rou3/releases/tags", "match": "repo-access" },
+        { "path": "/repos/h3js/rou3/compare/main...feature", "match": "compare", "params": { "owner": "h3js", "repo": "rou3", "base": "main", "head": "feature" } },
+        { "path": "/repos/h3js/rou3/compare/v1.0...v2.0", "match": "compare", "params": { "owner": "h3js", "repo": "rou3", "base": "v1.0", "head": "v2.0" } },
+        { "path": "/repos/h3js/rou3/compare/main..feature", "match": "repo-access" },
+        { "path": "/repos/h3js/rou3/compare/...feature", "match": "repo-access" },
+        { "path": "/repos/h3js/rou3/commits/a1b2c3", "match": "commit", "params": { "owner": "h3js", "repo": "rou3", "ref": "a1b2c3" } },
+        { "path": "/repos/h3js/rou3/collaborators/pi0/permission", "match": "collaborator-permission", "params": { "owner": "h3js", "repo": "rou3", "username": "pi0" } },
+        { "path": "/repos/h3js/rou3/actions/runs/99/logs", "match": "run-logs", "params": { "owner": "h3js", "repo": "rou3", "run_id": "99" } },
+        { "path": "/repos/h3js/rou3/actions/runs/latest/logs", "match": "repo-access" },
+        { "method": "POST", "path": "/repos/h3js/rou3/actions/workflows/ci.yml/dispatches", "match": "dispatch-workflow", "params": { "owner": "h3js", "repo": "rou3", "workflow_id": "ci.yml" } },
+        { "path": "/repos/h3js//issues", "match": null, "all": [] },
+        { "path": "/repos/h3js/rou3/issues/42/../../pulls/12/files", "normalize": true, "match": "pull-files", "params": { "owner": "h3js", "repo": "rou3", "pull_number": "12" } }
+      ]
+    },
+    {
+      "name": "Stripe-like API v1 with API-key middleware",
+      "description": "`search` / `upcoming` static siblings of `:id`, a prefixed-id route `cus_:id` beside `:id`, POST-to-update and action sub-resources",
+      "routes": [
+        { "method": "", "path": "/v1/**", "name": "auth" },
+        { "path": "/v1/customers", "name": "customers" },
+        { "method": "POST", "path": "/v1/customers", "name": "create-customer" },
+        { "path": "/v1/customers/search", "name": "search-customers" },
+        { "path": "/v1/customers/:id", "name": "customer" },
+        { "path": "/v1/customers/cus_:id", "name": "customer-cus" },
+        { "method": "POST", "path": "/v1/customers/:id", "name": "update-customer" },
+        { "method": "DELETE", "path": "/v1/customers/:id", "name": "delete-customer" },
+        { "path": "/v1/customers/:customer/payment_methods", "name": "customer-payment-methods" },
+        { "path": "/v1/payment_intents/:intent", "name": "payment-intent" },
+        { "method": "POST", "path": "/v1/payment_intents/:intent/confirm", "name": "confirm" },
+        { "method": "POST", "path": "/v1/payment_intents/:intent/cancel", "name": "cancel" },
+        { "method": "POST", "path": "/v1/payment_intents/:intent/capture", "name": "capture" },
+        { "path": "/v1/invoices/upcoming", "name": "upcoming-invoice" },
+        { "path": "/v1/invoices/:invoice", "name": "invoice" },
+        { "method": "POST", "path": "/v1/invoices/:invoice/pay", "name": "pay-invoice" },
+        { "path": "/v1/charges/:charge/refunds/:refund", "name": "refund" },
+        { "method": "POST", "path": "/v1/webhook_endpoints", "name": "create-webhook" }
+      ],
+      "guards": {
+        "auth": [
+          "customers", "create-customer", "search-customers", "customer", "customer-cus", "update-customer", "delete-customer",
+          "customer-payment-methods", "payment-intent", "confirm", "cancel", "capture", "upcoming-invoice", "invoice",
+          "pay-invoice", "refund", "create-webhook"
+        ]
+      },
+      "cases": [
+        { "path": "/v1/customers", "match": "customers", "all": ["auth", "customers"] },
+        { "method": "POST", "path": "/v1/customers", "match": "create-customer", "all": ["auth", "create-customer"] },
+        { "method": "DELETE", "path": "/v1/customers", "match": "auth", "params": { "0": "customers" } },
+        { "path": "/v1/customers/search", "match": "search-customers", "all": ["auth", "customer", "search-customers"] },
+        { "path": "/v1/customers/cus_123", "match": "customer-cus", "params": { "id": "123" }, "all": ["auth", "customer", "customer-cus"] },
+        { "path": "/v1/customers/cus_", "match": "customer", "params": { "id": "cus_" }, "all": ["auth", "customer"] },
+        { "path": "/v1/customers/guest_9", "match": "customer", "params": { "id": "guest_9" } },
+        { "method": "POST", "path": "/v1/customers/cus_123", "match": "update-customer", "params": { "id": "cus_123" }, "all": ["auth", "update-customer"] },
+        { "method": "POST", "path": "/v1/customers/search", "match": "update-customer", "params": { "id": "search" }, "note": "no POST search route: the param route takes it" },
+        { "method": "DELETE", "path": "/v1/customers/cus_123", "match": "delete-customer", "params": { "id": "cus_123" } },
+        { "path": "/v1/customers/cus_123/payment_methods", "match": "customer-payment-methods", "params": { "customer": "cus_123" } },
+        { "path": "/v1/payment_intents/pi_1", "match": "payment-intent", "params": { "intent": "pi_1" } },
+        { "method": "POST", "path": "/v1/payment_intents/pi_1/confirm", "match": "confirm", "params": { "intent": "pi_1" }, "all": ["auth", "confirm"] },
+        { "method": "POST", "path": "/v1/payment_intents/pi_1/capture", "match": "capture", "params": { "intent": "pi_1" } },
+        { "path": "/v1/payment_intents/pi_1/confirm", "match": "auth", "params": { "0": "payment_intents/pi_1/confirm" } },
+        { "path": "/v1/invoices/upcoming", "match": "upcoming-invoice", "all": ["auth", "invoice", "upcoming-invoice"] },
+        { "path": "/v1/invoices/in_1", "match": "invoice", "params": { "invoice": "in_1" } },
+        { "method": "POST", "path": "/v1/invoices/upcoming/pay", "match": "pay-invoice", "params": { "invoice": "upcoming" } },
+        { "path": "/v1/charges/ch_1/refunds/re_2", "match": "refund", "params": { "charge": "ch_1", "refund": "re_2" } },
+        { "method": "POST", "path": "/v1/webhook_endpoints", "match": "create-webhook" },
+        { "path": "/v1", "match": "auth", "params": {}, "all": ["auth"] },
+        { "path": "/v1/", "match": "auth", "params": {} },
+        { "path": "/v2/customers", "match": null, "all": [] },
+        { "path": "/V1/customers", "match": null }
+      ]
+    },
+    {
+      "name": "versioned APIs (`/v:version(\\d+)`, `:version(v1|v2)`, optional version groups)",
+      "routes": [
+        { "path": "/v:version(\\d+)/users", "name": "users-vn" },
+        { "path": "/api/:version(v1|v2)/users/:id", "name": "user-known" },
+        { "path": "/api/:version/users/:id", "name": "user-any-version" },
+        { "path": "/api/v2/users/me", "name": "me-v2" },
+        { "path": "{/v:version(\\d+)}?/status", "name": "status" },
+        { "path": "/api{/v1}?/health", "name": "health" }
+      ],
+      "cases": [
+        { "path": "/v1/users", "match": "users-vn", "params": { "version": "1" } },
+        { "path": "/v12/users", "match": "users-vn", "params": { "version": "12" } },
+        { "path": "/v/users", "match": null },
+        { "path": "/vx/users", "match": null },
+        { "path": "/V1/users", "match": null },
+        { "path": "/v1.1/users", "match": null },
+        { "path": "/api/v1/users/5", "match": "user-known", "params": { "version": "v1", "id": "5" }, "all": ["user-any-version", "user-known"] },
+        { "path": "/api/v2/users/5", "match": "user-known", "params": { "version": "v2", "id": "5" } },
+        { "path": "/api/v3/users/5", "match": "user-any-version", "params": { "version": "v3", "id": "5" }, "all": ["user-any-version"] },
+        { "path": "/api/v10/users/5", "match": "user-any-version", "params": { "version": "v10", "id": "5" } },
+        { "path": "/api/v1x/users/5", "match": "user-any-version", "params": { "version": "v1x", "id": "5" } },
+        { "path": "/api/v2/users/me", "match": "me-v2", "all": ["user-any-version", "user-known", "me-v2"] },
+        { "path": "/api/v1/users/me", "match": "user-known", "params": { "version": "v1", "id": "me" } },
+        { "path": "/status", "match": "status", "params": {} },
+        { "path": "/v2/status", "match": "status", "params": { "version": "2" } },
+        { "path": "/vv/status", "match": null },
+        { "path": "/v2", "match": null },
+        { "path": "/api/health", "match": "health", "params": {} },
+        { "path": "/api/v1/health", "match": "health", "params": {} },
+        { "path": "/api/v2/health", "match": null }
+      ]
+    },
+    {
+      "name": "method-specific vs method-agnostic routes on the same paths",
+      "description": "README 'Routes for any method': equally specific → the method's own route wins (and comes after the `\"\"` one); more specific `\"\"` routes beat less specific method routes; HEAD is not GET; method strings are case-sensitive",
+      "routes": [
+        { "method": "", "path": "/**", "name": "not-found" },
+        { "method": "OPTIONS", "path": "/**", "name": "preflight" },
+        { "path": "/resource", "name": "get" },
+        { "method": "POST", "path": "/resource", "name": "post" },
+        { "method": "", "path": "/resource", "name": "any" },
+        { "path": "/resource/:id", "name": "get-one" }
+      ],
+      "guards": { "not-found": ["get", "post", "any", "get-one", "preflight"] },
+      "cases": [
+        { "path": "/resource", "match": "get", "all": ["not-found", "any", "get"] },
+        { "method": "POST", "path": "/resource", "match": "post", "all": ["not-found", "any", "post"] },
+        { "method": "HEAD", "path": "/resource", "match": "any", "all": ["not-found", "any"] },
+        { "method": "get", "path": "/resource", "match": "any", "all": ["not-found", "any"], "note": "lowercase is just another method string: only `\"\"` routes see it" },
+        { "method": "Get", "path": "/resource", "match": "any" },
+        { "method": "DELETE", "path": "/resource", "match": "any" },
+        { "method": "OPTIONS", "path": "/resource", "match": "any", "all": ["not-found", "preflight", "any"], "note": "the deeper `\"\"` route beats the OPTIONS catch-all" },
+        { "method": "OPTIONS", "path": "/other", "match": "preflight", "params": { "0": "other" }, "all": ["not-found", "preflight"] },
+        { "method": "", "path": "/resource", "match": "any", "all": ["not-found", "any"] },
+        { "method": "", "path": "/other", "match": "not-found", "params": { "0": "other" }, "all": ["not-found"] },
+        { "path": "/resource/1", "match": "get-one", "params": { "id": "1" }, "all": ["not-found", "get-one"] },
+        { "method": "HEAD", "path": "/resource/1", "match": "not-found", "params": { "0": "resource/1" } },
+        { "method": "POST", "path": "/resource/1", "match": "not-found", "params": { "0": "resource/1" } },
+        { "path": "/", "match": "not-found", "params": {}, "all": ["not-found"] },
+        { "method": "OPTIONS", "path": "/", "match": "preflight", "params": {}, "all": ["not-found", "preflight"] },
+        { "path": "/Resource", "match": "not-found", "params": { "0": "Resource" } }
+      ]
+    },
+    {
+      "name": "HEAD and GET registered separately",
+      "description": "rou3 never maps HEAD to GET: a framework must register HEAD or fall back itself",
+      "routes": [
+        { "path": "/files/:name", "name": "get-file" },
+        { "method": "HEAD", "path": "/files/:name", "name": "head-file" },
+        { "method": "", "path": "/files/*", "name": "files-mw" },
+        { "path": "/health", "name": "health" }
+      ],
+      "guards": { "files-mw": ["get-file", "head-file"] },
+      "cases": [
+        { "path": "/files/a.txt", "match": "get-file", "params": { "name": "a.txt" }, "all": ["files-mw", "get-file"] },
+        { "method": "HEAD", "path": "/files/a.txt", "match": "head-file", "params": { "name": "a.txt" }, "all": ["files-mw", "head-file"] },
+        { "method": "head", "path": "/files/a.txt", "match": "files-mw", "params": { "0": "a.txt" } },
+        { "method": "POST", "path": "/files/a.txt", "match": "files-mw", "params": { "0": "a.txt" } },
+        { "method": "HEAD", "path": "/files/a/b", "match": "files-mw", "params": { "0": "a/b" } },
+        { "method": "HEAD", "path": "/files", "match": "files-mw", "params": {} },
+        { "method": "HEAD", "path": "/files/", "match": "files-mw", "params": { "0": "" } },
+        { "method": "HEAD", "path": "/health", "match": null, "all": [] },
+        { "path": "/health", "match": "health" }
+      ]
+    },
+    {
+      "name": "middleware stack: logger, auth, rate-limit, handler",
+      "description": "README 'Result ordering': findAllRoutes lists `/**` < `/api/**` < `/api/users/**` < handler, so merging the results lets the handler win",
+      "routes": [
+        { "method": "", "path": "/**", "name": "logger" },
+        { "method": "", "path": "/api/**", "name": "auth" },
+        { "method": "", "path": "/api/users/**", "name": "rate-limit" },
+        { "path": "/api/users", "name": "list" },
+        { "method": "POST", "path": "/api/users", "name": "create" },
+        { "path": "/api/users/:id", "name": "show" },
+        { "path": "/api/users/:id/posts/:post", "name": "user-post" },
+        { "path": "/health", "name": "health" },
+        { "path": "/api/public/**", "name": "public" }
+      ],
+      "guards": {
+        "logger": ["auth", "rate-limit", "list", "create", "show", "user-post", "health", "public"],
+        "auth": ["rate-limit", "list", "create", "show", "user-post", "public"],
+        "rate-limit": ["list", "create", "show", "user-post"]
+      },
+      "cases": [
+        { "path": "/api/users/42", "match": "show", "params": { "id": "42" }, "all": ["logger", "auth", "rate-limit", "show"] },
+        { "path": "/api/users", "match": "list", "all": ["logger", "auth", "rate-limit", "list"] },
+        { "path": "/api/users/", "match": "list", "all": ["logger", "auth", "rate-limit", "list"] },
+        { "method": "POST", "path": "/api/users", "match": "create", "all": ["logger", "auth", "rate-limit", "create"] },
+        { "method": "DELETE", "path": "/api/users/42", "match": "rate-limit", "params": { "0": "42" }, "all": ["logger", "auth", "rate-limit"] },
+        { "path": "/api/users/42/posts/7", "match": "user-post", "params": { "id": "42", "post": "7" }, "all": ["logger", "auth", "rate-limit", "user-post"] },
+        { "path": "/api/users/42/posts", "match": "rate-limit", "params": { "0": "42/posts" }, "all": ["logger", "auth", "rate-limit"] },
+        { "path": "/api/users//posts/7", "match": "rate-limit", "params": { "0": "/posts/7" }, "all": ["logger", "auth", "rate-limit"] },
+        { "path": "/api", "match": "auth", "params": {}, "all": ["logger", "auth"] },
+        { "path": "/api/other", "match": "auth", "params": { "0": "other" }, "all": ["logger", "auth"] },
+        { "path": "/api/public/logo.png", "match": "public", "params": { "0": "logo.png" }, "all": ["logger", "auth", "public"] },
+        { "method": "POST", "path": "/api/public/logo.png", "match": "auth", "params": { "0": "public/logo.png" }, "all": ["logger", "auth"] },
+        { "path": "/apix", "match": "logger", "params": { "0": "apix" }, "all": ["logger"] },
+        { "path": "/health", "match": "health", "all": ["logger", "health"] },
+        { "method": "HEAD", "path": "/health", "match": "logger", "all": ["logger"] },
+        { "path": "/", "match": "logger", "params": {}, "all": ["logger"] },
+        { "path": "/api/users/42/../../admin", "normalize": true, "match": "auth", "params": { "0": "admin" }, "all": ["logger", "auth"] },
+        { "path": "/api/public/../users/1", "normalize": true, "match": "show", "params": { "id": "1" }, "all": ["logger", "auth", "rate-limit", "show"] },
+        { "path": "/api/public/../users/1", "match": "public", "params": { "0": "../users/1" }, "all": ["logger", "auth", "public"] }
+      ]
+    },
+    {
+      "name": "catch-all flavours on one node: `**` < `*` < `**:name`",
+      "description": "README detailed ordering: on a shared node a `**` comes before a trailing `*` (same paths), before a `**:name` (needs a value); ties keep registration order with `\"\"` first",
+      "routes": [
+        { "method": "", "path": "/api/**", "name": "api-any" },
+        { "path": "/api/**", "name": "api-get" },
+        { "method": "", "path": "/api/*", "name": "api-star" },
+        { "path": "/api/**:rest", "name": "api-rest" }
+      ],
+      "guards": { "api-any": ["api-get", "api-star", "api-rest"], "api-star": ["api-get", "api-rest"] },
+      "cases": [
+        { "path": "/api/x", "match": "api-rest", "params": { "rest": "x" }, "all": ["api-any", "api-get", "api-star", "api-rest"] },
+        { "path": "/api/x/y", "match": "api-rest", "params": { "rest": "x/y" }, "all": ["api-any", "api-get", "api-star", "api-rest"] },
+        { "path": "/api", "match": "api-star", "params": {}, "all": ["api-any", "api-get", "api-star"] },
+        { "path": "/api/", "match": "api-star", "params": { "0": "" }, "all": ["api-any", "api-get", "api-star"] },
+        { "path": "/api//", "match": "api-star", "params": { "0": "" }, "all": ["api-any", "api-get", "api-star"] },
+        { "path": "/api/x//y", "match": "api-star", "params": { "0": "x//y" }, "all": ["api-any", "api-get", "api-star"] },
+        { "method": "POST", "path": "/api/x", "match": "api-star", "params": { "0": "x" }, "all": ["api-any", "api-star"] },
+        { "method": "", "path": "/api", "match": "api-star", "params": {}, "all": ["api-any", "api-star"] },
+        { "path": "/apis", "match": null, "all": [] }
+      ]
+    },
+    {
+      "name": "registration order breaks exact ties only",
+      "description": "Same node, same weight: findRoute picks the first-registered, findAllRoutes keeps registration order; a `\"\"` route sorts before the method's on a tie whatever the order; a constraint outranks them all",
+      "routes": [
+        { "path": "/items/:id", "name": "by-id" },
+        { "path": "/items/:slug", "name": "by-slug" },
+        { "method": "", "path": "/items/:any", "name": "any" },
+        { "path": "/items/:sku(\\d+)", "name": "by-sku" },
+        { "path": "/dup", "name": "dup-1" },
+        { "path": "/dup", "name": "dup-2" },
+        { "path": "/tags/:tag", "name": "tag-get" },
+        { "method": "", "path": "/tags/:name", "name": "tag-any" }
+      ],
+      "cases": [
+        { "path": "/items/abc", "match": "by-id", "params": { "id": "abc" }, "all": ["any", "by-id", "by-slug"] },
+        { "path": "/items/42", "match": "by-sku", "params": { "sku": "42" }, "all": ["any", "by-id", "by-slug", "by-sku"] },
+        { "method": "POST", "path": "/items/abc", "match": "any", "params": { "any": "abc" }, "all": ["any"] },
+        { "method": "POST", "path": "/items/42", "match": "any", "params": { "any": "42" } },
+        { "path": "/dup", "match": "dup-1", "all": ["dup-1", "dup-2"] },
+        { "method": "POST", "path": "/dup", "match": null },
+        { "path": "/tags/js", "match": "tag-get", "params": { "tag": "js" }, "all": ["tag-any", "tag-get"] },
+        { "method": "PUT", "path": "/tags/js", "match": "tag-any", "params": { "name": "js" } }
+      ]
+    },
+    {
+      "name": "static siblings of params: `/users/me`, `/new`, `/search` vs `/:slug`",
+      "description": "Static beats param at each level, with backtracking when the static branch has no continuation",
+      "routes": [
+        { "path": "/users/me", "name": "me" },
+        { "path": "/users/me/settings", "name": "me-settings" },
+        { "path": "/users/new", "name": "new-user" },
+        { "path": "/users/:id", "name": "user" },
+        { "path": "/users/:id/edit", "name": "edit-user" },
+        { "path": "/users/:id/settings", "name": "user-settings" },
+        { "path": "/search", "name": "search" },
+        { "path": "/about", "name": "about" },
+        { "path": "/:slug", "name": "page" },
+        { "path": "/:slug/comments", "name": "page-comments" }
+      ],
+      "cases": [
+        { "path": "/users/me", "match": "me", "all": ["user", "me"] },
+        { "path": "/users/me/", "match": "me" },
+        { "path": "/users/new", "match": "new-user", "all": ["user", "new-user"] },
+        { "path": "/users/7", "match": "user", "params": { "id": "7" }, "all": ["user"] },
+        { "path": "/users/me/edit", "match": "edit-user", "params": { "id": "me" }, "all": ["edit-user"] },
+        { "path": "/users/new/edit", "match": "edit-user", "params": { "id": "new" } },
+        { "path": "/users/me/settings", "match": "me-settings", "all": ["user-settings", "me-settings"] },
+        { "path": "/users/bob/settings", "match": "user-settings", "params": { "id": "bob" } },
+        { "path": "/users/ME", "match": "user", "params": { "id": "ME" } },
+        { "path": "/users/me%20", "match": "user", "params": { "id": "me%20" } },
+        { "path": "/users", "match": "page", "params": { "slug": "users" }, "all": ["page"] },
+        { "path": "/users/", "match": "page", "params": { "slug": "users" } },
+        { "path": "/search", "match": "search", "all": ["page", "search"] },
+        { "path": "/search/comments", "match": "page-comments", "params": { "slug": "search" } },
+        { "path": "/hello-world", "match": "page", "params": { "slug": "hello-world" } },
+        { "path": "/hello-world/comments", "match": "page-comments", "params": { "slug": "hello-world" } },
+        { "path": "/users/7/comments", "match": null },
+        { "path": "/", "match": null },
+        { "path": "//", "match": null }
+      ]
+    },
+    {
+      "name": "action sub-resources and AIP-136 custom methods",
+      "description": "`/orders/:id/cancel`-style actions and Google-style `/books/:id\\:archive` custom verbs beside the plain resource",
+      "routes": [
+        { "path": "/orders", "name": "orders" },
+        { "method": "POST", "path": "/orders", "name": "create-order" },
+        { "path": "/orders/:id", "name": "order" },
+        { "method": "POST", "path": "/orders/:id/cancel", "name": "cancel-order" },
+        { "method": "POST", "path": "/orders/:id/refund", "name": "refund-order" },
+        { "method": "POST", "path": "/orders/:id/items", "name": "add-item" },
+        { "method": "DELETE", "path": "/orders/:id/items/:itemId", "name": "remove-item" },
+        { "path": "/books/:id", "name": "book" },
+        { "method": "POST", "path": "/books/:id", "name": "update-book" },
+        { "method": "POST", "path": "/books/:id\\:archive", "name": "archive-book" },
+        { "method": "POST", "path": "/books\\:batchGet", "name": "batch-get-books" }
+      ],
+      "cases": [
+        { "path": "/orders", "match": "orders" },
+        { "method": "POST", "path": "/orders", "match": "create-order" },
+        { "path": "/orders/o_1", "match": "order", "params": { "id": "o_1" } },
+        { "method": "POST", "path": "/orders/o_1/cancel", "match": "cancel-order", "params": { "id": "o_1" }, "all": ["cancel-order"] },
+        { "path": "/orders/o_1/cancel", "match": null, "all": [] },
+        { "method": "POST", "path": "/orders/o_1/refund", "match": "refund-order", "params": { "id": "o_1" } },
+        { "method": "POST", "path": "/orders/o_1/items", "match": "add-item", "params": { "id": "o_1" } },
+        { "method": "DELETE", "path": "/orders/o_1/items/i_2", "match": "remove-item", "params": { "id": "o_1", "itemId": "i_2" } },
+        { "method": "DELETE", "path": "/orders/o_1/items", "match": null },
+        { "method": "POST", "path": "/orders/o_1/ship", "match": null },
+        { "path": "/books/42", "match": "book", "params": { "id": "42" } },
+        { "path": "/books/42:archive", "match": "book", "params": { "id": "42:archive" } },
+        { "method": "POST", "path": "/books/42:archive", "match": "archive-book", "params": { "id": "42" }, "all": ["update-book", "archive-book"] },
+        { "method": "POST", "path": "/books/42", "match": "update-book", "params": { "id": "42" }, "all": ["update-book"] },
+        { "method": "POST", "path": "/books/:archive", "match": "update-book", "params": { "id": ":archive" } },
+        { "method": "POST", "path": "/books/a:b:archive", "match": "archive-book", "params": { "id": "a:b" } },
+        { "method": "POST", "path": "/books:batchGet", "match": "batch-get-books" },
+        { "method": "POST", "path": "/books", "match": null }
+      ],
+      "invalid": ["/orders/:id/:id", "/books/:id\\:archive?", "/orders/:id(\\d+"]
+    },
+    {
+      "name": "files with names and extensions",
+      "description": "`:name.:ext` (lazy name), a fixed `.json` extension, `*.zip` downloads at any depth, and a static-asset `**` fallback",
+      "routes": [
+        { "path": "/files/:name", "name": "file" },
+        { "path": "/files/:name.json", "name": "file-json" },
+        { "path": "/files/:name.:ext", "name": "file-ext" },
+        { "path": "/files/**", "name": "files-any" },
+        { "path": "/download/*.zip", "name": "zip" },
+        { "method": "PUT", "path": "/files/:name.:ext", "name": "upload" }
+      ],
+      "cases": [
+        { "path": "/files/report.pdf", "match": "file-ext", "params": { "name": "report", "ext": "pdf" }, "all": ["files-any", "file", "file-ext"] },
+        { "path": "/files/a.tar.gz", "match": "file-ext", "params": { "name": "a", "ext": "tar.gz" } },
+        { "path": "/files/data.json", "match": "file-json", "params": { "name": "data" }, "all": ["files-any", "file", "file-ext", "file-json"], "note": "containment: `:name` ⊋ `:name.:ext` ⊋ `:name.json`", "bug": "`:name.:ext` and `:name.json` tie on weight, so registration order (not specificity) orders them: the narrower `:name.json` is listed first" },
+        { "path": "/files/a.b.json", "match": "file-json", "params": { "name": "a.b" } },
+        { "path": "/files/.json", "match": "file", "params": { "name": ".json" }, "all": ["files-any", "file"], "note": "`:name` before `.json` / `.:ext` needs a value" },
+        { "path": "/files/.env", "match": "file", "params": { "name": ".env" } },
+        { "path": "/files/archive.", "match": "file", "params": { "name": "archive." } },
+        { "path": "/files/README", "match": "file", "params": { "name": "README" }, "all": ["files-any", "file"] },
+        { "path": "/files/a/b.txt", "match": "files-any", "params": { "0": "a/b.txt" }, "all": ["files-any"] },
+        { "path": "/files", "match": "files-any", "params": {} },
+        { "method": "PUT", "path": "/files/a.txt", "match": "upload", "params": { "name": "a", "ext": "txt" }, "all": ["upload"] },
+        { "method": "PUT", "path": "/files/a", "match": null },
+        { "path": "/download/release.zip", "match": "zip", "params": { "0": "release" } },
+        { "path": "/download/v1/release.zip", "match": "zip", "params": { "0": "v1/release" } },
+        { "path": "/download/a.b.zip", "match": "zip", "params": { "0": "a.b" } },
+        { "path": "/download/.zip", "match": "zip", "params": { "0": "" } },
+        { "path": "/download/release.tar", "match": null },
+        { "path": "/download/release.ZIP", "match": null },
+        { "path": "/download", "match": null }
+      ]
+    },
+    {
+      "name": "extension routes registered broadest first",
+      "description": "The same three file routes as above in the order a developer adds them (generic first): the more literal `:name.json` should still win on `data.json`",
+      "routes": [
+        { "path": "/files/:name", "name": "file" },
+        { "path": "/files/:name.:ext", "name": "file-ext" },
+        { "path": "/files/:name.json", "name": "file-json" }
+      ],
+      "cases": [
+        { "path": "/files/data.json", "match": "file-json", "params": { "name": "data" }, "all": ["file", "file-ext", "file-json"], "bug": "`:name.:ext` ties `:name.json` on weight, so the first-registered (broader) `:name.:ext` wins: { name: 'data', ext: 'json' }" },
+        { "path": "/files/data.csv", "match": "file-ext", "params": { "name": "data", "ext": "csv" }, "all": ["file", "file-ext"] },
+        { "path": "/files/data", "match": "file", "params": { "name": "data" }, "all": ["file"] }
+      ]
+    },
+    {
+      "name": "mounted sub-routers: per-version and per-prefix middleware",
+      "description": "`app.use(\"/api/:version\", …)` and `app.use(\"/api/v1\", …)`-style middleware: the param scope lists before the static one at the same depth, both before the handler",
+      "routes": [
+        { "method": "", "path": "/api/:version/**", "name": "version-mw" },
+        { "method": "", "path": "/api/v1/**", "name": "v1-mw" },
+        { "path": "/api/v1/users/:id", "name": "v1-user" },
+        { "path": "/api/:version/users/:id", "name": "any-user" },
+        { "method": "", "path": "/api/v1/legacy/*", "name": "legacy-mw" }
+      ],
+      "guards": { "version-mw": ["v1-mw", "v1-user", "any-user", "legacy-mw"], "v1-mw": ["v1-user", "legacy-mw"] },
+      "cases": [
+        { "path": "/api/v1/users/1", "match": "v1-user", "params": { "id": "1" }, "all": ["version-mw", "any-user", "v1-mw", "v1-user"] },
+        { "path": "/api/v2/users/1", "match": "any-user", "params": { "version": "v2", "id": "1" }, "all": ["version-mw", "any-user"] },
+        { "method": "DELETE", "path": "/api/v2/users/1", "match": "version-mw", "params": { "version": "v2", "0": "users/1" } },
+        { "method": "DELETE", "path": "/api/v1/users/1", "match": "v1-mw", "params": { "0": "users/1" }, "all": ["version-mw", "v1-mw"] },
+        { "path": "/api/v1", "match": "v1-mw", "params": {}, "all": ["version-mw", "v1-mw"] },
+        { "path": "/api/v1/legacy/a/b", "match": "legacy-mw", "params": { "0": "a/b" }, "all": ["version-mw", "v1-mw", "legacy-mw"] },
+        { "path": "/api/v1/legacy", "match": "legacy-mw", "params": {}, "all": ["version-mw", "v1-mw", "legacy-mw"] },
+        { "path": "/api", "match": null, "all": [] },
+        { "path": "/api//users/1", "match": null }
+      ]
+    },
+    {
+      "name": "CORS preflight with OPTIONS and a method-agnostic CORS header middleware",
+      "routes": [
+        { "method": "OPTIONS", "path": "/**", "name": "preflight" },
+        { "method": "", "path": "/api/**", "name": "cors" },
+        { "path": "/api/items", "name": "items" },
+        { "method": "POST", "path": "/api/items", "name": "create-item" },
+        { "method": "OPTIONS", "path": "/api/items", "name": "items-options" }
+      ],
+      "guards": { "cors": ["items", "create-item", "items-options"], "preflight": ["items-options"] },
+      "cases": [
+        { "method": "OPTIONS", "path": "/api/items", "match": "items-options", "all": ["preflight", "cors", "items-options"] },
+        { "method": "OPTIONS", "path": "/api/other", "match": "cors", "params": { "0": "other" }, "all": ["preflight", "cors"], "note": "the deeper `\"\"` route wins over the root OPTIONS catch-all" },
+        { "method": "OPTIONS", "path": "/other", "match": "preflight", "params": { "0": "other" }, "all": ["preflight"] },
+        { "method": "OPTIONS", "path": "/", "match": "preflight", "params": {} },
+        { "path": "/api/items", "match": "items", "all": ["cors", "items"] },
+        { "method": "POST", "path": "/api/items", "match": "create-item", "all": ["cors", "create-item"] },
+        { "method": "DELETE", "path": "/api/items", "match": "cors", "params": { "0": "items" } },
+        { "path": "/other", "match": null, "all": [] },
+        { "method": "options", "path": "/other", "match": null }
+      ]
+    },
+    {
+      "name": "optional format suffix, pagination and optional trailing params",
+      "description": "`{.:format(json|csv)}?`, `{/page/:page(\\d+)}?`, and README carve-out A1 (`/admin` + `/admin/:page?`)",
+      "routes": [
+        { "path": "/reports/:id{.:format(json|csv)}?", "name": "report" },
+        { "path": "/posts{/page/:page(\\d+)}?", "name": "posts" },
+        { "path": "/posts/:slug", "name": "post" },
+        { "path": "/admin", "name": "admin" },
+        { "path": "/admin/:page?", "name": "admin-page" },
+        { "path": "/search/:q?", "name": "search" }
+      ],
+      "cases": [
+        { "path": "/reports/5", "match": "report", "params": { "id": "5" } },
+        { "path": "/reports/5.json", "match": "report", "params": { "id": "5", "format": "json" } },
+        { "path": "/reports/5.csv", "match": "report", "params": { "id": "5", "format": "csv" } },
+        { "path": "/reports/5.xml", "match": "report", "params": { "id": "5.xml" } },
+        { "path": "/reports/a.b.csv", "match": "report", "params": { "id": "a.b", "format": "csv" } },
+        { "path": "/reports/.json", "match": "report", "params": { "id": ".json" } },
+        { "path": "/reports", "match": null },
+        { "path": "/posts", "match": "posts", "params": {} },
+        { "path": "/posts/page/2", "match": "posts", "params": { "page": "2" } },
+        { "path": "/posts/page", "match": "post", "params": { "slug": "page" } },
+        { "path": "/posts/page/two", "match": null },
+        { "path": "/posts/hello", "match": "post", "params": { "slug": "hello" } },
+        { "path": "/admin", "match": "admin", "all": ["admin", "admin-page"], "note": "README carve-out A1: the broader pattern comes last" },
+        { "path": "/admin/users", "match": "admin-page", "params": { "page": "users" }, "all": ["admin-page"] },
+        { "path": "/admin//", "match": null },
+        { "path": "/search", "match": "search", "params": {} },
+        { "path": "/search/rou3%20router", "match": "search", "params": { "q": "rou3%20router" } }
+      ]
+    },
+    {
+      "name": "RPC-style endpoints: JSON-RPC, tRPC, Twirp, Connect / gRPC-web",
+      "routes": [
+        { "method": "POST", "path": "/rpc", "name": "jsonrpc" },
+        { "path": "/trpc/:procedure", "name": "trpc-query" },
+        { "method": "POST", "path": "/trpc/:procedure", "name": "trpc-mutation" },
+        { "method": "POST", "path": "/twirp/:service/:method", "name": "twirp" },
+        { "method": "POST", "path": "/:service/:method", "name": "connect" },
+        { "method": "POST", "path": "/grpc.health.v1.Health/Check", "name": "health-check" }
+      ],
+      "cases": [
+        { "method": "POST", "path": "/rpc", "match": "jsonrpc" },
+        { "path": "/rpc", "match": null },
+        { "path": "/trpc/user.list", "match": "trpc-query", "params": { "procedure": "user.list" } },
+        { "path": "/trpc/user.list,user.byId", "match": "trpc-query", "params": { "procedure": "user.list,user.byId" } },
+        { "method": "POST", "path": "/trpc/post.create", "match": "trpc-mutation", "params": { "procedure": "post.create" }, "all": ["connect", "trpc-mutation"] },
+        { "method": "PUT", "path": "/trpc/post.create", "match": null },
+        { "method": "POST", "path": "/acme.user.v1.UserService/GetUser", "match": "connect", "params": { "service": "acme.user.v1.UserService", "method": "GetUser" } },
+        { "path": "/acme.user.v1.UserService/GetUser", "match": null },
+        { "method": "POST", "path": "/grpc.health.v1.Health/Check", "match": "health-check", "all": ["connect", "health-check"] },
+        { "method": "POST", "path": "/grpc.health.v1.Health/Watch", "match": "connect", "params": { "service": "grpc.health.v1.Health", "method": "Watch" } },
+        { "method": "POST", "path": "/twirp/acme.Haberdasher/MakeHat", "match": "twirp", "params": { "service": "acme.Haberdasher", "method": "MakeHat" }, "all": ["twirp"] },
+        { "method": "POST", "path": "/twirp/MakeHat", "match": "connect", "params": { "service": "twirp", "method": "MakeHat" } },
+        { "method": "POST", "path": "/rpc/x", "match": "connect", "params": { "service": "rpc", "method": "x" } },
+        { "method": "POST", "path": "/a//b", "match": null }
+      ]
+    },
+    {
+      "name": "format suffix catch-all ranked from the end (`/**.json` vs `/api/users/:id`)",
+      "description": "README 'Segments after a catch-all': on paths a suffix route matches, results rank from the last segment backwards, so `*.json` beats a plain `:id` there",
+      "routes": [
+        { "method": "", "path": "/api/**", "name": "api-mw" },
+        { "path": "/api/users/:id", "name": "user" },
+        { "path": "/api/users/:id(\\d+).json", "name": "user-json" },
+        { "path": "/**.json", "name": "json" }
+      ],
+      "guards": { "api-mw": ["user", "user-json"] },
+      "cases": [
+        { "path": "/api/users/abc.json", "match": "json", "params": { "0": "api/users/abc" }, "all": ["api-mw", "user", "json"] },
+        { "path": "/api/users/5.json", "match": "user-json", "params": { "id": "5" }, "all": ["api-mw", "user", "json", "user-json"] },
+        { "path": "/api/users/5", "match": "user", "params": { "id": "5" }, "all": ["api-mw", "user"] },
+        { "path": "/package.json", "match": "json", "params": { "0": "package" }, "all": ["json"] },
+        { "path": "/a/b/c.json", "match": "json", "params": { "0": "a/b/c" } },
+        { "path": "/api/x.json", "match": "json", "params": { "0": "api/x" }, "all": ["api-mw", "json"] },
+        { "method": "POST", "path": "/api/users/5.json", "match": "api-mw", "params": { "0": "users/5.json" } }
+      ]
+    },
+    {
+      "name": "README carve-out B: `:name+` before a param and a catch-all",
+      "description": "`/p/:id/**` contains `/p/:path+` but wildcards list first, so the narrower route comes first and findRoute picks the broader",
+      "routes": [
+        { "path": "/p/:id/**", "name": "id-rest" },
+        { "path": "/p/:path+", "name": "path" }
+      ],
+      "cases": [
+        { "path": "/p/a/b", "match": "id-rest", "params": { "id": "a", "0": "b" }, "all": ["path", "id-rest"] },
+        { "path": "/p/a", "match": "id-rest", "params": { "id": "a" }, "all": ["path", "id-rest"] },
+        { "path": "/p/a//b", "match": "id-rest", "params": { "id": "a", "0": "/b" }, "all": ["id-rest"] },
+        { "path": "/p", "match": null }
+      ]
+    },
+    {
+      "name": "API gateway / proxy with `**:path` forwarding",
+      "routes": [
+        { "method": "", "path": "/proxy/**", "name": "proxy-mw" },
+        { "method": "", "path": "/proxy/:service/**:path", "name": "forward" },
+        { "method": "", "path": "/proxy/:service", "name": "service-root" },
+        { "path": "/proxy/internal/**", "name": "internal-block" }
+      ],
+      "guards": { "proxy-mw": ["forward", "service-root", "internal-block"] },
+      "cases": [
+        { "path": "/proxy/billing/v1/invoices", "match": "forward", "params": { "service": "billing", "path": "v1/invoices" }, "all": ["proxy-mw", "forward"] },
+        { "method": "DELETE", "path": "/proxy/billing/v1/invoices/1", "match": "forward", "params": { "service": "billing", "path": "v1/invoices/1" } },
+        { "path": "/proxy/billing", "match": "service-root", "params": { "service": "billing" }, "all": ["proxy-mw", "service-root"] },
+        { "path": "/proxy/billing/", "match": "service-root", "params": { "service": "billing" } },
+        { "path": "/proxy/billing//x", "match": "proxy-mw", "params": { "0": "billing//x" }, "all": ["proxy-mw"] },
+        { "path": "/proxy/internal/secrets", "match": "internal-block", "params": { "0": "secrets" }, "all": ["proxy-mw", "forward", "internal-block"] },
+        { "method": "POST", "path": "/proxy/internal/secrets", "match": "forward", "params": { "service": "internal", "path": "secrets" }, "all": ["proxy-mw", "forward"] },
+        { "path": "/proxy/internal", "match": "internal-block", "params": {}, "all": ["proxy-mw", "service-root", "internal-block"] },
+        { "path": "/proxy", "match": "proxy-mw", "params": {} }
+      ]
+    },
+    {
+      "name": "admin area behind a `*` guard, with path traversal attempts",
+      "description": "`use(\"/admin/*\")`-style guard covers `/admin` and every depth below; `..` only resolves with `normalize`",
+      "routes": [
+        { "method": "", "path": "/admin/*", "name": "admin-guard" },
+        { "path": "/admin", "name": "dashboard" },
+        { "path": "/admin/users", "name": "admin-users" },
+        { "method": "DELETE", "path": "/admin/users/:id", "name": "admin-delete-user" },
+        { "path": "/public/**", "name": "static" },
+        { "path": "/login", "name": "login" }
+      ],
+      "guards": { "admin-guard": ["dashboard", "admin-users", "admin-delete-user"] },
+      "cases": [
+        { "path": "/admin", "match": "dashboard", "all": ["admin-guard", "dashboard"] },
+        { "path": "/admin/", "match": "dashboard" },
+        { "path": "/admin/users", "match": "admin-users", "all": ["admin-guard", "admin-users"] },
+        { "method": "DELETE", "path": "/admin/users/9", "match": "admin-delete-user", "params": { "id": "9" }, "all": ["admin-guard", "admin-delete-user"] },
+        { "path": "/admin/users/9", "match": "admin-guard", "params": { "0": "users/9" } },
+        { "method": "POST", "path": "/admin", "match": "admin-guard", "params": {} },
+        { "path": "/public/../admin/users", "match": "static", "params": { "0": "../admin/users" }, "all": ["static"] },
+        { "path": "/public/../admin/users", "normalize": true, "match": "admin-users", "all": ["admin-guard", "admin-users"] },
+        { "path": "/public/%2e%2e/admin/users", "normalize": true, "match": "static", "params": { "0": "%2e%2e/admin/users" } },
+        { "path": "/admin/../login", "normalize": true, "match": "login", "all": ["login"] },
+        { "path": "/admin/./users", "normalize": true, "match": "admin-users" },
+        { "path": "/admin/./users", "match": "admin-guard", "params": { "0": "./users" } },
+        { "path": "/admin%2Fusers", "match": null },
+        { "path": "//admin/users", "match": null },
+        { "path": "/ADMIN/users", "match": null }
+      ]
+    }
+  ]
+}

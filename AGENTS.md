@@ -14,7 +14,7 @@ Read the relevant doc before changing that area:
 - [`.agents/compiler.md`](.agents/compiler.md): `compileRouter` / `compileRouterToString` contract and codegen invariants.
 - [`.agents/regexp.md`](.agents/regexp.md): `routeToRegExp` (regex ≡ router) and `regExpToRoute`.
 - [`.agents/overlap.md`](.agents/overlap.md): `routesOverlap` / `compareRoutes` / `findOverlappingRoutes` and `routeNodeKeys`.
-- [`.agents/testing.md`](.agents/testing.md): suites, fixture conventions, sweeps, cross-engine and Node 22 checks.
+- [`.agents/testing.md`](.agents/testing.md): suites, fixture conventions, sweeps, JSON scenarios (`test/scenarios/`), cross-engine and Node 22 checks.
 
 ## Core invariants
 

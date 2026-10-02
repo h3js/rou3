@@ -1,0 +1,484 @@
+{
+  "$schema": "./_schema.json",
+  "description": "Optional syntax (`:x?`, `{...}?`, `:x*`, in-segment `?`), in-segment params and the pattern mistakes developers make",
+  "sources": [
+    "README: Route patterns (table, Params, Param naming rules, Wildcards, Groups, Invalid patterns, Differences from URLPattern)",
+    "README: Matching (Trailing slashes and empty segments, Result ordering incl. the optional-syntax carve-out A1)",
+    ".agents/syntax.md: Leading `/`, Group delimiters, Params sharing a segment, Reserved syntax",
+    ".agents/matching.md: findAllRoutes ordering, Greedy `*`"
+  ],
+  "scenarios": [
+    {
+      "name": "i18n docs with a constrained optional language prefix",
+      "description": "`{/:lang(en|fr|de)}?` in front of a docs route, next to a static docs page and a site-wide 404 catch-all",
+      "routes": [
+        { "path": "/**", "name": "not-found" },
+        { "path": "{/:lang(en|fr|de)}?/docs/:page", "name": "docs" },
+        { "path": "/docs/getting-started", "name": "docs-start" }
+      ],
+      "cases": [
+        { "path": "/docs/intro", "match": "docs", "params": { "page": "intro" }, "all": ["not-found", "docs"] },
+        { "path": "/en/docs/intro", "match": "docs", "params": { "lang": "en", "page": "intro" }, "all": ["not-found", "docs"] },
+        { "path": "/de/docs/intro/", "match": "docs", "params": { "lang": "de", "page": "intro" } },
+        { "path": "/es/docs/intro", "match": "not-found", "params": { "0": "es/docs/intro" }, "all": ["not-found"] },
+        { "path": "/EN/docs/intro", "match": "not-found", "params": { "0": "EN/docs/intro" } },
+        { "path": "/docs/getting-started", "match": "docs-start", "params": {}, "all": ["not-found", "docs", "docs-start"] },
+        { "path": "/fr/docs/getting-started", "match": "docs", "params": { "lang": "fr", "page": "getting-started" } },
+        { "path": "/en/docs", "match": "not-found", "params": { "0": "en/docs" } },
+        { "path": "/docs", "match": "not-found", "params": { "0": "docs" } },
+        { "path": "//docs/intro", "match": "not-found", "params": { "0": "/docs/intro" } },
+        { "path": "/", "match": "not-found", "params": {} }
+      ]
+    },
+    {
+      "name": "unconstrained optional language at the root",
+      "description": "`{/:lang}?` alone matches `/` and `/en` (README Groups); a static route beats the param on its path",
+      "routes": [
+        { "path": "{/:lang}?", "name": "home" },
+        { "path": "{/:lang}?/about", "name": "about" },
+        { "path": "/api/health", "name": "health" }
+      ],
+      "cases": [
+        { "path": "/", "match": "home", "params": {} },
+        { "path": "/en", "match": "home", "params": { "lang": "en" } },
+        { "path": "/en/", "match": "home", "params": { "lang": "en" } },
+        { "path": "/about", "match": "about", "params": {}, "all": ["home", "about"] },
+        { "path": "/en/about", "match": "about", "params": { "lang": "en" } },
+        { "path": "/about/about", "match": "about", "params": { "lang": "about" } },
+        { "path": "/api", "match": "home", "params": { "lang": "api" } },
+        { "path": "/api/health", "match": "health", "params": {}, "all": ["health"] },
+        { "path": "//about", "match": null },
+        { "path": "/en/about/team", "match": null },
+        { "path": "//", "match": null }
+      ]
+    },
+    {
+      "name": "optional constrained param segment before a static one",
+      "description": "`/:lang(en|fr)?/about` next to a generic page route and a localized one",
+      "routes": [
+        { "path": "/:lang(en|fr)?/about", "name": "about" },
+        { "path": "/:slug", "name": "page" },
+        { "path": "/:lang(en|fr)/:slug", "name": "localized" }
+      ],
+      "cases": [
+        { "path": "/about", "match": "about", "params": {}, "all": ["page", "about"] },
+        { "path": "/en/about", "match": "about", "params": { "lang": "en" }, "all": ["localized", "about"] },
+        { "path": "/fr/contact", "match": "localized", "params": { "lang": "fr", "slug": "contact" } },
+        { "path": "/de/about", "match": null },
+        { "path": "/contact", "match": "page", "params": { "slug": "contact" } },
+        { "path": "/en", "match": "page", "params": { "slug": "en" } },
+        { "path": "/en/", "match": "page", "params": { "slug": "en" } }
+      ]
+    },
+    {
+      "name": "leading groups: optional prefix, empty first segment, relative group",
+      "description": "README Groups: `{/:lang}?/docs`, `/{/:lang}?/legacy` (a route starting with an empty segment) and `{v2}?/api` (a leading group without `/` gets one)",
+      "routes": [
+        { "path": "{/:lang}?/docs", "name": "docs" },
+        { "path": "/{/:lang}?/legacy", "name": "legacy" },
+        { "path": "{v2}?/api", "name": "api" }
+      ],
+      "cases": [
+        { "path": "/docs", "match": "docs", "params": {} },
+        { "path": "/en/docs", "match": "docs", "params": { "lang": "en" } },
+        { "path": "//docs", "match": null },
+        { "path": "/en/fr/docs", "match": null },
+        { "path": "//legacy", "match": "legacy", "params": {} },
+        { "path": "//en/legacy", "match": "legacy", "params": { "lang": "en" } },
+        { "path": "/legacy", "match": null },
+        { "path": "/en/legacy", "match": null },
+        { "path": "/api", "match": "api", "params": {} },
+        { "path": "/v2/api", "match": "api", "params": {} },
+        { "path": "/v2api", "match": null },
+        { "path": "/v3/api", "match": null }
+      ]
+    },
+    {
+      "name": "blog pagination with an optional multi-segment group",
+      "description": "`/blog{/page/:n(\\d+)}?` keeps page 1 at `/blog`; a post slug can still be called `page`",
+      "routes": [
+        { "path": "/blog{/page/:n(\\d+)}?", "name": "index" },
+        { "path": "/blog/:slug", "name": "post" },
+        { "path": "/blog/:slug/comments{/page/:n(\\d+)}?", "name": "comments" }
+      ],
+      "cases": [
+        { "path": "/blog", "match": "index", "params": {} },
+        { "path": "/blog/", "match": "index", "params": {} },
+        { "path": "/blog/page/2", "match": "index", "params": { "n": "2" } },
+        { "path": "/blog/page/02/", "match": "index", "params": { "n": "02" } },
+        { "path": "/blog/page/two", "match": null },
+        { "path": "/blog/page", "match": "post", "params": { "slug": "page" } },
+        { "path": "/blog/hello", "match": "post", "params": { "slug": "hello" }, "all": ["post"] },
+        { "path": "/blog/page//2", "match": null },
+        { "path": "/blog/hello/comments", "match": "comments", "params": { "slug": "hello" } },
+        { "path": "/blog/hello/comments/page/3", "match": "comments", "params": { "slug": "hello", "n": "3" } },
+        { "path": "/blog/page/comments/page/3", "match": "comments", "params": { "slug": "page", "n": "3" } },
+        { "path": "/blog/hello/comments/page", "match": null }
+      ]
+    },
+    {
+      "name": "users with an optional id, a static alias and an optional group mid-route",
+      "description": "`/users/:id?`, `/users{/:id}?/posts` and a numeric variant: static beats param, a regex param beats a plain one on the same node",
+      "routes": [
+        { "path": "/users/:id?", "name": "users" },
+        { "path": "/users/me", "name": "me" },
+        { "path": "/users{/:id}?/posts", "name": "posts" },
+        { "path": "/users/:id(\\d+)", "name": "user-num" }
+      ],
+      "cases": [
+        { "path": "/users", "match": "users", "params": {}, "all": ["users"] },
+        { "path": "/users/", "match": "users", "params": {} },
+        { "path": "/users/bob", "match": "users", "params": { "id": "bob" }, "all": ["users"] },
+        { "path": "/users/42", "match": "user-num", "params": { "id": "42" }, "all": ["users", "user-num"] },
+        { "path": "/users/me", "match": "me", "params": {}, "all": ["users", "me"] },
+        { "path": "/users/posts", "match": "posts", "params": {}, "all": ["users", "posts"] },
+        { "path": "/users/42/posts", "match": "posts", "params": { "id": "42" } },
+        { "path": "/users/me/posts", "match": "posts", "params": { "id": "me" } },
+        { "path": "/users//posts", "match": null },
+        { "path": "/users//", "match": null },
+        { "path": "/users/42/posts/1", "match": null }
+      ]
+    },
+    {
+      "name": "plural-tolerant catalog with an optional literal",
+      "description": "README `/book{s}?`: both spellings, the group only adds literal text",
+      "routes": [
+        { "path": "/book{s}?", "name": "catalog" },
+        { "path": "/book{s}?/:id(\\d+)", "name": "book" },
+        { "path": "/books/featured", "name": "featured" }
+      ],
+      "cases": [
+        { "path": "/book", "match": "catalog", "params": {} },
+        { "path": "/books", "match": "catalog", "params": {} },
+        { "path": "/books/", "match": "catalog", "params": {} },
+        { "path": "/bookss", "match": null },
+        { "path": "/Books", "match": null },
+        { "path": "/books/12", "match": "book", "params": { "id": "12" } },
+        { "path": "/book/12", "match": "book", "params": { "id": "12" } },
+        { "path": "/books/featured", "match": "featured", "params": {} },
+        { "path": "/book/featured", "match": null },
+        { "path": "/books/abc", "match": null }
+      ]
+    },
+    {
+      "name": "blog post id with an optional title suffix",
+      "description": "README `/blog/:id(\\d+){-:title}?` next to a plain slug route on the same param node",
+      "routes": [
+        { "path": "/blog/:slug", "name": "slug" },
+        { "path": "/blog/:id(\\d+){-:title}?", "name": "post" }
+      ],
+      "cases": [
+        { "path": "/blog/123", "match": "post", "params": { "id": "123" }, "all": ["slug", "post"] },
+        { "path": "/blog/123-my-post", "match": "post", "params": { "id": "123", "title": "my-post" }, "all": ["slug", "post"] },
+        { "path": "/blog/1-2-3", "match": "post", "params": { "id": "1", "title": "2-3" } },
+        { "path": "/blog/123-", "match": "slug", "params": { "slug": "123-" }, "all": ["slug"] },
+        { "path": "/blog/hello-world", "match": "slug", "params": { "slug": "hello-world" } },
+        { "path": "/blog/-1", "match": "slug", "params": { "slug": "-1" } },
+        { "path": "/blog/123-my-post/", "match": "post", "params": { "id": "123", "title": "my-post" } },
+        { "path": "/blog/123/my-post", "match": null }
+      ]
+    },
+    {
+      "name": "file name with an optional extension",
+      "description": "README `/files/:name{.:ext}?`: the lazy name takes up to the first dot",
+      "routes": [{ "path": "/files/:name{.:ext}?", "name": "file" }],
+      "cases": [
+        { "path": "/files/readme", "match": "file", "params": { "name": "readme" } },
+        { "path": "/files/a.tar.gz", "match": "file", "params": { "name": "a", "ext": "tar.gz" } },
+        { "path": "/files/photo.jpg", "match": "file", "params": { "name": "photo", "ext": "jpg" } },
+        { "path": "/files/.env", "match": "file", "params": { "name": ".env" } },
+        { "path": "/files/a.", "match": "file", "params": { "name": "a." } },
+        { "path": "/files/a..b", "match": "file", "params": { "name": "a", "ext": ".b" } },
+        { "path": "/files", "match": null },
+        { "path": "/files/a/b.txt", "match": null }
+      ]
+    },
+    {
+      "name": "optional param inside a segment after text",
+      "description": "README `/v:version?`, `/pre-:x?` (only the param is optional) and `{-:channel}?`, beside a generic page route",
+      "routes": [
+        { "path": "/v:version?", "name": "version" },
+        { "path": "/:page", "name": "page" },
+        { "path": "/dl/latest{-:channel}?", "name": "latest" },
+        { "path": "/tags/pre-:x?", "name": "pre" }
+      ],
+      "cases": [
+        { "path": "/v", "match": "version", "params": {}, "all": ["page", "version"] },
+        { "path": "/v2", "match": "version", "params": { "version": "2" }, "all": ["page", "version"] },
+        { "path": "/version", "match": "version", "params": { "version": "ersion" } },
+        { "path": "/about", "match": "page", "params": { "page": "about" } },
+        { "path": "/v/", "match": "version", "params": {} },
+        { "path": "/dl/latest", "match": "latest", "params": {} },
+        { "path": "/dl/latest-beta", "match": "latest", "params": { "channel": "beta" } },
+        { "path": "/dl/latest-", "match": null },
+        { "path": "/tags/pre-", "match": "pre", "params": {} },
+        { "path": "/tags/pre-a", "match": "pre", "params": { "x": "a" } },
+        { "path": "/tags/", "match": "page", "params": { "page": "tags" } },
+        { "path": "/tags/pre", "match": null }
+      ]
+    },
+    {
+      "name": "date archive with chained optional segments",
+      "description": "`/archive/:year(\\d{4}){/:month(\\d{2})}?{/:day(\\d{2})}?`: a month-only path goes to `month` (the first expansion)",
+      "routes": [
+        { "path": "/archive/:year(\\d{4}){/:month(\\d{2})}?{/:day(\\d{2})}?", "name": "archive" },
+        { "path": "/archive/:slug", "name": "slug" }
+      ],
+      "cases": [
+        { "path": "/archive/2024", "match": "archive", "params": { "year": "2024" }, "all": ["slug", "archive"] },
+        { "path": "/archive/2024/05", "match": "archive", "params": { "year": "2024", "month": "05" } },
+        { "path": "/archive/2024/05/17", "match": "archive", "params": { "year": "2024", "month": "05", "day": "17" } },
+        { "path": "/archive/2024/5", "match": null },
+        { "path": "/archive/24", "match": "slug", "params": { "slug": "24" } },
+        { "path": "/archive/latest", "match": "slug", "params": { "slug": "latest" } },
+        { "path": "/archive/2024/05/17/x", "match": null },
+        { "path": "/archive/2024//17", "match": null }
+      ]
+    },
+    {
+      "name": "zero-or-more vs one-or-more path params",
+      "description": "README `:path*` / `:path+`: none of their segments can be empty, a static index sits next to the `+` route",
+      "routes": [
+        { "path": "/docs/:path*", "name": "docs" },
+        { "path": "/docs/api/:name", "name": "docs-api" },
+        { "path": "/files", "name": "files-index" },
+        { "path": "/files/:path+", "name": "files" }
+      ],
+      "cases": [
+        { "path": "/docs", "match": "docs", "params": {} },
+        { "path": "/docs/", "match": "docs", "params": {} },
+        { "path": "/docs/a/b", "match": "docs", "params": { "path": "a/b" } },
+        { "path": "/docs/a/b/", "match": "docs", "params": { "path": "a/b" } },
+        { "path": "/docs//", "match": null },
+        { "path": "/docs/a//b", "match": null },
+        { "path": "/docs/api/fetch", "match": "docs-api", "params": { "name": "fetch" }, "all": ["docs", "docs-api"] },
+        { "path": "/docs/api", "match": "docs", "params": { "path": "api" } },
+        { "path": "/files", "match": "files-index", "params": {}, "all": ["files-index"] },
+        { "path": "/files/a", "match": "files", "params": { "path": "a" } },
+        { "path": "/files/a/b/c", "match": "files", "params": { "path": "a/b/c" } },
+        { "path": "/files//a", "match": null },
+        { "path": "/files//", "match": null }
+      ]
+    },
+    {
+      "name": "one-or-more param with a bare catch-all fallback",
+      "description": "README: a path with an empty segment falls through from `:path+` to a less specific `**`; on the same wildcard node `**` < `**:name`",
+      "routes": [
+        { "path": "/files/**", "name": "raw" },
+        { "path": "/files/:path+", "name": "files" }
+      ],
+      "cases": [
+        { "path": "/files/a/b", "match": "files", "params": { "path": "a/b" }, "all": ["raw", "files"] },
+        { "path": "/files//a", "match": "raw", "params": { "0": "/a" }, "all": ["raw"] },
+        { "path": "/files/a//b", "match": "raw", "params": { "0": "a//b" } },
+        { "path": "/files//", "match": "raw", "params": { "0": "" } },
+        { "path": "/files", "match": "raw", "params": {} }
+      ]
+    },
+    {
+      "name": "carve-out A1: static route registered before its optional superset",
+      "description": "README Result ordering: `/admin` and `/admin/:page?` match `/admin` with an identical entry, registration order decides",
+      "routes": [
+        { "path": "/admin", "name": "admin" },
+        { "path": "/admin/:page?", "name": "admin-page" }
+      ],
+      "cases": [
+        { "path": "/admin", "match": "admin", "params": {}, "all": ["admin", "admin-page"] },
+        { "path": "/admin/", "match": "admin", "params": {}, "all": ["admin", "admin-page"] },
+        { "path": "/admin/users", "match": "admin-page", "params": { "page": "users" }, "all": ["admin-page"] },
+        { "path": "/admin/users/1", "match": null }
+      ]
+    },
+    {
+      "name": "carve-out A1: optional superset registered before the static route",
+      "description": "README Result ordering: adding `/admin/:page?` first swaps the order on `/admin`",
+      "routes": [
+        { "path": "/admin/:page?", "name": "admin-page" },
+        { "path": "/admin", "name": "admin" }
+      ],
+      "cases": [
+        { "path": "/admin", "match": "admin-page", "params": {}, "all": ["admin-page", "admin"] },
+        { "path": "/admin/", "match": "admin-page", "params": {}, "all": ["admin-page", "admin"] },
+        { "path": "/admin/users", "match": "admin-page", "params": { "page": "users" }, "all": ["admin-page"] }
+      ]
+    },
+    {
+      "name": "optional slug next to a docs catch-all",
+      "description": "`/docs/:slug?` and `/docs/**` on `/docs`: traversal lists the wildcard child before the node's own entry",
+      "routes": [
+        { "path": "/docs/**", "name": "docs-all" },
+        { "path": "/docs/:slug?", "name": "docs-slug" }
+      ],
+      "cases": [
+        { "path": "/docs", "match": "docs-slug", "params": {}, "all": ["docs-all", "docs-slug"] },
+        { "path": "/docs/intro", "match": "docs-slug", "params": { "slug": "intro" }, "all": ["docs-all", "docs-slug"] },
+        { "path": "/docs/a/b", "match": "docs-all", "params": { "0": "a/b" }, "all": ["docs-all"] },
+        { "path": "/docs//", "match": "docs-all", "params": { "0": "" }, "all": ["docs-all"] }
+      ]
+    },
+    {
+      "name": "api scope middleware over an optional version segment",
+      "description": "A method-agnostic `/api/*` guard (optional at the end, README Wildcards) covering `/api{/:version(v\\d+)}?/users` and a static v1 route",
+      "routes": [
+        { "method": "", "path": "/api/*", "name": "api-scope" },
+        { "path": "/api{/:version(v\\d+)}?/users", "name": "users" },
+        { "path": "/api/v1/users", "name": "v1-users" }
+      ],
+      "guards": { "api-scope": ["users", "v1-users"] },
+      "cases": [
+        { "path": "/api", "match": "api-scope", "params": {} },
+        { "path": "/api/", "match": "api-scope", "params": { "0": "" } },
+        { "path": "/api/users", "match": "users", "params": {}, "all": ["api-scope", "users"] },
+        { "path": "/api/v2/users", "match": "users", "params": { "version": "v2" }, "all": ["api-scope", "users"] },
+        { "path": "/api/v1/users", "match": "v1-users", "params": {}, "all": ["api-scope", "users", "v1-users"] },
+        { "path": "/api/beta/users", "match": "api-scope", "params": { "0": "beta/users" } },
+        { "method": "POST", "path": "/api/users", "match": "api-scope", "params": { "0": "users" } },
+        { "method": "POST", "path": "/api/v1/users", "match": "api-scope", "params": { "0": "v1/users" } }
+      ]
+    },
+    {
+      "name": "optional segment before a trailing star",
+      "description": "README Differences: `/a/:x?/*` gives a lone segment to the optional param and the `*` is optional",
+      "routes": [{ "path": "/cdn/:version?/*", "name": "cdn" }],
+      "cases": [
+        { "path": "/cdn", "match": "cdn", "params": {} },
+        { "path": "/cdn/a", "match": "cdn", "params": { "version": "a" } },
+        { "path": "/cdn/a/b", "match": "cdn", "params": { "version": "a", "0": "b" } },
+        { "path": "/cdn/a/b/c", "match": "cdn", "params": { "version": "a", "0": "b/c" } },
+        { "path": "/cdn/a/", "match": "cdn", "params": { "version": "a", "0": "" } },
+        { "path": "/cdn//b", "match": "cdn", "params": { "0": "/b" } }
+      ]
+    },
+    {
+      "name": "two optional segments in a row",
+      "description": "`/shop/:category?/:product?`: a single segment goes to the first param, as in URLPattern; a static sibling wins on its own path",
+      "routes": [
+        { "path": "/shop/:category?/:product?", "name": "shop" },
+        { "path": "/shop/sale", "name": "sale" }
+      ],
+      "cases": [
+        { "path": "/shop", "match": "shop", "params": {} },
+        { "path": "/shop/shoes", "match": "shop", "params": { "category": "shoes" }, "all": ["shop"], "bug": "findAllRoutes lists the one route twice, once per expansion (/shop/:category and /shop/:product): [{category}, {product}]" },
+        { "path": "/shop/shoes/nike", "match": "shop", "params": { "category": "shoes", "product": "nike" } },
+        { "path": "/shop/sale", "match": "sale", "params": {}, "all": ["shop", "sale"], "bug": "the optional route is listed twice: [shop, shop, sale]" },
+        { "path": "/shop/sale/nike", "match": "shop", "params": { "category": "sale", "product": "nike" } },
+        { "path": "/shop/shoes/nike/x", "match": null },
+        { "path": "/shop//nike", "match": null }
+      ]
+    },
+    {
+      "name": "orders with an optional numeric id",
+      "description": "README `:id(\\d+)?`: an optional segment with a constraint, beside a static `new` page",
+      "routes": [
+        { "path": "/orders/:id(\\d+)?", "name": "orders" },
+        { "path": "/orders/new", "name": "new" }
+      ],
+      "cases": [
+        { "path": "/orders", "match": "orders", "params": {} },
+        { "path": "/orders/7", "match": "orders", "params": { "id": "7" } },
+        { "path": "/orders/new", "match": "new", "params": {}, "all": ["new"] },
+        { "path": "/orders/abc", "match": null },
+        { "path": "/orders//", "match": null }
+      ]
+    },
+    {
+      "name": "optional extension group after a star",
+      "description": "README Differences: `/media/*{.webp}?`, the route with the group wins (`/a.webp` gives `{ 0: \"a\" }`)",
+      "routes": [{ "path": "/media/*{.webp}?", "name": "media" }],
+      "cases": [
+        { "path": "/media/a.webp", "match": "media", "params": { "0": "a" } },
+        { "path": "/media/a/b.webp", "match": "media", "params": { "0": "a/b" } },
+        { "path": "/media/a.png", "match": "media", "params": { "0": "a.png" } },
+        { "path": "/media", "match": "media", "params": {} },
+        { "path": "/media/", "match": "media", "params": { "0": "" } }
+      ]
+    },
+    {
+      "name": "params sharing a segment (README Params)",
+      "description": "Lazy `:name`s split at the first separator, a `*` is greedy across `/`, and `-` ends a param name",
+      "routes": [
+        { "path": "/pair/:a-:b", "name": "pair" },
+        { "path": "/files/:name.:ext", "name": "file" },
+        { "path": "/blog/:year-:month", "name": "month" },
+        { "path": "/users/:user-id", "name": "user" },
+        { "path": "/glob/*-:a", "name": "glob" }
+      ],
+      "cases": [
+        { "path": "/pair/x-y-z", "match": "pair", "params": { "a": "x", "b": "y-z" } },
+        { "path": "/pair/a--b", "match": "pair", "params": { "a": "a", "b": "-b" } },
+        { "path": "/pair/x-", "match": null },
+        { "path": "/pair/-x", "match": null },
+        { "path": "/pair/xy", "match": null },
+        { "path": "/files/a.tar.gz", "match": "file", "params": { "name": "a", "ext": "tar.gz" } },
+        { "path": "/files/archive", "match": null },
+        { "path": "/blog/2024-05", "match": "month", "params": { "year": "2024", "month": "05" } },
+        { "path": "/users/42-id", "match": "user", "params": { "user": "42" } },
+        { "path": "/users/a-b-id", "match": "user", "params": { "user": "a-b" } },
+        { "path": "/users/42", "match": null },
+        { "path": "/users/42-ID", "match": null },
+        { "path": "/glob/x-y-z", "match": "glob", "params": { "0": "x-y", "a": "z" } },
+        { "path": "/glob/x/y-z", "match": "glob", "params": { "0": "x/y", "a": "z" } },
+        { "path": "/glob/-z", "match": "glob", "params": { "0": "", "a": "z" } },
+        { "path": "/glob/x-y/", "match": "glob", "params": { "0": "x", "a": "y" } },
+        { "path": "/glob/xyz", "match": null }
+      ]
+    },
+    {
+      "name": "common pattern mistakes",
+      "description": "README Invalid patterns and Param naming rules: each throws a `rou3:` error instead of matching something unexpected; the fixed spellings work",
+      "routes": [
+        { "path": "/u/:user_id", "name": "user-id" },
+        { "path": "/v/:v2/:_0", "name": "names" },
+        { "path": "/lang/c++", "name": "cpp" },
+        { "path": "/q/what\\?", "name": "question" },
+        { "path": "/caf/:caf\\é", "name": "escaped-name-end" }
+      ],
+      "cases": [
+        { "path": "/u/42", "match": "user-id", "params": { "user_id": "42" } },
+        { "path": "/v/a/b", "match": "names", "params": { "v2": "a", "_0": "b" } },
+        { "path": "/lang/c++", "match": "cpp", "params": {} },
+        { "path": "/q/what%3F", "match": "question", "params": {} },
+        { "path": "/q/what", "match": null },
+        { "path": "/caf/x%C3%A9", "match": "escaped-name-end", "params": { "caf": "x" } }
+      ],
+      "invalid": [
+        "/:0",
+        "/:1st",
+        "/:café",
+        "/:id$",
+        "/:",
+        "/users/:id/:id",
+        "/foo?",
+        "/a/b?/c",
+        "/book{s}+",
+        "/book{s}*",
+        "/a{/b{/c}?}?",
+        "/users/{oops",
+        "/users/:id(\\d+",
+        "/x/()",
+        "/*/x/*",
+        "/*/**",
+        "/file-*-*.png",
+        "/:a(.*)/(.*)",
+        "/:a+/:b+",
+        "/files/:path(.*)?",
+        "/files/(.*)?",
+        "/files/*?",
+        "/files/**+",
+        "/:x.png?",
+        "/:id(\\d+)+",
+        "/tags/pre-:x+",
+        "/:x((a))",
+        "/:x(^a)",
+        "/:x(a$)",
+        "{/a}?b",
+        "{/:id}?.png",
+        "/a**b",
+        "/a\\/b",
+        "/:_/**",
+        "/{:foo}{*}",
+        "/:id(\\d+){?}"
+      ]
+    }
+  ]
+}

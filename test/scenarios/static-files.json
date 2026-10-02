@@ -1,0 +1,634 @@
+{
+  "$schema": "./_schema.json",
+  "description": "Static assets, file serving and SSR/SSG frameworks: exact files vs extension routes vs SPA fallbacks, Nuxt/Nitro payloads and route rules, Next.js/SvelteKit catch-alls, dotfiles, traversal and encoded file names",
+  "sources": [
+    "README: Route patterns (Params, Wildcards, Percent-encoding, Invalid patterns, Differences from URLPattern)",
+    "README: Matching (Trailing slashes and empty segments, Path normalization, Result ordering incl. 'Segments after a catch-all')",
+    "README: Regular expressions (regex ≡ router, used as a guard)",
+    ".agents/matching.md: greedy `*`, segments after a catch-all, empty segments",
+    "Nitro route rules / Nuxt payload extraction (`/**/_payload.json`, `/_ipx/**`, `/api/_content/**`), Nuxt OG image",
+    "Next.js dynamic routes (`[...slug]`, `[[...slug]]`), SvelteKit rest params and matchers, Vite dev server URLs (`/@fs/`, `/@id/`, `/node_modules/.vite/deps/`)"
+  ],
+  "scenarios": [
+    {
+      "name": "asset server with exact files and a SPA fallback",
+      "description": "A typical SPA host: a `/**` index.html fallback, exact root files, asset mounts in every common spelling and a method-agnostic API scope.",
+      "routes": [
+        { "path": "/**", "name": "spa" },
+        { "path": "/favicon.ico", "name": "favicon" },
+        { "path": "/robots.txt", "name": "robots" },
+        { "path": "/assets/**", "name": "assets" },
+        { "path": "/_nuxt/**", "name": "nuxt" },
+        { "path": "/static/*", "name": "static" },
+        { "method": "", "path": "/api/**", "name": "api" }
+      ],
+      "cases": [
+        { "path": "/", "match": "spa", "params": {}, "all": ["spa"] },
+        { "path": "/favicon.ico", "match": "favicon", "params": {}, "all": ["spa", "favicon"] },
+        { "path": "/favicon.ico/", "match": "favicon", "note": "one trailing slash is ignored" },
+        { "path": "/robots.txt", "match": "robots", "all": ["spa", "robots"] },
+        { "path": "/FAVICON.ICO", "match": "spa", "params": { "0": "FAVICON.ICO" }, "note": "case-sensitive" },
+        { "path": "/favicon.ico/x", "match": "spa", "params": { "0": "favicon.ico/x" } },
+        { "path": "/assets/app.js", "match": "assets", "params": { "0": "app.js" }, "all": ["spa", "assets"] },
+        { "path": "/assets", "match": "assets", "params": {}, "all": ["spa", "assets"] },
+        { "path": "/assets/", "match": "assets", "params": {} },
+        { "path": "/assets/js/chunk-abc.js", "match": "assets", "params": { "0": "js/chunk-abc.js" } },
+        { "path": "/static/logo.svg", "match": "static", "params": { "0": "logo.svg" }, "all": ["spa", "static"] },
+        { "path": "/static", "match": "static", "params": {} },
+        { "path": "/static/", "match": "static", "params": { "0": "" } },
+        { "path": "/static/img/a/b.png", "match": "static", "params": { "0": "img/a/b.png" } },
+        { "path": "/_nuxt/entry.CkX3.js", "match": "nuxt", "params": { "0": "entry.CkX3.js" } },
+        { "path": "/about/team", "match": "spa", "params": { "0": "about/team" } },
+        { "path": "/.env", "match": "spa", "params": { "0": ".env" } },
+        { "method": "POST", "path": "/assets/app.js", "match": null, "all": [] },
+        { "method": "POST", "path": "/api/upload", "match": "api", "params": { "0": "upload" }, "all": ["api"] },
+        { "path": "/api/users", "match": "api", "all": ["spa", "api"] },
+        { "path": "/assets/../.env", "match": "assets", "params": { "0": "../.env" }, "note": "no normalization by default" },
+        { "path": "/assets/../.env", "normalize": true, "match": "spa", "params": { "0": ".env" } },
+        { "path": "/static/../../robots.txt", "normalize": true, "match": "robots" },
+        { "path": "/static/img/..", "normalize": true, "match": "static", "params": { "0": "" }, "note": "a last `..` leaves a trailing slash, which a trailing `*` reads" },
+        { "path": "/assets/%2e%2e/.env", "normalize": true, "match": "assets", "params": { "0": "%2e%2e/.env" }, "note": "paths are never decoded; new URL() would already have resolved it" }
+      ]
+    },
+    {
+      "name": "file mounts in every catch-all spelling",
+      "description": "Trailing slashes and empty segments per spelling (README 'Trailing slashes and empty segments' and the 0.12 notes): `*`, `**`, `(.*)` and `:name(.*)` take empty segments, `**:name`, `:name+` and `:name*` never do.",
+      "routes": [
+        { "path": "/assets/**", "name": "assets" },
+        { "path": "/static/*", "name": "static" },
+        { "path": "/files/**:path", "name": "files" },
+        { "path": "/downloads/:path+", "name": "downloads" },
+        { "path": "/docs/:slug*", "name": "docs" },
+        { "path": "/media/:path(.*)", "name": "media" },
+        { "path": "/raw/(.*)", "name": "raw" }
+      ],
+      "cases": [
+        { "path": "/assets", "match": "assets", "params": {} },
+        { "path": "/assets/", "match": "assets", "params": {} },
+        { "path": "/assets//", "match": "assets", "params": { "0": "" } },
+        { "path": "/assets/a/b", "match": "assets", "params": { "0": "a/b" } },
+        { "path": "/assets/a/b/", "match": "assets", "params": { "0": "a/b" } },
+        { "path": "/assets//a", "match": "assets", "params": { "0": "/a" } },
+        { "path": "/assets/a//b", "match": "assets", "params": { "0": "a//b" } },
+        { "path": "/assets/a//", "match": "assets", "params": { "0": "a/" } },
+        { "path": "/static", "match": "static", "params": {} },
+        { "path": "/static/", "match": "static", "params": { "0": "" } },
+        { "path": "/static//", "match": "static", "params": { "0": "" } },
+        { "path": "/static/a/b/", "match": "static", "params": { "0": "a/b" } },
+        { "path": "/static//a", "match": "static", "params": { "0": "/a" } },
+        { "path": "/static/a//", "match": "static", "params": { "0": "a/" } },
+        { "path": "/files", "match": null },
+        { "path": "/files/", "match": null },
+        { "path": "/files//", "match": null },
+        { "path": "/files/a/b/", "match": "files", "params": { "path": "a/b" } },
+        { "path": "/files//a", "match": null },
+        { "path": "/files/a//b", "match": null },
+        { "path": "/files/a//", "match": null },
+        { "path": "/downloads/a", "match": "downloads", "params": { "path": "a" } },
+        { "path": "/downloads/a/b.zip", "match": "downloads", "params": { "path": "a/b.zip" } },
+        { "path": "/downloads", "match": null },
+        { "path": "/downloads/a//b", "match": null },
+        { "path": "/docs", "match": "docs", "params": {} },
+        { "path": "/docs/", "match": "docs", "params": {} },
+        { "path": "/docs//", "match": null },
+        { "path": "/docs/a/b", "match": "docs", "params": { "slug": "a/b" } },
+        { "path": "/docs/a//b", "match": null },
+        { "path": "/media", "match": "media", "params": {} },
+        { "path": "/media/", "match": "media", "params": { "path": "" } },
+        { "path": "/media//", "match": "media", "params": { "path": "" } },
+        { "path": "/media/a/b", "match": "media", "params": { "path": "a/b" } },
+        { "path": "/media//a", "match": "media", "params": { "path": "/a" } },
+        { "path": "/media/a//b", "match": "media", "params": { "path": "a//b" } },
+        { "path": "/raw", "match": "raw", "params": {} },
+        { "path": "/raw/", "match": "raw", "params": { "0": "" } },
+        { "path": "/raw/a/b", "match": "raw", "params": { "0": "a/b" } }
+      ]
+    },
+    {
+      "name": "extension routes anchored at the end with a SPA fallback",
+      "description": "`/*.json`, `/**.md` (≡ `/*.md`) and `/images/*.png` match from the end of the path and beat the `/**` fallback.",
+      "routes": [
+        { "path": "/**", "name": "spa" },
+        { "path": "/*.json", "name": "json" },
+        { "path": "/**.md", "name": "md" },
+        { "path": "/images/*.png", "name": "png" }
+      ],
+      "cases": [
+        { "path": "/manifest.json", "match": "json", "params": { "0": "manifest" }, "all": ["spa", "json"] },
+        { "path": "/api/data/users.json", "match": "json", "params": { "0": "api/data/users" } },
+        { "path": "/.json", "match": "json", "params": { "0": "" } },
+        { "path": "/README.md", "match": "md", "params": { "0": "README" }, "all": ["spa", "md"] },
+        { "path": "/docs/guide/intro.md", "match": "md", "params": { "0": "docs/guide/intro" } },
+        { "path": "/docs/intro.md/", "match": "md", "params": { "0": "docs/intro" } },
+        { "path": "/docs/intro.md//", "match": "spa", "params": { "0": "docs/intro.md/" }, "note": "the last segment is empty" },
+        { "path": "/images/logo.png", "match": "png", "params": { "0": "logo" }, "all": ["spa", "png"] },
+        { "path": "/images/icons/x.png", "match": "png", "params": { "0": "icons/x" } },
+        { "path": "/images/logo.jpg", "match": "spa", "params": { "0": "images/logo.jpg" } },
+        { "path": "/images/.png", "match": "png", "params": { "0": "" } },
+        { "path": "/images//a.png", "match": "png", "params": { "0": "/a" } },
+        { "path": "/images/logo.png.json", "match": "json", "params": { "0": "images/logo.png" }, "all": ["spa", "json"] },
+        { "path": "/images/notes.md", "match": "md", "params": { "0": "images/notes" } },
+        { "path": "/notes.json.md", "match": "md", "params": { "0": "notes.json" } },
+        { "path": "/images/a.md.png", "match": "png", "params": { "0": "a.md" }, "all": ["spa", "png"] },
+        { "path": "/x.png", "match": "spa", "params": { "0": "x.png" } },
+        { "path": "/data.JSON", "match": "spa" },
+        { "path": "/", "match": "spa", "params": {}, "all": ["spa"] }
+      ]
+    },
+    {
+      "name": "root file names with `/:name.:ext`",
+      "description": "A dotted root route next to a page route, an exact file and a fallback: params in a segment are lazy, so the name stops at the first dot.",
+      "routes": [
+        { "path": "/**", "name": "spa" },
+        { "path": "/favicon.ico", "name": "favicon" },
+        { "path": "/:name.:ext", "name": "root-file" },
+        { "path": "/:page", "name": "page" }
+      ],
+      "cases": [
+        { "path": "/sitemap.xml", "match": "root-file", "params": { "name": "sitemap", "ext": "xml" }, "all": ["spa", "page", "root-file"] },
+        { "path": "/favicon.ico", "match": "favicon", "params": {}, "all": ["spa", "page", "root-file", "favicon"] },
+        { "path": "/about", "match": "page", "params": { "page": "about" }, "all": ["spa", "page"] },
+        { "path": "/jquery.min.js", "match": "root-file", "params": { "name": "jquery", "ext": "min.js" } },
+        { "path": "/.env", "match": "page", "params": { "page": ".env" }, "note": "the name needs a character before the dot" },
+        { "path": "/.env.local", "match": "root-file", "params": { "name": ".env", "ext": "local" } },
+        { "path": "/file.", "match": "page", "params": { "page": "file." } },
+        { "path": "/v1.2/", "match": "root-file", "params": { "name": "v1", "ext": "2" } },
+        { "path": "/a/b.js", "match": "spa", "params": { "0": "a/b.js" } },
+        { "path": "/", "match": "spa", "params": {} }
+      ]
+    },
+    {
+      "name": "competing extension routes in one directory",
+      "description": "An exact file, an image-only route, any `name.ext`, a `*.pdf` that spans directories, and a `:path+` catch-all for the rest.",
+      "routes": [
+        { "path": "/files/:path+", "name": "path" },
+        { "path": "/files/:name.:ext", "name": "any-ext" },
+        { "path": "/files/:name.:ext(png|jpg|webp)", "name": "image" },
+        { "path": "/files/*.pdf", "name": "pdf" },
+        { "path": "/files/report.pdf", "name": "report" }
+      ],
+      "cases": [
+        { "path": "/files/a.png", "match": "image", "params": { "name": "a", "ext": "png" }, "all": ["path", "any-ext", "image"], "bug": "a strictly narrower mixed-segment sibling (`:name.:ext(png|jpg|webp)` ⊂ `:name.:ext`) ties on weight, so registration order decides and the image route never wins (compareRoutes also says partial)" },
+        { "path": "/files/photo.final.webp", "match": "any-ext", "params": { "name": "photo", "ext": "final.webp" }, "note": "same tie: the first-registered any-ext wins" },
+        { "path": "/files/a.PNG", "match": "any-ext", "params": { "name": "a", "ext": "PNG" } },
+        { "path": "/files/archive.tar.gz", "match": "any-ext", "params": { "name": "archive", "ext": "tar.gz" }, "all": ["path", "any-ext"] },
+        { "path": "/files/report.pdf", "match": "report", "params": {}, "all": ["path", "pdf", "any-ext", "report"] },
+        { "path": "/files/a.pdf", "match": "any-ext", "params": { "name": "a", "ext": "pdf" }, "all": ["path", "pdf", "any-ext"], "note": "both pin the last segment with a regex; tie → tree order (wildcard before param)" },
+        { "path": "/files/a/b.pdf", "match": "pdf", "params": { "0": "a/b" }, "all": ["path", "pdf"] },
+        { "path": "/files/.pdf", "match": "pdf", "params": { "0": "" }, "all": ["path", "pdf"] },
+        { "path": "/files/noext", "match": "path", "params": { "path": "noext" } },
+        { "path": "/files/.htaccess", "match": "path", "params": { "path": ".htaccess" } },
+        { "path": "/files/.env.local", "match": "any-ext", "params": { "name": ".env", "ext": "local" } },
+        { "path": "/files/a/b.png", "match": "path", "params": { "path": "a/b.png" } },
+        { "path": "/files//a.pdf", "match": "pdf", "params": { "0": "/a" }, "all": ["pdf"] },
+        { "path": "/files", "match": null }
+      ]
+    },
+    {
+      "name": "content-hashed build assets",
+      "description": "Vite-style `name-HASH.ext` files get immutable caching; the hash constraint lets the lazy name take dashes.",
+      "routes": [
+        { "method": "", "path": "/assets/**", "name": "assets-mw" },
+        { "path": "/assets/:file", "name": "asset" },
+        { "path": "/assets/:name-:hash([A-Za-z0-9_]{8}).:ext", "name": "hashed" }
+      ],
+      "guards": { "assets-mw": ["asset", "hashed"] },
+      "cases": [
+        { "path": "/assets/index-Bx3kQ9_a.js", "match": "hashed", "params": { "name": "index", "hash": "Bx3kQ9_a", "ext": "js" }, "all": ["assets-mw", "asset", "hashed"] },
+        { "path": "/assets/vendor-react-Ab12Cd34.js", "match": "hashed", "params": { "name": "vendor-react", "hash": "Ab12Cd34", "ext": "js" } },
+        { "path": "/assets/index-Bx3kQ9_a.js.map", "match": "hashed", "params": { "name": "index", "hash": "Bx3kQ9_a", "ext": "js.map" } },
+        { "path": "/assets/logo.svg", "match": "asset", "params": { "file": "logo.svg" }, "all": ["assets-mw", "asset"] },
+        { "path": "/assets/index-short.js", "match": "asset", "params": { "file": "index-short.js" } },
+        { "path": "/assets/fonts/inter-Ab12Cd34.woff2", "match": "assets-mw", "params": { "0": "fonts/inter-Ab12Cd34.woff2" } },
+        { "method": "HEAD", "path": "/assets/index-Bx3kQ9_a.js", "match": "assets-mw", "all": ["assets-mw"] },
+        { "path": "/assets/", "match": "assets-mw", "params": {} }
+      ]
+    },
+    {
+      "name": "nuxt payloads, OG images and IPX",
+      "description": "The README 'Segments after a catch-all' example extended with a `/**` fallback, OG images under any blog path and the IPX image proxy.",
+      "routes": [
+        { "path": "/**", "name": "spa" },
+        { "path": "/blog/**", "name": "blog" },
+        { "path": "/blog/:slug", "name": "post" },
+        { "path": "/**/_payload.json", "name": "payload" },
+        { "path": "/blog/:slug/_payload.json", "name": "post-payload" },
+        { "path": "/blog/**:slug/og.png", "name": "og" },
+        { "path": "/_ipx/:modifiers/**:path", "name": "ipx" },
+        { "path": "/api/_content/**", "name": "content" }
+      ],
+      "cases": [
+        { "path": "/blog/_payload.json", "match": "payload", "params": { "0": "blog" }, "all": ["spa", "blog", "post", "payload"] },
+        { "path": "/blog/hello/_payload.json", "match": "post-payload", "params": { "slug": "hello" }, "all": ["spa", "blog", "payload", "post-payload"] },
+        { "path": "/blog/hello/_payload.json/", "match": "post-payload", "params": { "slug": "hello" } },
+        { "path": "/blog/hello", "match": "post", "params": { "slug": "hello" }, "all": ["spa", "blog", "post"] },
+        { "path": "/blog", "match": "blog", "params": {}, "all": ["spa", "blog"] },
+        { "path": "/blog/", "match": "blog", "params": {} },
+        { "path": "/_payload.json", "match": "payload", "params": {}, "all": ["spa", "payload"] },
+        { "path": "/about/team/_payload.json", "match": "payload", "params": { "0": "about/team" } },
+        { "path": "/blog/hello/og.png", "match": "og", "params": { "slug": "hello" }, "all": ["spa", "blog", "og"] },
+        { "path": "/blog/2024/hello/og.png", "match": "og", "params": { "slug": "2024/hello" } },
+        { "path": "/blog/og.png", "match": "post", "params": { "slug": "og.png" }, "all": ["spa", "blog", "post"], "note": "`**:slug` needs a segment" },
+        { "path": "/blog//og.png", "match": "blog", "params": { "0": "/og.png" }, "all": ["spa", "blog"] },
+        { "path": "/_ipx/w_200/images/a.png", "match": "ipx", "params": { "modifiers": "w_200", "path": "images/a.png" }, "all": ["spa", "ipx"] },
+        { "path": "/_ipx/_/logo.png", "match": "ipx", "params": { "modifiers": "_", "path": "logo.png" } },
+        { "path": "/_ipx/w_200", "match": "spa", "params": { "0": "_ipx/w_200" } },
+        { "path": "/_ipx/w_200//a.png", "match": "spa", "params": { "0": "_ipx/w_200//a.png" } },
+        { "path": "/_ipx/w_200/_payload.json", "match": "payload", "params": { "0": "_ipx/w_200" }, "all": ["spa", "ipx", "payload"] },
+        { "path": "/api/_content/query/abc", "match": "content", "params": { "0": "query/abc" } }
+      ]
+    },
+    {
+      "name": "nitro route rules merged from findAllRoutes",
+      "description": "Method-agnostic route rules (prerender, ISR, cache, CORS) merged least → most specific, so the most specific rule wins.",
+      "routes": [
+        { "method": "", "path": "/**", "name": "defaults" },
+        { "method": "", "path": "/blog/**", "name": "isr" },
+        { "method": "", "path": "/blog/:slug", "name": "prerender" },
+        { "method": "", "path": "/blog/drafts/**", "name": "no-cache" },
+        { "method": "", "path": "/api/**", "name": "cors" },
+        { "method": "", "path": "/_nuxt/**", "name": "immutable" },
+        { "method": "", "path": "/admin/**", "name": "ssr-off" }
+      ],
+      "guards": { "defaults": ["isr", "prerender", "no-cache", "cors", "immutable", "ssr-off"], "isr": ["prerender", "no-cache"] },
+      "cases": [
+        { "path": "/", "match": "defaults", "all": ["defaults"] },
+        { "path": "/blog/hello", "match": "prerender", "all": ["defaults", "isr", "prerender"] },
+        { "path": "/blog/drafts/wip", "match": "no-cache", "params": { "0": "wip" }, "all": ["defaults", "isr", "no-cache"] },
+        { "path": "/blog/drafts", "match": "no-cache", "params": {}, "all": ["defaults", "isr", "prerender", "no-cache"] },
+        { "path": "/blog", "match": "isr", "all": ["defaults", "isr"] },
+        { "path": "/blog/a/b", "match": "isr", "all": ["defaults", "isr"] },
+        { "path": "/_nuxt/entry.js", "match": "immutable", "all": ["defaults", "immutable"] },
+        { "method": "POST", "path": "/api/hello", "match": "cors", "all": ["defaults", "cors"] },
+        { "method": "OPTIONS", "path": "/api", "match": "cors", "all": ["defaults", "cors"] },
+        { "path": "/admin", "match": "ssr-off", "all": ["defaults", "ssr-off"] },
+        { "path": "/administrator", "match": "defaults", "all": ["defaults"] }
+      ],
+      "invalid": ["/**/*.xml", "/blog/*/*.png", "/assets/x**"]
+    },
+    {
+      "name": "next.js catch-all segments translated",
+      "description": "`[...slug]` → `/docs/**:slug`, `[[...slug]]` → `/shop/:slug*`, `[lang]/[...rest]` → `/:lang/**:rest`.",
+      "routes": [
+        { "path": "/", "name": "home" },
+        { "path": "/docs/**:slug", "name": "docs" },
+        { "path": "/shop/:slug*", "name": "shop" },
+        { "path": "/:lang", "name": "lang-home" },
+        { "path": "/:lang/**:rest", "name": "lang-rest" },
+        { "path": "/blog/:slug", "name": "blog-post" },
+        { "path": "/_next/static/**", "name": "next-static" }
+      ],
+      "cases": [
+        { "path": "/", "match": "home", "all": ["home"] },
+        { "path": "/docs", "match": "lang-home", "params": { "lang": "docs" }, "note": "`[...slug]` needs a segment" },
+        { "path": "/docs/a", "match": "docs", "params": { "slug": "a" }, "all": ["lang-rest", "docs"] },
+        { "path": "/docs/a/b/c", "match": "docs", "params": { "slug": "a/b/c" } },
+        { "path": "/docs/a/", "match": "docs", "params": { "slug": "a" } },
+        { "path": "/docs/a//b", "match": null, "all": [] },
+        { "path": "/shop", "match": "shop", "params": {}, "all": ["lang-home", "shop"] },
+        { "path": "/shop/", "match": "shop", "params": {} },
+        { "path": "/shop/shoes/red", "match": "shop", "params": { "slug": "shoes/red" }, "all": ["lang-rest", "shop"] },
+        { "path": "/shop//", "match": null },
+        { "path": "/en", "match": "lang-home", "params": { "lang": "en" } },
+        { "path": "/en/guide/intro", "match": "lang-rest", "params": { "lang": "en", "rest": "guide/intro" } },
+        { "path": "/en//", "match": null },
+        { "path": "/blog/hello", "match": "blog-post", "params": { "slug": "hello" }, "all": ["lang-rest", "blog-post"] },
+        { "path": "/blog/hello/comments", "match": "lang-rest", "params": { "lang": "blog", "rest": "hello/comments" } },
+        { "path": "/_next/static/chunks/main-abc.js", "match": "next-static", "params": { "0": "chunks/main-abc.js" }, "all": ["lang-rest", "next-static"] },
+        { "path": "/_next/static", "match": "next-static", "params": {}, "all": ["lang-rest", "next-static"] }
+      ]
+    },
+    {
+      "name": "sveltekit rest params and param matchers",
+      "description": "`[[lang=lang]]`-style matcher `/:lang(en|fr|de)/:rest*` and a root `[...rest]` that also matches `/`.",
+      "routes": [
+        { "path": "/:rest*", "name": "fallback" },
+        { "path": "/about", "name": "about" },
+        { "path": "/:lang(en|fr|de)/:rest*", "name": "localized" },
+        { "path": "/:lang(en|fr|de)/about", "name": "about-l" }
+      ],
+      "cases": [
+        { "path": "/", "match": "fallback", "params": {}, "all": ["fallback"] },
+        { "path": "/about", "match": "about", "params": {}, "all": ["fallback", "about"] },
+        { "path": "/en", "match": "localized", "params": { "lang": "en" }, "all": ["fallback", "localized"] },
+        { "path": "/en/about", "match": "about-l", "params": { "lang": "en" }, "all": ["fallback", "localized", "about-l"] },
+        { "path": "/es/about", "match": "fallback", "params": { "rest": "es/about" } },
+        { "path": "/en/a/b", "match": "localized", "params": { "lang": "en", "rest": "a/b" } },
+        { "path": "/en//a", "match": null, "all": [] },
+        { "path": "/fr/", "match": "localized", "params": { "lang": "fr" } },
+        { "path": "/EN/about", "match": "fallback", "params": { "rest": "EN/about" } }
+      ]
+    },
+    {
+      "name": "dotfiles and traversal under a cache-header rule",
+      "description": "A method-agnostic cache rule on `/assets/**` must cover every asset handler; dotfiles and `..` are only resolved with `normalize`.",
+      "routes": [
+        { "method": "", "path": "/assets/**", "name": "cache-headers" },
+        { "path": "/assets/:file", "name": "asset-file" },
+        { "path": "/assets/:dir/:file", "name": "asset-nested" },
+        { "path": "/assets/*.map", "name": "sourcemap" },
+        { "path": "/assets/img/:name.:ext(png|jpg|webp)", "name": "img" },
+        { "path": "/.well-known/**", "name": "well-known" },
+        { "path": "/.env", "name": "dotenv" },
+        { "path": "/**", "name": "spa" }
+      ],
+      "guards": { "cache-headers": ["asset-file", "asset-nested", "sourcemap", "img"] },
+      "cases": [
+        { "path": "/assets/app.js", "match": "asset-file", "params": { "file": "app.js" }, "all": ["spa", "cache-headers", "asset-file"] },
+        { "path": "/assets/app.js.map", "match": "sourcemap", "params": { "0": "app.js" }, "all": ["spa", "cache-headers", "asset-file", "sourcemap"] },
+        { "path": "/assets/js/app.js.map", "match": "sourcemap", "params": { "0": "js/app.js" }, "all": ["spa", "cache-headers", "asset-nested", "sourcemap"] },
+        { "path": "/assets/.map", "match": "sourcemap", "params": { "0": "" } },
+        { "path": "/assets/img/logo.png", "match": "img", "params": { "name": "logo", "ext": "png" }, "all": ["spa", "cache-headers", "asset-nested", "img"] },
+        { "path": "/assets/img/logo.tar.png", "match": "img", "params": { "name": "logo.tar", "ext": "png" } },
+        { "path": "/assets/img/logo.gif", "match": "asset-nested", "params": { "dir": "img", "file": "logo.gif" } },
+        { "path": "/.env", "match": "dotenv", "params": {}, "all": ["spa", "dotenv"] },
+        { "path": "/.env.local", "match": "spa", "params": { "0": ".env.local" } },
+        { "path": "/assets/../.env", "match": "asset-nested", "params": { "dir": "..", "file": ".env" } },
+        { "path": "/assets/../.env", "normalize": true, "match": "dotenv" },
+        { "path": "/assets/%2e%2e/.env", "normalize": true, "match": "asset-nested", "params": { "dir": "%2e%2e", "file": ".env" } },
+        { "path": "/assets/%2F..%2F.env", "match": "asset-file", "params": { "file": "%2F..%2F.env" } },
+        { "path": "/assets//etc/passwd", "match": "cache-headers", "params": { "0": "/etc/passwd" }, "all": ["spa", "cache-headers"] },
+        { "path": "/assets/./img/logo.png", "normalize": true, "match": "img", "params": { "name": "logo", "ext": "png" } },
+        { "path": "/.well-known/security.txt", "match": "well-known", "params": { "0": "security.txt" } },
+        { "path": "/assets", "match": "cache-headers", "params": {} },
+        { "method": "POST", "path": "/assets/app.js", "match": "cache-headers", "params": { "0": "app.js" }, "all": ["cache-headers"] }
+      ]
+    },
+    {
+      "name": "percent-encoded file names",
+      "description": "Literal pattern text is encoded once at insert (upper-case UTF-8 hex); lookup paths are the encoded pathname and are never decoded.",
+      "routes": [
+        { "path": "/files/:name", "name": "file" },
+        { "path": "/files/café.pdf", "name": "cafe" },
+        { "path": "/files/my report.pdf", "name": "spaced" },
+        { "path": "/files/résumé-:lang.pdf", "name": "resume" },
+        { "path": "/files/100%25.txt", "name": "percent" },
+        { "path": "/docs/日本語/:page", "name": "ja" },
+        { "path": "/static/\\{hash\\}.js", "name": "braces" }
+      ],
+      "cases": [
+        { "path": "/files/caf%C3%A9.pdf", "match": "cafe", "params": {}, "all": ["file", "cafe"] },
+        { "path": "/files/café.pdf", "match": "file", "params": { "name": "café.pdf" } },
+        { "path": "/files/caf%c3%a9.pdf", "match": "file", "params": { "name": "caf%c3%a9.pdf" } },
+        { "path": "/files/my%20report.pdf", "match": "spaced" },
+        { "path": "/files/my report.pdf", "match": "file" },
+        { "path": "/files/r%C3%A9sum%C3%A9-en.pdf", "match": "resume", "params": { "lang": "en" }, "all": ["file", "resume"] },
+        { "path": "/files/r%C3%A9sum%C3%A9-pt-BR.pdf", "match": "resume", "params": { "lang": "pt-BR" } },
+        { "path": "/files/100%25.txt", "match": "percent", "all": ["file", "percent"] },
+        { "path": "/files/100%.txt", "match": "file", "params": { "name": "100%.txt" } },
+        { "path": "/files/%F0%9F%93%84.txt", "match": "file", "params": { "name": "%F0%9F%93%84.txt" } },
+        { "path": "/docs/%E6%97%A5%E6%9C%AC%E8%AA%9E/intro", "match": "ja", "params": { "page": "intro" } },
+        { "path": "/docs/日本語/intro", "match": null },
+        { "path": "/static/%7Bhash%7D.js", "match": "braces", "params": {} },
+        { "path": "/static/{hash}.js", "match": null }
+      ]
+    },
+    {
+      "name": "serveStatic with GET, HEAD and a method-agnostic scope",
+      "description": "h3-style static handler registered for GET and HEAD, with a method-agnostic middleware that must cover both and an upload endpoint.",
+      "routes": [
+        { "method": "", "path": "/public/**", "name": "public-mw" },
+        { "method": "GET", "path": "/public/**:file", "name": "get-file" },
+        { "method": "HEAD", "path": "/public/**:file", "name": "head-file" },
+        { "method": "POST", "path": "/public/upload", "name": "upload" }
+      ],
+      "guards": { "public-mw": ["get-file", "head-file", "upload"] },
+      "cases": [
+        { "path": "/public/a/b.txt", "match": "get-file", "params": { "file": "a/b.txt" }, "all": ["public-mw", "get-file"] },
+        { "method": "HEAD", "path": "/public/a.txt", "match": "head-file", "params": { "file": "a.txt" }, "all": ["public-mw", "head-file"] },
+        { "method": "PUT", "path": "/public/a.txt", "match": "public-mw", "params": { "0": "a.txt" }, "all": ["public-mw"] },
+        { "path": "/public", "match": "public-mw", "params": {} },
+        { "path": "/public/", "match": "public-mw", "params": {} },
+        { "path": "/public//x", "match": "public-mw", "params": { "0": "/x" }, "all": ["public-mw"] },
+        { "path": "/public/a//", "match": "public-mw", "params": { "0": "a/" } },
+        { "method": "POST", "path": "/public/upload", "match": "upload", "all": ["public-mw", "upload"] },
+        { "path": "/public/upload", "match": "get-file", "params": { "file": "upload" } },
+        { "method": "", "path": "/public/a", "match": "public-mw", "all": ["public-mw"] }
+      ]
+    },
+    {
+      "name": "vite dev server urls",
+      "description": "`/@fs/` absolute file access, `/@id/` virtual modules, pre-bundled deps and an index.html fallback.",
+      "routes": [
+        { "path": "/**", "name": "index" },
+        { "path": "/@vite/client", "name": "vite-client" },
+        { "path": "/@fs/**", "name": "fs" },
+        { "path": "/@id/**:id", "name": "id" },
+        { "path": "/node_modules/.vite/deps/*.js", "name": "deps" },
+        { "path": "/src/**", "name": "src" }
+      ],
+      "cases": [
+        { "path": "/@vite/client", "match": "vite-client", "all": ["index", "vite-client"] },
+        { "path": "/@fs/home/me/app/main.ts", "match": "fs", "params": { "0": "home/me/app/main.ts" }, "all": ["index", "fs"] },
+        { "path": "/@fs//etc/passwd", "match": "fs", "params": { "0": "/etc/passwd" } },
+        { "path": "/@id/virtual:my-module", "match": "id", "params": { "id": "virtual:my-module" } },
+        { "path": "/@id/__x00__virtual:a/b", "match": "id", "params": { "id": "__x00__virtual:a/b" } },
+        { "path": "/@id", "match": "index", "params": { "0": "@id" } },
+        { "path": "/node_modules/.vite/deps/vue.js", "match": "deps", "params": { "0": "vue" }, "all": ["index", "deps"] },
+        { "path": "/node_modules/.vite/deps/chunk/a-b.js", "match": "deps", "params": { "0": "chunk/a-b" } },
+        { "path": "/node_modules/.vite/deps/vue.js.map", "match": "index" },
+        { "path": "/src/main.ts", "match": "src", "params": { "0": "main.ts" }, "all": ["index", "src"] },
+        { "path": "/src", "match": "src", "params": {} },
+        { "path": "/dashboard/settings", "match": "index", "params": { "0": "dashboard/settings" } },
+        { "path": "/", "match": "index", "params": {} }
+      ]
+    },
+    {
+      "name": "ssg output with directory indexes",
+      "description": "Prerendered `index.html` in any directory beats a generic `*.html` route, which beats nothing else.",
+      "routes": [
+        { "path": "/", "name": "home" },
+        { "path": "/**/index.html", "name": "dir-index" },
+        { "path": "/*.html", "name": "html" },
+        { "path": "/404.html", "name": "not-found" }
+      ],
+      "cases": [
+        { "path": "/", "match": "home", "all": ["home"] },
+        { "path": "/index.html", "match": "dir-index", "params": {}, "all": ["html", "dir-index"] },
+        { "path": "/docs/index.html", "match": "dir-index", "params": { "0": "docs" }, "all": ["html", "dir-index"] },
+        { "path": "/docs/guide/index.html", "match": "dir-index", "params": { "0": "docs/guide" } },
+        { "path": "/about.html", "match": "html", "params": { "0": "about" }, "all": ["html"] },
+        { "path": "/a/b/c.html", "match": "html", "params": { "0": "a/b/c" } },
+        { "path": "/404.html", "match": "not-found", "all": ["html", "not-found"] },
+        { "path": "/docs/404.html", "match": "html", "params": { "0": "docs/404" } },
+        { "path": "/index.htm", "match": null },
+        { "path": "//index.html", "match": "dir-index", "params": { "0": "" } }
+      ]
+    },
+    {
+      "name": "repository file browser",
+      "description": "GitHub-like blob/raw/tree/archive URLs: `**:path` needs a value, `:path*` doesn't, and the archive name splits on its constrained extension.",
+      "routes": [
+        { "path": "/:owner/:repo", "name": "repo" },
+        { "path": "/:owner/:repo/blob/:ref/**:path", "name": "blob" },
+        { "path": "/:owner/:repo/raw/:ref/**:path", "name": "raw" },
+        { "path": "/:owner/:repo/tree/:ref/:path*", "name": "tree" },
+        { "path": "/:owner/:repo/archive/:ref.:ext(zip|tar\\.gz)", "name": "archive" }
+      ],
+      "cases": [
+        { "path": "/h3js/rou3", "match": "repo", "params": { "owner": "h3js", "repo": "rou3" } },
+        { "path": "/h3js/rou3/blob/main/src/index.ts", "match": "blob", "params": { "owner": "h3js", "repo": "rou3", "ref": "main", "path": "src/index.ts" } },
+        { "path": "/h3js/rou3/blob/main/.github/workflows/ci.yml", "match": "blob", "params": { "owner": "h3js", "repo": "rou3", "ref": "main", "path": ".github/workflows/ci.yml" } },
+        { "path": "/h3js/rou3/blob/main", "match": null },
+        { "path": "/h3js/rou3/blob/main/a//b", "match": null },
+        { "path": "/h3js/rou3/tree/main", "match": "tree", "params": { "owner": "h3js", "repo": "rou3", "ref": "main" } },
+        { "path": "/h3js/rou3/tree/main/src", "match": "tree", "params": { "owner": "h3js", "repo": "rou3", "ref": "main", "path": "src" } },
+        { "path": "/h3js/rou3/raw/v0.5.0/README.md", "match": "raw", "params": { "owner": "h3js", "repo": "rou3", "ref": "v0.5.0", "path": "README.md" } },
+        { "path": "/h3js/rou3/archive/v1.2.0.tar.gz", "match": "archive", "params": { "owner": "h3js", "repo": "rou3", "ref": "v1.2.0", "ext": "tar.gz" } },
+        { "path": "/h3js/rou3/archive/main.zip", "match": "archive", "params": { "owner": "h3js", "repo": "rou3", "ref": "main", "ext": "zip" } },
+        { "path": "/h3js/rou3/archive/main.rar", "match": null }
+      ]
+    },
+    {
+      "name": "optional file extensions",
+      "description": "`{.ext}?` groups after a `*` and after a name: the route with the group wins (README 'Differences from URLPattern').",
+      "routes": [
+        { "path": "/media/*{.webp}?", "name": "media" },
+        { "path": "/img/:name{.:ext}?", "name": "img" }
+      ],
+      "cases": [
+        { "path": "/media/a.webp", "match": "media", "params": { "0": "a" } },
+        { "path": "/media/a.png", "match": "media", "params": { "0": "a.png" } },
+        { "path": "/media/x/y.webp", "match": "media", "params": { "0": "x/y" } },
+        { "path": "/media", "match": "media", "params": {} },
+        { "path": "/media/", "match": "media", "params": { "0": "" } },
+        { "path": "/img/archive.tar.gz", "match": "img", "params": { "name": "archive", "ext": "tar.gz" } },
+        { "path": "/img/logo", "match": "img", "params": { "name": "logo" } },
+        { "path": "/img/logo.png", "match": "img", "params": { "name": "logo", "ext": "png" } },
+        { "path": "/img", "match": null },
+        { "path": "/img/a/b.png", "match": null }
+      ]
+    },
+    {
+      "name": "private files behind an auth scope",
+      "description": "A method-agnostic `/private/*` auth check must cover every private file handler, including a download route anchored at the end.",
+      "routes": [
+        { "method": "", "path": "/private/*", "name": "auth" },
+        { "path": "/private/:file", "name": "private-file" },
+        { "path": "/private/reports/:year(\\d+)/:file", "name": "report" },
+        { "path": "/private/**:path/download", "name": "download" },
+        { "path": "/public/**", "name": "public" }
+      ],
+      "guards": { "auth": ["private-file", "report", "download"] },
+      "cases": [
+        { "path": "/private/a.pdf", "match": "private-file", "params": { "file": "a.pdf" }, "all": ["auth", "private-file"] },
+        { "path": "/private/reports/2024/q1.pdf", "match": "report", "params": { "year": "2024", "file": "q1.pdf" }, "all": ["auth", "report"] },
+        { "path": "/private/reports/latest/q1.pdf", "match": "auth", "params": { "0": "reports/latest/q1.pdf" } },
+        { "path": "/private/x/y/download", "match": "download", "params": { "path": "x/y" }, "all": ["auth", "download"] },
+        { "path": "/private/download", "match": "private-file", "params": { "file": "download" }, "all": ["auth", "private-file"] },
+        { "path": "/private/reports/2024/download", "match": "download", "params": { "path": "reports/2024" }, "all": ["auth", "report", "download"] },
+        { "path": "/private", "match": "auth", "params": {} },
+        { "path": "/private/", "match": "auth", "params": { "0": "" } },
+        { "path": "/private//a.pdf", "match": "auth", "params": { "0": "/a.pdf" }, "all": ["auth"] },
+        { "method": "POST", "path": "/private/a.pdf", "match": "auth", "all": ["auth"] },
+        { "path": "/private/../public/x", "normalize": true, "match": "public", "params": { "0": "x" } },
+        { "path": "/public/../private/a.pdf", "match": "public", "params": { "0": "../private/a.pdf" } },
+        { "path": "/public/../private/a.pdf", "normalize": true, "match": "private-file", "params": { "file": "a.pdf" } }
+      ],
+      "invalid": ["/private/*/download/*", "/private/:path+.pdf", "/files/:path(.*)?"]
+    },
+    {
+      "name": "docs site with raw markdown and versions",
+      "description": "Pages under `/docs/**:slug`, the raw source at `*.md` anywhere below, and versioned docs pinned by a regex.",
+      "routes": [
+        { "path": "/docs", "name": "index" },
+        { "path": "/docs/**:slug", "name": "page" },
+        { "path": "/docs/*.md", "name": "raw" },
+        { "path": "/docs/:v(v\\d+)/**:slug", "name": "versioned" }
+      ],
+      "cases": [
+        { "path": "/docs", "match": "index", "all": ["index"] },
+        { "path": "/docs/", "match": "index" },
+        { "path": "/docs/guide/intro", "match": "page", "params": { "slug": "guide/intro" }, "all": ["page"] },
+        { "path": "/docs/guide/intro.md", "match": "raw", "params": { "0": "guide/intro" }, "all": ["page", "raw"] },
+        { "path": "/docs/v2/guide", "match": "versioned", "params": { "v": "v2", "slug": "guide" }, "all": ["page", "versioned"] },
+        { "path": "/docs/v2/guide.md", "match": "raw", "params": { "0": "v2/guide" }, "all": ["page", "versioned", "raw"] },
+        { "path": "/docs/v2", "match": "page", "params": { "slug": "v2" } },
+        { "path": "/docs/.md", "match": "raw", "params": { "0": "" } },
+        { "path": "/docs//intro.md", "match": "raw", "params": { "0": "/intro" }, "all": ["raw"] }
+      ],
+      "invalid": ["/docs/:slug+.md", "/docs/**:slug.md"]
+    },
+    {
+      "name": "one mount registered in several catch-all spellings",
+      "description": "`/m/**`, `/m/*` and `/m/**:path` share one wildcard node: `**` < `*` < `**:name`, each where it matches.",
+      "routes": [
+        { "path": "/m/**", "name": "dbl" },
+        { "path": "/m/*", "name": "star" },
+        { "path": "/m/**:path", "name": "named" }
+      ],
+      "cases": [
+        { "path": "/m/a/b", "match": "named", "params": { "path": "a/b" }, "all": ["dbl", "star", "named"] },
+        { "path": "/m", "match": "star", "params": {}, "all": ["dbl", "star"] },
+        { "path": "/m/", "match": "star", "params": { "0": "" }, "all": ["dbl", "star"] },
+        { "path": "/m//", "match": "star", "params": { "0": "" }, "all": ["dbl", "star"] },
+        { "path": "/m//a", "match": "star", "params": { "0": "/a" }, "all": ["dbl", "star"] },
+        { "path": "/m/a//", "match": "star", "params": { "0": "a/" } }
+      ]
+    },
+    {
+      "name": "precompressed files and literal extensions",
+      "description": "`.br` / `.gz` siblings of an asset mount, a literal `.png` next to a `.:ext` param, and an escaped `*` in a file name.",
+      "routes": [
+        { "path": "/assets/**", "name": "assets" },
+        { "path": "/assets/*.br", "name": "br" },
+        { "path": "/assets/*.gz", "name": "gz" },
+        { "path": "/thumbs/:name.:ext", "name": "thumb-any" },
+        { "path": "/thumbs/:name.png", "name": "thumb-png" },
+        { "path": "/files/:name", "name": "file" },
+        { "path": "/files/\\*.txt", "name": "star-literal" }
+      ],
+      "cases": [
+        { "path": "/assets/app.js.br", "match": "br", "params": { "0": "app.js" }, "all": ["assets", "br"] },
+        { "path": "/assets/a/b.css.gz", "match": "gz", "params": { "0": "a/b.css" }, "all": ["assets", "gz"] },
+        { "path": "/assets/app.js", "match": "assets", "params": { "0": "app.js" } },
+        { "path": "/assets/.br", "match": "br", "params": { "0": "" } },
+        { "path": "/thumbs/a.png", "match": "thumb-png", "params": { "name": "a" }, "all": ["thumb-any", "thumb-png"], "bug": "`:name.png` ⊂ `:name.:ext` (literal extension) ties on weight with the first-registered `:name.:ext`, so the literal-extension route never wins" },
+        { "path": "/thumbs/a.jpg", "match": "thumb-any", "params": { "name": "a", "ext": "jpg" } },
+        { "path": "/thumbs/a.b.png", "match": "thumb-any", "params": { "name": "a", "ext": "b.png" } },
+        { "path": "/files/*.txt", "match": "star-literal", "params": {}, "all": ["file", "star-literal"] },
+        { "path": "/files/a.txt", "match": "file", "params": { "name": "a.txt" } }
+      ]
+    },
+    {
+      "name": "og images and a locale-prefixed docs tree",
+      "description": "Nuxt OG image `/__og-image__/image/**/og.png` (zero or more segments between) and a leading `{/:locale(en|fr)}?` group before a `**:slug`.",
+      "routes": [
+        { "path": "/**", "name": "spa" },
+        { "path": "/__og-image__/image/**/og.png", "name": "og" },
+        { "path": "{/:locale(en|fr)}?/docs/**:slug", "name": "docs" }
+      ],
+      "cases": [
+        { "path": "/__og-image__/image/blog/post/og.png", "match": "og", "params": { "0": "blog/post" }, "all": ["spa", "og"] },
+        { "path": "/__og-image__/image/og.png", "match": "og", "params": {} },
+        { "path": "/__og-image__/image//og.png", "match": "og", "params": { "0": "" } },
+        { "path": "/__og-image__/og.png", "match": "spa", "params": { "0": "__og-image__/og.png" } },
+        { "path": "/en/docs/intro", "match": "docs", "params": { "locale": "en", "slug": "intro" }, "all": ["spa", "docs"] },
+        { "path": "/docs/guide/intro", "match": "docs", "params": { "slug": "guide/intro" }, "all": ["spa", "docs"] },
+        { "path": "/de/docs/intro", "match": "spa", "params": { "0": "de/docs/intro" } },
+        { "path": "/en/docs", "match": "spa", "params": { "0": "en/docs" } },
+        { "path": "/en/docs/a/../b", "normalize": true, "match": "docs", "params": { "locale": "en", "slug": "b" } },
+        { "path": "/docs/a/..", "normalize": true, "match": "spa", "params": { "0": "docs" } }
+      ]
+    },
+    {
+      "name": "favicon and touch-icon variants",
+      "description": "Optional groups inside a file name: `{-precomposed}?` and a constrained `{-:size}?` before the extension.",
+      "routes": [
+        { "path": "/**", "name": "spa" },
+        { "path": "/apple-touch-icon{-precomposed}?.png", "name": "touch" },
+        { "path": "/favicon{-:size(\\d+x\\d+)}?.png", "name": "fav" },
+        { "path": "/site.webmanifest", "name": "manifest" }
+      ],
+      "cases": [
+        { "path": "/apple-touch-icon.png", "match": "touch", "params": {}, "all": ["spa", "touch"] },
+        { "path": "/apple-touch-icon-precomposed.png", "match": "touch", "params": {} },
+        { "path": "/apple-touch-icon-120x120.png", "match": "spa" },
+        { "path": "/favicon.png", "match": "fav", "params": {}, "all": ["spa", "fav"] },
+        { "path": "/favicon-32x32.png", "match": "fav", "params": { "size": "32x32" } },
+        { "path": "/favicon-big.png", "match": "spa", "params": { "0": "favicon-big.png" } },
+        { "path": "/site.webmanifest", "match": "manifest", "all": ["spa", "manifest"] }
+      ]
+    }
+  ]
+}

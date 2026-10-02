@@ -1,0 +1,299 @@
+{
+  "$schema": "./_schema.json",
+  "description": "Percent-encoding contract: literal pattern text is encoded once at insert, lookup paths are never decoded or encoded",
+  "sources": [
+    "README: Percent-encoding, Escaping, Invalid patterns, Path normalization, Methods and paths",
+    ".agents/syntax.md: Escapes, Percent-encoding",
+    "WHATWG URL: path percent-encode set (what `new URL().pathname` gives)"
+  ],
+  "scenarios": [
+    {
+      "name": "cafe menu with a non-ASCII literal (README example)",
+      "description": "`/café/:id` matches only the encoded pathname `/caf%C3%A9/1`; a param takes a raw or encoded value as is",
+      "routes": [
+        { "path": "/café", "name": "cafe-index" },
+        { "path": "/café/:id", "name": "cafe" },
+        { "path": "/menu/:item", "name": "item" }
+      ],
+      "cases": [
+        { "path": "/caf%C3%A9/1", "match": "cafe", "params": { "id": "1" } },
+        { "path": "/caf%C3%A9/1/", "match": "cafe", "params": { "id": "1" } },
+        { "path": "/café/1", "match": null },
+        { "path": "/caf%c3%a9/1", "match": null },
+        { "path": "/CAF%C3%A9/1", "match": null },
+        { "path": "/caf%C3%A9", "match": "cafe-index", "params": {} },
+        { "path": "/café", "match": null },
+        { "path": "/cafe", "match": null },
+        { "path": "/menu/cr%C3%A8me-br%C3%BBl%C3%A9e", "match": "item", "params": { "item": "cr%C3%A8me-br%C3%BBl%C3%A9e" } },
+        { "path": "/menu/crème", "match": "item", "params": { "item": "crème" } }
+      ]
+    },
+    {
+      "name": "routes written already percent-encoded",
+      "description": "README: `%` is never encoded, so an existing `%xx` stays as written (hex case included) and a lone `%` is literal",
+      "routes": [
+        { "path": "/caf%C3%A9/menu", "name": "upper" },
+        { "path": "/b%c3%a4r", "name": "lower" },
+        { "path": "/100%", "name": "percent" },
+        { "path": "/50%25off", "name": "sale" },
+        { "path": "/a%2Fb", "name": "slash-enc" }
+      ],
+      "cases": [
+        { "path": "/caf%C3%A9/menu", "match": "upper", "params": {} },
+        { "path": "/café/menu", "match": null },
+        { "path": "/caf%c3%a9/menu", "match": null },
+        { "path": "/b%c3%a4r", "match": "lower", "params": {} },
+        { "path": "/b%C3%A4r", "match": null },
+        { "path": "/bär", "match": null },
+        { "path": "/100%", "match": "percent", "params": {} },
+        { "path": "/100%25", "match": null },
+        { "path": "/50%25off", "match": "sale", "params": {} },
+        { "path": "/50%off", "match": null },
+        { "path": "/a%2Fb", "match": "slash-enc", "params": {} },
+        { "path": "/a%2fb", "match": null },
+        { "path": "/a/b", "match": null }
+      ]
+    },
+    {
+      "name": "one route in two spellings",
+      "description": "README: `/café` and `/caf%C3%A9` are the same route, as are `/café-:id` and `/caf%C3%A9-:id`; on a tie registration order decides",
+      "routes": [
+        { "path": "/café", "name": "raw" },
+        { "path": "/caf%C3%A9", "name": "enc" },
+        { "path": "/shop/café-:id", "name": "raw-id" },
+        { "path": "/shop/caf%C3%A9-:id", "name": "enc-id" }
+      ],
+      "cases": [
+        { "path": "/caf%C3%A9", "match": "raw", "params": {}, "all": ["raw", "enc"] },
+        { "path": "/café", "match": null },
+        { "path": "/shop/caf%C3%A9-7", "match": "raw-id", "params": { "id": "7" }, "all": ["raw-id", "enc-id"] },
+        { "path": "/shop/café-7", "match": null },
+        { "path": "/shop/caf%C3%A9-", "match": null }
+      ]
+    },
+    {
+      "name": "ASCII characters in the path percent-encode set",
+      "description": "Space, `\"`, `#`, `<`, `>`, `^` and backtick in literal text are encoded; `|[]!$&',;=@~` are kept as is",
+      "routes": [
+        { "path": "/hello world", "name": "space" },
+        { "path": "/say/\"hi\"", "name": "quote" },
+        { "path": "/tag/<b>", "name": "angle" },
+        { "path": "/a^b", "name": "caret" },
+        { "path": "/tick/`x`", "name": "backtick" },
+        { "path": "/hash#1", "name": "hash" },
+        { "path": "/pipe/a|b[c]", "name": "pipe" },
+        { "path": "/misc/!$&',;=@~", "name": "subdelims" }
+      ],
+      "cases": [
+        { "path": "/hello%20world", "match": "space", "params": {} },
+        { "path": "/hello world", "match": null },
+        { "path": "/hello+world", "match": null },
+        { "path": "/say/%22hi%22", "match": "quote", "params": {} },
+        { "path": "/say/\"hi\"", "match": null },
+        { "path": "/tag/%3Cb%3E", "match": "angle", "params": {} },
+        { "path": "/tag/<b>", "match": null },
+        { "path": "/a%5Eb", "match": "caret", "params": {} },
+        { "path": "/a^b", "match": null },
+        { "path": "/tick/%60x%60", "match": "backtick", "params": {} },
+        { "path": "/hash%231", "match": "hash", "params": {} },
+        { "path": "/hash", "match": null },
+        { "path": "/pipe/a|b[c]", "match": "pipe", "params": {} },
+        { "path": "/pipe/a%7Cb%5Bc%5D", "match": null },
+        { "path": "/misc/!$&',;=@~", "match": "subdelims", "params": {} }
+      ]
+    },
+    {
+      "name": "escaped syntax characters",
+      "description": "README Escaping: `\\x` is a literal `x`; an escaped `?`, `{` or `}` is then encoded like other literal text",
+      "routes": [
+        { "path": "/static\\:path/\\*\\*", "name": "colon-stars" },
+        { "path": "/files/\\(2024\\)", "name": "parens" },
+        { "path": "/what\\?", "name": "question" },
+        { "path": "/tpl/\\{name\\}", "name": "braces" },
+        { "path": "/foo\\.bar", "name": "dot" },
+        { "path": "/back\\\\slash", "name": "backslash" },
+        { "path": "/sum/1\\+1", "name": "plus" },
+        { "path": "/time/:h\\:00", "name": "hour" }
+      ],
+      "cases": [
+        { "path": "/static:path/**", "match": "colon-stars", "params": {} },
+        { "path": "/static:path/ab", "match": null },
+        { "path": "/staticX/**", "match": null },
+        { "path": "/files/(2024)", "match": "parens", "params": {} },
+        { "path": "/files/2024", "match": null },
+        { "path": "/files/%282024%29", "match": null },
+        { "path": "/what%3F", "match": "question", "params": {} },
+        { "path": "/what%3f", "match": null },
+        { "path": "/what", "match": null },
+        { "path": "/tpl/%7Bname%7D", "match": "braces", "params": {} },
+        { "path": "/tpl/{name}", "match": null },
+        { "path": "/foo.bar", "match": "dot", "params": {} },
+        { "path": "/fooxbar", "match": null },
+        { "path": "/back\\slash", "match": "backslash", "params": {} },
+        { "path": "/backslash", "match": null },
+        { "path": "/sum/1+1", "match": "plus", "params": {} },
+        { "path": "/sum/11", "match": null },
+        { "path": "/time/10:00", "match": "hour", "params": { "h": "10" } },
+        { "path": "/time/10%3A00", "match": null },
+        { "path": "/time/10", "match": null }
+      ]
+    },
+    {
+      "name": "an encoded slash is not a segment separator",
+      "description": "`%2F` stays inside its segment: it is never decoded, nor resolved by `normalize`",
+      "routes": [
+        { "path": "/files/:name", "name": "file" },
+        { "path": "/repo/:owner/:name", "name": "repo" },
+        { "path": "/blob/*", "name": "blob" }
+      ],
+      "cases": [
+        { "path": "/files/a%2Fb", "match": "file", "params": { "name": "a%2Fb" } },
+        { "path": "/files/a/b", "match": null },
+        { "path": "/files/a%2f..%2f..%2fetc", "match": "file", "params": { "name": "a%2f..%2f..%2fetc" } },
+        { "path": "/files/x/../a%2Fb", "normalize": true, "match": "file", "params": { "name": "a%2Fb" } },
+        { "path": "/files/a%2F..%2F..%2Fetc", "normalize": true, "match": "file", "params": { "name": "a%2F..%2F..%2Fetc" } },
+        { "path": "/repo/a%2Fb", "match": null },
+        { "path": "/repo/a%2Fb/c", "match": "repo", "params": { "owner": "a%2Fb", "name": "c" } },
+        { "path": "/blob/a%2F..%2Fb", "match": "blob", "params": { "0": "a%2F..%2Fb" } },
+        { "path": "/blob/a/b%2F", "match": "blob", "params": { "0": "a/b%2F" } }
+      ]
+    },
+    {
+      "name": "regex constraints are not encoded",
+      "description": "README: a constraint is regex, written against the encoded path (`:x(%C3%A9)`); `:x(é)` only matches a raw `é`",
+      "routes": [
+        { "path": "/word/:w(%C3%A9t%C3%A9)", "name": "enc" },
+        { "path": "/raw/:x(é)", "name": "raw" },
+        { "path": "/tea/(caf%C3%A9|th%C3%A9)", "name": "unnamed" },
+        { "path": "/menu/:dish(\\w+)-à-la-carte", "name": "mixed" }
+      ],
+      "cases": [
+        { "path": "/word/%C3%A9t%C3%A9", "match": "enc", "params": { "w": "%C3%A9t%C3%A9" } },
+        { "path": "/word/été", "match": null },
+        { "path": "/word/%c3%a9t%c3%a9", "match": null },
+        { "path": "/raw/é", "match": "raw", "params": { "x": "é" } },
+        { "path": "/raw/%C3%A9", "match": null },
+        { "path": "/tea/th%C3%A9", "match": "unnamed", "params": { "0": "th%C3%A9" } },
+        { "path": "/tea/thé", "match": null },
+        { "path": "/menu/steak-%C3%A0-la-carte", "match": "mixed", "params": { "dish": "steak" } },
+        { "path": "/menu/steak-à-la-carte", "match": null }
+      ]
+    },
+    {
+      "name": "params next to encoded literal text",
+      "description": "Literal text around params is encoded (`-à-la-carte`, `café-`), param values are taken as is",
+      "routes": [
+        { "path": "/menu/:dish-à-la-carte", "name": "dish" },
+        { "path": "/shop/café-:id", "name": "cafe-id" },
+        { "path": "/p/:a.:b", "name": "pair" },
+        { "path": "/img/*-é.png", "name": "img" },
+        { "path": "/docs/*.pdf", "name": "pdf" }
+      ],
+      "cases": [
+        { "path": "/menu/steak-%C3%A0-la-carte", "match": "dish", "params": { "dish": "steak" } },
+        { "path": "/menu/steak-à-la-carte", "match": null },
+        { "path": "/shop/caf%C3%A9-42", "match": "cafe-id", "params": { "id": "42" } },
+        { "path": "/shop/café-42", "match": null },
+        { "path": "/p/%C3%A9.%C3%A8", "match": "pair", "params": { "a": "%C3%A9", "b": "%C3%A8" } },
+        { "path": "/img/a-%C3%A9.png", "match": "img", "params": { "0": "a" } },
+        { "path": "/img/x/y-%C3%A9.png", "match": "img", "params": { "0": "x/y" } },
+        { "path": "/img/a-é.png", "match": null },
+        { "path": "/docs/r%C3%A9sum%C3%A9.pdf", "match": "pdf", "params": { "0": "r%C3%A9sum%C3%A9" } },
+        { "path": "/docs/a%20b/c%2Fd.pdf", "match": "pdf", "params": { "0": "a%20b/c%2Fd" } }
+      ]
+    },
+    {
+      "name": "emoji and astral characters",
+      "description": "Characters beyond the BMP are encoded as 4-byte UTF-8; lookups with raw emoji only reach params",
+      "routes": [
+        { "path": "/🍕/:topping", "name": "pizza" },
+        { "path": "/emoji/:e", "name": "emoji" },
+        { "path": "/flag/🇫🇷", "name": "flag" },
+        { "path": "/react/:id/👍", "name": "like" }
+      ],
+      "cases": [
+        { "path": "/%F0%9F%8D%95/cheese", "match": "pizza", "params": { "topping": "cheese" } },
+        { "path": "/🍕/cheese", "match": null },
+        { "path": "/%f0%9f%8d%95/cheese", "match": null },
+        { "path": "/emoji/%F0%9F%98%80", "match": "emoji", "params": { "e": "%F0%9F%98%80" } },
+        { "path": "/emoji/😀", "match": "emoji", "params": { "e": "😀" } },
+        { "path": "/flag/%F0%9F%87%AB%F0%9F%87%B7", "match": "flag", "params": {} },
+        { "path": "/flag/%F0%9F%87%AB", "match": null },
+        { "path": "/react/7/%F0%9F%91%8D", "match": "like", "params": { "id": "7" } },
+        { "path": "/react/7/👍", "match": null }
+      ]
+    },
+    {
+      "name": "lone surrogates and control characters",
+      "description": "README: a lone surrogate is encoded as U+FFFD (`%EF%BF%BD`); a tab or newline is encoded too (URLPattern strips it)",
+      "routes": [
+        { "path": "/x\ud800y", "name": "high" },
+        { "path": "/z/\udc00", "name": "low" },
+        { "path": "/a\tb", "name": "tab" },
+        { "path": "/line\nbreak", "name": "newline" }
+      ],
+      "cases": [
+        { "path": "/x%EF%BF%BDy", "match": "high", "params": {} },
+        { "path": "/x%ED%A0%80y", "match": null },
+        { "path": "/x\ud800y", "match": null },
+        { "path": "/z/%EF%BF%BD", "match": "low", "params": {} },
+        { "path": "/a%09b", "match": "tab", "params": {} },
+        { "path": "/ab", "match": null },
+        { "path": "/a\tb", "match": null },
+        { "path": "/line%0Abreak", "match": "newline", "params": {} },
+        { "path": "/line%0abreak", "match": null }
+      ]
+    },
+    {
+      "name": "optional groups and in-segment optionals with encoded text",
+      "description": "Group bodies are literal text too: `{/café}?` registers `/menu/caf%C3%A9`, `naïve-:x?` the static `na%C3%AFve-`",
+      "routes": [
+        { "path": "/menu{/café}?", "name": "menu" },
+        { "path": "/tag/naïve-:x?", "name": "naive" },
+        { "path": "/r{/résumé}?/:lang(en|fr)", "name": "resume" }
+      ],
+      "cases": [
+        { "path": "/menu", "match": "menu", "params": {} },
+        { "path": "/menu/caf%C3%A9", "match": "menu", "params": {} },
+        { "path": "/menu/café", "match": null },
+        { "path": "/tag/na%C3%AFve-", "match": "naive", "params": {} },
+        { "path": "/tag/na%C3%AFve-x%20y", "match": "naive", "params": { "x": "x%20y" } },
+        { "path": "/tag/naïve-a", "match": null },
+        { "path": "/r/fr", "match": "resume", "params": { "lang": "fr" } },
+        { "path": "/r/r%C3%A9sum%C3%A9/en", "match": "resume", "params": { "lang": "en" } },
+        { "path": "/r/résumé/en", "match": null }
+      ]
+    },
+    {
+      "name": "normalization with encoded dots",
+      "description": "`normalize` resolves literal `.` / `..` segments only; an encoded `%2e%2e` is not decoded (new URL() resolves it before rou3 sees the path)",
+      "routes": [
+        { "path": "/public/*", "name": "public" },
+        { "path": "/admin/:page", "name": "admin" },
+        { "path": "/caf%C3%A9/:id", "name": "cafe" }
+      ],
+      "cases": [
+        { "path": "/public/../admin/x", "normalize": true, "match": "admin", "params": { "page": "x" } },
+        { "path": "/public/../admin/x", "match": "public", "params": { "0": "../admin/x" } },
+        { "path": "/public/%2e%2e/admin/x", "normalize": true, "match": "public", "params": { "0": "%2e%2e/admin/x" } },
+        { "path": "/public/%2E%2E/admin/x", "normalize": true, "match": "public", "params": { "0": "%2E%2E/admin/x" } },
+        { "path": "/public/.%2e/admin/x", "normalize": true, "match": "public", "params": { "0": ".%2e/admin/x" } },
+        { "path": "/public/./a", "normalize": true, "match": "public", "params": { "0": "a" } },
+        { "path": "/public/x/..", "normalize": true, "match": "public", "params": { "0": "" } },
+        { "path": "/public/..", "normalize": true, "match": null },
+        { "path": "/admin/..", "match": "admin", "params": { "page": ".." } },
+        { "path": "/admin/..", "normalize": true, "match": null },
+        { "path": "/admin/%2e%2e", "normalize": true, "match": "admin", "params": { "page": "%2e%2e" } },
+        { "path": "/x/../caf%C3%A9/1", "normalize": true, "match": "cafe", "params": { "id": "1" } },
+        { "path": "/caf%C3%A9/./1", "normalize": true, "match": "cafe", "params": { "id": "1" } }
+      ]
+    },
+    {
+      "name": "invalid patterns around encoding and escapes",
+      "description": "README Invalid patterns: a non-ASCII char or `$` right after a param name, U+FFFD-U+FFFF (internal), `\\/`, a trailing `\\`, an unescaped `?`",
+      "routes": [{ "path": "/ok/:caf\\é", "name": "ok" }],
+      "cases": [{ "path": "/ok/x%C3%A9", "match": "ok", "params": { "caf": "x" } }],
+      "invalid": ["/:café", "/x/:id$", "/a/�", "/a￿", "/a￾/b", "/a\\/b", "/a\\", "/what?", "/:x(é", "/tag/{oops"]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
 {
   "$schema": "https://unpkg.com/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["test/wpt", "test/.snapshot"]
+  "ignorePatterns": ["test/wpt", "test/.snapshot", "test/scenarios/*.json"]
 }
