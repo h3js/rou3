@@ -216,7 +216,7 @@ rou3 matches paths segment by segment in a tree, which leads to a few intentiona
 
 ### Methods and paths
 
-The paths you look up must start with `/` and the methods must be **UPPERCASE** (`"GET"`, not `"get"`). rou3 does not normalize lookup input, so do it before calling `findRoute`. Paths must be percent-encoded, as `new URL().pathname` gives them: a route's literal text is encoded (see [percent-encoding](#percent-encoding)).
+The paths you look up must start with `/` (other input is unsupported: `findRoute` and the compiled matcher may answer differently) and the methods must be **UPPERCASE** (`"GET"`, not `"get"`). rou3 does not normalize lookup input, so do it before calling `findRoute`. Paths must be percent-encoded, as `new URL().pathname` gives them: a route's literal text is encoded (see [percent-encoding](#percent-encoding)).
 
 ### Routes for any method
 
@@ -271,6 +271,8 @@ findRoute(router, "GET", "/foo/bar/../baz", { normalize: true }); // matches "/f
 findAllRoutes(router, "GET", "/foo/./bar", { normalize: true }); // matches "/foo/bar"
 ```
 
+Only literal `.` and `..` segments are resolved: percent-encoded dots (`%2e`, `%2E%2E`, `.%2e`) are left as they are, since lookup paths are never decoded. `new URL()` resolves those too (`/a/%2e%2e/b` is `/b`), so a `new URL().pathname` has none left.
+
 As in `new URL()`, a last `.` or `..` leaves a trailing slash: `/foo/bar/..` is `/foo/`, which `/foo/*` matches (`{ "0": "" }`). Since 0.12 this also keeps an empty segment before it: `/a//.` is `/a//` and no longer matches `/a`, and `//.` and `//x/..` are `//`, which no longer match `/`.
 
 The [compiler](#compiler) accepts the same option: `compileRouter(router, { normalize: true })`.
@@ -300,7 +302,7 @@ findAllRoutes(router, "GET", "/api/v1/users/42").map((m) => m.data.name);
 
 The [compiled](#compiler) `matchAll` function returns exactly the same results in the same order.
 
-In short: static segments beat params, and params beat wildcards. Among routes that end on the same kind of segment, a constrained or required param beats an optional or unconstrained one. Registration order only breaks exact ties.
+In short: static segments beat params, and params beat wildcards. Among routes that end on the same kind of segment, a constrained or required param beats an optional or unconstrained one. Registration order only breaks exact ties: `findRoute` returns the first-registered of the tied routes, and `findAllRoutes` lists them in registration order (so the winner is not the last entry there).
 
 <details>
 <summary>Detailed ordering rules</summary>
