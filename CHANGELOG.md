@@ -2,6 +2,73 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.12.0
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.11.0...v0.12.0)
+
+### 🩹 Fixes
+
+- **router:** ⚠️  Percent-encode literal pattern text like URLPattern ([#231](https://github.com/h3js/rou3/pull/231))
+- **router:** ⚠️  Never let `:name*` capture an empty value ([#232](https://github.com/h3js/rou3/pull/232))
+- **router:** ⚠️  Let a greedy capture before an optional param take what it can ([#233](https://github.com/h3js/rou3/pull/233))
+- **router:** ⚠️  Key a bare `**` capture like URLPattern ([#234](https://github.com/h3js/rou3/pull/234))
+- **router:** ⚠️  End a param at a `}` before a regex group ([#236](https://github.com/h3js/rou3/pull/236))
+- ⚠️  Review follow-ups for #231, #232 and #233 ([#238](https://github.com/h3js/rou3/pull/238), [#231](https://github.com/h3js/rou3/issues/231), [#232](https://github.com/h3js/rou3/issues/232), [#233](https://github.com/h3js/rou3/issues/233))
+- **router:** ⚠️  Don't prefix `/` to a pattern that starts with a `{/…}` group ([#239](https://github.com/h3js/rou3/pull/239))
+- **router:** ⚠️  Make `*` a greedy catch-all like URLPattern ([#240](https://github.com/h3js/rou3/pull/240))
+- **router:** ⚠️  Reject empty segments inside `:name+` / `:name*` like URLPattern ([#241](https://github.com/h3js/rou3/pull/241))
+- **router:** ⚠️  Read `(.*)` and `:name(.*)` as greedy catch-alls like URLPattern ([#242](https://github.com/h3js/rou3/pull/242))
+- **router:** ⚠️  Reject `--` / `&&` in a constraint class like URLPattern ([#245](https://github.com/h3js/rou3/pull/245))
+- **router:** ⚠️  Throw on a tab, LF or CR in a pattern ([#244](https://github.com/h3js/rou3/pull/244))
+- **router:** ⚠️  Resolve `.` / `..` segments in patterns like URLPattern ([#246](https://github.com/h3js/rou3/pull/246))
+- **router:** List each route once in findAllRoutes ([1c8aaa3](https://github.com/h3js/rou3/commit/1c8aaa3))
+- **router:** Match segments with several captures in linear time ([e3e9a25](https://github.com/h3js/rou3/commit/e3e9a25))
+- **regexp:** Avoid polynomial backtracking for params sharing a segment ([0b8fde4](https://github.com/h3js/rou3/commit/0b8fde4))
+- **router:** Rank constrained and literal in-segment params above plain ones ([0f437bc](https://github.com/h3js/rou3/commit/0f437bc))
+
+### 💅 Refactors
+
+- Reorganize src  and split docs ([aa4c478](https://github.com/h3js/rou3/commit/aa4c478))
+
+### 📖 Documentation
+
+- Clarify encoded dots, lookup path input and tie order ([746210e](https://github.com/h3js/rou3/commit/746210e))
+- Simplify pattern and matching docs ([f00fba9](https://github.com/h3js/rou3/commit/f00fba9))
+- Simplify public api jsdocs and remaining readme sections ([f066346](https://github.com/h3js/rou3/commit/f066346))
+
+### 🏡 Chore
+
+- Mark `RouterContext` props as internal ([c0f6015](https://github.com/h3js/rou3/commit/c0f6015))
+
+### ✅ Tests
+
+- **wpt:** Sync urlpattern data with upstream and tighten harness ([863bb6a](https://github.com/h3js/rou3/commit/863bb6a))
+- **wpt:** Compare groups strictly and pin rou3 results for known diffs ([#235](https://github.com/h3js/rou3/pull/235))
+- **find-all:** Sweep that a containing route is listed first ([#237](https://github.com/h3js/rou3/pull/237))
+- Raise timeout for empty-segments compiled parity sweep ([2a658e3](https://github.com/h3js/rou3/commit/2a658e3))
+- **scenarios:** Add data-driven cross-matcher scenario suite ([01f72fb](https://github.com/h3js/rou3/commit/01f72fb))
+
+#### ⚠️ Breaking Changes
+
+- **router:** ⚠️  Percent-encode literal pattern text like URLPattern ([#231](https://github.com/h3js/rou3/pull/231))
+- **router:** ⚠️  Never let `:name*` capture an empty value ([#232](https://github.com/h3js/rou3/pull/232))
+- **router:** ⚠️  Let a greedy capture before an optional param take what it can ([#233](https://github.com/h3js/rou3/pull/233))
+- **router:** ⚠️  Key a bare `**` capture like URLPattern ([#234](https://github.com/h3js/rou3/pull/234))
+- **router:** ⚠️  End a param at a `}` before a regex group ([#236](https://github.com/h3js/rou3/pull/236))
+- ⚠️  Review follow-ups for #231, #232 and #233 ([#238](https://github.com/h3js/rou3/pull/238), [#231](https://github.com/h3js/rou3/issues/231), [#232](https://github.com/h3js/rou3/issues/232), [#233](https://github.com/h3js/rou3/issues/233))
+- **router:** ⚠️  Don't prefix `/` to a pattern that starts with a `{/…}` group ([#239](https://github.com/h3js/rou3/pull/239))
+- **router:** ⚠️  Make `*` a greedy catch-all like URLPattern ([#240](https://github.com/h3js/rou3/pull/240))
+- **router:** ⚠️  Reject empty segments inside `:name+` / `:name*` like URLPattern ([#241](https://github.com/h3js/rou3/pull/241))
+- **router:** ⚠️  Read `(.*)` and `:name(.*)` as greedy catch-alls like URLPattern ([#242](https://github.com/h3js/rou3/pull/242))
+- **router:** ⚠️  Reject `--` / `&&` in a constraint class like URLPattern ([#245](https://github.com/h3js/rou3/pull/245))
+- **router:** ⚠️  Throw on a tab, LF or CR in a pattern ([#244](https://github.com/h3js/rou3/pull/244))
+- **router:** ⚠️  Resolve `.` / `..` segments in patterns like URLPattern ([#246](https://github.com/h3js/rou3/pull/246))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+- Pi0x <x@pi0.io>
+
 ## v0.11.0
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.10.2...v0.11.0)
