@@ -167,15 +167,16 @@ export function _findAll<T>(
  * param, plus two for a required last param. Siblings differ there only on
  * a wildcard node (`**` none, a trailing `*`, which matches the same paths,
  * one: below any regex, `**:name` two, as a regex);
- * elsewhere it adds the same to all, which the compiler leaves out.
- * A route's own tied variants are listed last-registered first (see
- * `reverseVariants`; `reverse` already does).
+ * elsewhere it adds the same to all, which the compiler leaves out. Plus
+ * `rank`, which breaks ties (see `_selectMatcher`). A route's own tied
+ * variants are listed last-registered first (see `reverseVariants`;
+ * `reverse` already does).
  */
 function pushSorted<T>(matches: MethodData<T>[], match: MethodData<T>[], reverse?: boolean): void {
   if (match.length > 1) {
     match = (reverse ? match : reverseVariants(match))
       .map((m): [MethodData<T>, number] => {
-        let w = 0;
+        let w = m.rank;
         const { paramsRegexp: rx, paramsMap: pm } = m;
         for (let i = 0; i < rx.length; i++) {
           if (rx[i]) w += 2;

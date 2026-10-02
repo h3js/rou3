@@ -714,21 +714,22 @@ describe("`*` vs `**` priority and ordering", () => {
     }
   });
 
-  it("leaves a `**` with regex params and a `**:name` tied, as before (no `*`)", () => {
-    // A regex param weighs what a required `**:name` does: registration order
-    // decides, in every matcher
+  it("ranks a `**` with more constraints above a `**:name` it ties (no `*`)", () => {
+    // A regex param weighs what a required `**:name` does; on that tie the
+    // route with more constraints ranks higher (`rank`), in every matcher and
+    // either registration order (the two are incomparable)
     for (const [routes, path] of [
-      [["/api/:v(\\d+)/**", "/api/:v/**:rest"], "/api/1/x"],
-      [["/q/:a(\\d+)/:b(\\d+)/**", "/q/:c(\\d+)/:d/**:r"], "/q/1/2/x"],
+      [["/api/:v/**:rest", "/api/:v(\\d+)/**"], "/api/1/x"],
+      [["/q/:c(\\d+)/:d/**:r", "/q/:a(\\d+)/:b(\\d+)/**"], "/q/1/2/x"],
     ] as const) {
       for (const order of [[...routes], [...routes].reverse()]) {
         const router = createRouter<string>();
         for (const route of order) addRoute(router, "GET", route, route);
         const aot = new Function(`return ${compileRouterToString(router)}`)();
-        expect(findRoute(router, "GET", path)?.data, order.join(", ")).toBe(order[0]);
-        expect(compileRouter(router)("GET", path)?.data).toBe(order[0]);
-        expect(aot("GET", path)?.data).toBe(order[0]);
-        expect(findAllRoutes(router, "GET", path).map((m) => m.data)).toEqual(order);
+        expect(findRoute(router, "GET", path)?.data, order.join(", ")).toBe(routes[1]);
+        expect(compileRouter(router)("GET", path)?.data).toBe(routes[1]);
+        expect(aot("GET", path)?.data).toBe(routes[1]);
+        expect(findAllRoutes(router, "GET", path).map((m) => m.data)).toEqual(routes);
       }
     }
   });

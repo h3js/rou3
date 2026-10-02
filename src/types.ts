@@ -52,6 +52,13 @@ export type MethodData<T = unknown> = {
    * (`/a/:x?/:y?`: `/a/:x` and `/a/:y`); `findAllRoutes` lists the route once.
    */
   variants?: object;
+  /**
+   * Breaks weight ties between same-node siblings (higher is more specific):
+   * the rank of its regex segments (literal text, then constraints and
+   * captures that may be `""`, see `getParamRegexp`) over 2^32, a fraction
+   * of a weight point.
+   */
+  rank: number;
 };
 
 export interface Node<T = unknown> {

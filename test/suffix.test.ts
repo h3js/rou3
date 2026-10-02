@@ -299,6 +299,10 @@ describe("segments after `**`: priority", () => {
       "/b/*/p",
       // an in-place optional that restricts nothing more than `:y`
       "/**/:y:z?",
+      // mixed segments: more literal text ranks higher (`rank`)
+      "/**/:y.:z",
+      "/**/:y.p",
+      "/:a.:z",
     ];
     // `""`: an empty segment, which a `:a` / `**:n` can't take (#229), in
     // paths up to 3 segments (the sweep's cost grows with the paths)

@@ -193,6 +193,8 @@ function _insert<T>(
 
   const paramsMap: ParamsIndexMap = [];
   const paramsRegexp: RegExp[] = [];
+  // Literal text and constraints of its regex segments (see `getParamRegexp`)
+  let rank = 0;
   // Param names of this expansion: a name declared twice throws
   const names: string[] = [];
   // The key of unnamed capture `n`; a `:name(.*)`'s declares its name once
@@ -277,7 +279,7 @@ function _insert<T>(
       if (!/^:[A-Za-z_]\w*$/.test(segment)) {
         // The last piece of a split `*` starts with it: its number
         const tail = i === join + 1 && segment.charCodeAt(0) === 42; /* * */
-        const [source, nextIndex, inPlace] = getParamRegexp(
+        const [source, nextIndex, inPlace, segmentRank] = getParamRegexp(
           segment,
           _unnamedParamIndex - (tail ? 1 : 0),
           names,
@@ -287,6 +289,7 @@ function _insert<T>(
         _unnamedParamIndex = nextIndex;
         // The same matches without polynomial backtracking (see `linearRegExp`)
         const regexp = (paramsRegexp[i] = linearRegExp(source));
+        rank += segmentRank;
         if (!suffix) {
           node.hasRegexParam = true;
         }
@@ -356,6 +359,9 @@ function _insert<T>(
     route: route ?? key,
     suffix: suffix && [wildcardIndex, suffix.length],
     variants,
+    // Within half a weight point (`getParamRegexp` ranks a segment by
+    // +-2^31 at most)
+    rank: rank / 2 ** 32,
   });
 
   // Static (keyed by the lookup form after its one trailing-slash strip, so
@@ -425,6 +431,12 @@ function addName(names: string[], name: string, input: string): string {
  * (`(?:(?<x>…))?`, unset when absent; `expandModifiers` leaves it here after
  * a capture), so the captures split the segment like URLPattern's regex. Its
  * name is the third element of the result.
+ *
+ * The fourth is the segment's rank among same-node siblings that tie on
+ * weight (see `_selectMatcher`): 256 per literal char (as encoded), plus one
+ * per constraint that can't match `""`, minus one per capture that can (a
+ * `*`, an optional `:name?`, a constraint like `(\d*)`). Per capture, these
+ * order what it takes: a constraint ⊆ a `:name` ⊆ a capture that may be `""`.
  */
 export function getParamRegexp(
   segment: string,
@@ -432,7 +444,7 @@ export function getParamRegexp(
   names: string[],
   input: string,
   groupKey: (index: number) => string = toUnnamedGroupKey,
-): [RegExp, number, string?] {
+): [RegExp, number, string | undefined, number] {
   let _i = unnamedStart;
   // The in-place optional param's name
   let _o: string | undefined;
@@ -440,7 +452,12 @@ export function getParamRegexp(
   let _s = "",
     _d = 0,
     // Index right after the last `:name`, top-level group or `*`
-    _e = -1;
+    _e = -1,
+    // Where the top-level group starts, the rank (see above)
+    _g = 0,
+    _r = 0;
+  // The constraints
+  const _c: string[] = [];
   for (let j = 0; j < segment.length; j++) {
     const c = segment.charCodeAt(j);
     if (_d === 0) {
@@ -463,6 +480,7 @@ export function getParamRegexp(
         // percent-encoded, it would be `%3F`)
         if (c === 63 && j === segment.length - 1 && PARAM_MODIFIER.test(segment)) {
           _s += "?";
+          _r--;
           continue;
         }
         // Otherwise `?` / `+` here would be raw quantifiers; a `*` right after
@@ -475,6 +493,7 @@ export function getParamRegexp(
         // `splitStar`), an unnamed group numbered with the others
         _e = j + 1;
         _s += "([^/]*)";
+        _r--;
         continue;
       }
     } else if (c === 58) {
@@ -482,14 +501,21 @@ export function getParamRegexp(
       _s += "\uFFFE:";
       continue;
     }
-    if (c === 40) _d++;
-    else if (c === 41 && _d > 0) {
-      if (--_d === 0) _e = j + 1;
+    if (c === 40) {
+      if (_d++ === 0) _g = j;
+    } else if (c === 41 && _d > 0) {
+      if (--_d === 0) {
+        _e = j + 1;
+        // A constraint (not `joinGroup`'s `:name`)
+        const p = segment.slice(_g + 1, j);
+        if (p !== "[^\\x2f]+?") _c.push(p);
+      }
     } else if (_d === 0 && c === 0xfffd && /[34]/.test(segment[j + 1])) {
       // `encodeEscapes`' placeholders 3 and 4, an escaped `{` / `}`, are text;
       // the others (`\:` `\(` `\)` `\\`) stay hidden until params and groups
       // are named (`encodeLiteral` leaves U+FFFD alone)
       _s += encodeLiteral("{}"[+segment[++j] - 3]);
+      _r += 768;
       continue;
     } else if (_d === 0 && /[\0- "#$).<>?[-^`{-}\x7F-\uFFFC]/.test(segment[j])) {
       // Outside a (...) group, a `\x` is a literal `x` (U+FFFE-marked; `\*`
@@ -502,8 +528,11 @@ export function getParamRegexp(
       const encoded = encodeLiteral(ch);
       j += esc + ch.length - 1;
       _s += encoded !== ch ? encoded : esc && ch !== "*" ? "\uFFFE" + ch : "\\" + ch;
+      _r += encoded.length * 256;
       continue;
     }
+    // Text outside groups and names (an escape placeholder is one char)
+    if (_d === 0 && j >= _e && segment.charCodeAt(j - 1) !== 0xfffd) _r += 256;
     _s += segment[j];
   }
   const regex = decodeEscapes(
@@ -519,5 +548,9 @@ export function getParamRegexp(
     "\uFFFE",
   ).replace(/\uFFFE([\s\S])|\uFFFF/g, (_, c = "") => (/[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c));
 
-  return [new RegExp(`^${regex}$`), _i, _o];
+  const regexp = new RegExp(`^${regex}$`);
+  for (const p of _c) {
+    _r += new RegExp(`^(?:${decodeEscapes(p, "\\")})$`).test("") ? -1 : 1;
+  }
+  return [regexp, _i, _o, _r];
 }

@@ -317,26 +317,31 @@ describe("matcher: optional param after a capture in its segment", () => {
   const router = createRouter(["/g/*-", "/g/*-:x?", "/g/:id"]);
 
   it("lists the route once, ordered by weight", () => {
+    // `*-:x?` ⊋ `*-`: same weight, but its optional `:x?` ranks it lower
     for (const routes of [
       ["/g/*-", "/g/*-:x?", "/g/:id"],
       ["/g/:id", "/g/*-:x?", "/g/*-"],
     ]) {
-      expect(_findAllRoutes(createRouter(routes), "GET", "/g/--")).toEqual(
-        ["/g/:id"].concat(routes.filter((r) => r !== "/g/:id")),
-      );
+      expect(_findAllRoutes(createRouter(routes), "GET", "/g/--")).toEqual([
+        "/g/:id",
+        "/g/*-:x?",
+        "/g/*-",
+      ]);
     }
     expect(_findAllRoutes(router, "GET", "/g/a-b")).toEqual(["/g/:id", "/g/*-:x?"]);
   });
 
   it("weighs as a regex param, also after a lone `:name`", () => {
-    // `:a:b?` is one regex (it was `:a:b` + a plain `:a`): it ties a
-    // constrained sibling on `/e/1` too, and registration order decides.
+    // `:a:b?` is one regex (it was `:a:b` + a plain `:a`): it weighs what a
+    // constrained sibling does, which ranks above it (a constraint, `rank`)
+    // in either registration order: `:id(\\d+)` ⊊ `:a:b?` (≡ `:id`).
     for (const routes of [
       ["/e/:id(\\d+)", "/e/:a:b?"],
       ["/e/:a:b?", "/e/:id(\\d+)"],
     ]) {
-      expect(_findAllRoutes(createRouter(routes), "GET", "/e/1")).toEqual(routes);
-      expect(_findAllRoutes(createRouter(routes), "GET", "/e/12")).toEqual(routes);
+      const expected = ["/e/:a:b?", "/e/:id(\\d+)"];
+      expect(_findAllRoutes(createRouter(routes), "GET", "/e/1")).toEqual(expected);
+      expect(_findAllRoutes(createRouter(routes), "GET", "/e/12")).toEqual(expected);
     }
   });
 
@@ -1023,6 +1028,202 @@ describe("matcher: regression #187", () => {
       "/foo/:b",
       "/foo/:a",
     ]);
+  });
+});
+
+describe("matcher: mixed-segment siblings rank by literal text, then constraints", () => {
+  // Same-node siblings whose regex segments tie on weight are ranked by their
+  // literal text, then their constrained captures (`MethodData.rank`), so a
+  // narrower mixed segment beats a broader one in either registration order:
+  // `findRoute`, `findAllRoutes` and compiled (JIT / AOT, single / matchAll).
+  const check = (expected: string[], path: string, method = "GET") => {
+    for (const routes of [expected, [...expected].reverse()]) {
+      const router = createEmptyRouter<string>();
+      for (const route of routes) {
+        const [m, p] = route.startsWith("* ") ? ["", route.slice(2)] : ["GET", route];
+        addRoute(router, m, p, route);
+      }
+      const at = `${routes.join(", ")} @ ${path}`;
+      const all = findAllRoutes(router, method, path).map((m) => m.data);
+      expect(all, at).toEqual(expected);
+      const toAot = (matchAll: boolean) =>
+        new Function(`return ${compileRouterToString(router, { matchAll })}`)();
+      for (const matchAll of [compileRouter(router, { matchAll: true }), toAot(true)]) {
+        expect(
+          matchAll(method, path).map((m: { data: string }) => m.data),
+          at,
+        ).toEqual(expected);
+      }
+      expect(findRoute(router, method, path)?.data, at).toBe(expected.at(-1));
+      for (const match of [compileRouter(router), toAot(false)]) {
+        expect(match(method, path)?.data, at).toBe(expected.at(-1));
+      }
+    }
+  };
+
+  it("a constrained capture beats a plain one in the same segment", () => {
+    check(["/f/:name.:ext", "/f/:name.:ext(png|jpg)"], "/f/a.png");
+    check(["/f/:name.:ext"], "/f/a.gif");
+    check(["/f/:a-:b", "/f/:a-:b(\\d+)"], "/f/x-1");
+  });
+
+  it("more literal text beats less", () => {
+    check(["/f/:name.:ext", "/f/:name.png"], "/f/a.png");
+    check(["/f/:name.:ext", "/f/:name.png"], "/f/a.b.png");
+    check(["/f/:a-:b", "/f/x-:b"], "/f/x-x");
+    check(["/f/:a.:b", "/f/:a.:b.:c"], "/f/a.b.c");
+  });
+
+  it("literal text beats a constraint", () => {
+    // `:name.png` ⊊ `:name.:ext(png|jpg)`
+    check(["/f/:name.:ext", "/f/:name.:ext(png|jpg)", "/f/:name.png"], "/f/a.png");
+  });
+
+  it("a constraint beats a capture-only regex (`:a:b?` is a `:name`)", () => {
+    check(["/f/:a:b?", "/f/:id(\\d+)"], "/f/1");
+  });
+
+  it("deeper routes, wildcard nodes and suffix tries", () => {
+    check(["/f/:name.:ext/x", "/f/:name.png/x"], "/f/a.png/x");
+    check(["/f/:name.:ext/**", "/f/:name.png/**"], "/f/a.png/b");
+    check(["/f/:name.:ext/*", "/f/:name.png/*"], "/f/a.png");
+    check(["/**/:name.:ext", "/**/:name.png"], "/f/a.png");
+    check(["/**/:name.:ext", "/**/:name.:ext(png)"], "/a.png");
+  });
+
+  it("method-agnostic siblings", () => {
+    check(["* /f/:name.:ext", "/f/:name.png"], "/f/a.png");
+    check(["/f/:name.:ext", "* /f/:name.png"], "/f/a.png");
+  });
+
+  it("never ranks a strictly broader segment higher (sweep)", () => {
+    // Every pair of segments whose match sets (over all strings of up to five
+    // of `a`, `p`, `.`, `1`, and `""`) strictly contain one another, on a
+    // param node, after a `**` (suffix trie) and before one (wildcard node):
+    // in no registration order is the broader listed after the narrower
+    // (`findAllRoutes`, compiled matchAll JIT / AOT) or picked (`findRoute`,
+    // compiled), unless the two tie (registration order decides: listed
+    // last in one order only), pinned in `ties`. Known exception (none here):
+    // a constraint standing in for literal text the broader segment writes
+    // out (`:x(p\\.p)` ⊊ `p.:b`), or one restricting nothing (`:a(.+).:b`).
+    const words = [""];
+    for (let n = 0; n < 5; n++) {
+      for (const w of words.filter((w) => w.length === n)) {
+        for (const c of "ap.1") words.push(w + c);
+      }
+    }
+    // A trailing slash is ignored: `""` is an empty last segment
+    const shapes: [string, (segment: string) => string][] = [
+      ["/f/", (s) => `/f/${s}/`],
+      ["/**/", (s) => `/x/${s}/`],
+      ["/f/<>/**", (s) => `/f/${s}/x`],
+    ];
+    const allSegments = [
+      [":id", ":id(\\d+)", ":id(\\d*)", ":a:b?", ":a(\\d+):b?", "p:a", ":a.", ".:b"],
+      [":a.:b", ":a.p", "p.:b", ":a.:b(p)", ":a.:b(p|1)", ":a.:b(\\d+)", ":a.:b?"],
+      [":a.:b(p)?", ":a.:b(\\d*)", ":a(\\d+).:b", ":a.:b.:c", ":a.p.:c", "*.p", "p*", "p.*"],
+    ].flat();
+    const failures: string[] = [];
+    const ties = new Set<string>();
+    let pairs = 0;
+    let proven = 0;
+    for (const [shape, toPath] of shapes) {
+      const route = (s: string) => (shape.includes("<>") ? shape.replace("<>", s) : shape + s);
+      // A `*` is a catch-all: one per route
+      const segments = allSegments.filter((s) => shape === "/f/" || !s.includes("*"));
+      const sets = segments.map((s) => {
+        const router = createEmptyRouter<string>();
+        addRoute(router, "", route(s), s);
+        return new Set(words.filter((w) => findRoute(router, "", toPath(w))));
+      });
+      for (let i = 0; i < segments.length; i++) {
+        for (let j = 0; j < segments.length; j++) {
+          const [a, b] = [sets[i], sets[j]];
+          // `compareRoutes` claims only what holds (on these paths too)
+          const relation = compareRoutes(route(segments[i]), route(segments[j]));
+          if (/superset|equal/.test(relation) && ![...b].every((w) => a.has(w))) {
+            failures.push(`compareRoutes(${route(segments[i])}, ${route(segments[j])})`);
+          }
+          if (i === j || a.size <= b.size || ![...b].every((w) => a.has(w))) continue;
+          pairs++;
+          if (relation === "superset") proven++;
+          // `segments[i]` strictly contains `segments[j]`
+          const [broad, narrow] = [route(segments[i]), route(segments[j])];
+          // Per path: in how many registration orders the broader is last
+          const late = new Map<string, number>();
+          for (const order of [
+            [broad, narrow],
+            [narrow, broad],
+          ]) {
+            const router = createEmptyRouter<string>();
+            for (const r of order) addRoute(router, "", r, r);
+            const jit = compileRouter(router, { matchAll: true });
+            const aot = new Function(
+              `return ${compileRouterToString(router, { matchAll: true })}`,
+            )();
+            const one = compileRouter(router);
+            for (const w of b) {
+              const path = toPath(w);
+              const all = findAllRoutes(router, "", path);
+              const data = all.map((m) => m.data);
+              const at = `${order.join(", ")} @ ${path}: ${JSON.stringify(data)}`;
+              if ([jit, aot].some((f) => JSON.stringify(f("", path)) !== JSON.stringify(all))) {
+                failures.push(`compiled matchAll differs: ${at}`);
+              }
+              const found = findRoute(router, "", path)?.data;
+              if (one("", path)?.data !== found) failures.push(`compiled differs: ${at}`);
+              if (data.indexOf(broad) > data.indexOf(narrow)) {
+                late.set(path, (late.get(path) || 0) + 1);
+              }
+              const key = `${path} (findRoute)`;
+              if (found === broad) late.set(key, (late.get(key) || 0) + 1);
+            }
+          }
+          for (const [path, count] of late) {
+            if (count > 1) failures.push(`${broad} ⊋ ${narrow} ranks higher @ ${path}`);
+            else ties.add(`${broad} ⊋ ${narrow}`);
+          }
+        }
+      }
+    }
+    expect(failures.slice(0, 20)).toEqual([]);
+    // Strict pairs, and those `compareRoutes` proves (`segmentCovers`): not
+    // two different constraints (`(p|1)` ⊋ `(p)`, `(p)?` ⊋ `(p)`), nor a `*`
+    // pattern, which also takes more segments (`/f/*.p`: not ⊆ `/f/:id`)
+    expect([pairs, proven]).toEqual([200, 183]);
+    // Ties: two constraints (compared by count only), or captures that may
+    // be `""` on both sides
+    expect([...ties].sort()).toEqual([
+      "/**/:a.:b(p)? ⊋ /**/:a.",
+      "/**/:a.:b(p|1) ⊋ /**/:a.:b(p)",
+      "/f/:a.:b(p)? ⊋ /f/:a.",
+      "/f/:a.:b(p)?/** ⊋ /f/:a./**",
+      "/f/:a.:b(p|1) ⊋ /f/:a.:b(p)",
+      "/f/:a.:b(p|1)/** ⊋ /f/:a.:b(p)/**",
+      "/f/:a.:b? ⊋ /f/:a.:b(\\d*)",
+    ]);
+  }, 60_000);
+
+  it("a route's variants that differ in rank are listed once, as findRoute picks", () => {
+    // `/f/:n.{png}?` registers `/f/:n.png` and `/f/:n.` on one node: the
+    // rank orders them, and `findAllRoutes` keeps the one `findRoute` picks
+    check(["/f/:n.:e", "/f/:n.{png}?"], "/f/a.png");
+    check(["/f/:n.{png}?"], "/f/a.");
+    const router = createEmptyRouter<string>();
+    addRoute(router, "", "/f/:n.{png}?", "r");
+    for (const path of ["/f/a.png", "/f/a.", "/f/a.b.png"]) {
+      const all = findAllRoutes(router, "", path);
+      expect(all, path).toEqual([findRoute(router, "", path)]);
+      expect(compileRouter(router, { matchAll: true })("", path), path).toEqual(all);
+    }
+    expect(findRoute(router, "", "/f/a.png")?.params).toEqual({ n: "a" });
+  });
+
+  it("known exception: a constraint standing in for literal text", () => {
+    // `:x(p\\.p)` ⊊ `p.:b`, but only the broader one has literal text: it
+    // ranks higher (a rank compares counts, not match sets)
+    check(["/f/:x(p\\.p)", "/f/p.:b"], "/f/p.p");
+    expect(compareRoutes("/f/p.:b", "/f/:x(p\\.p)")).toBe("partial");
   });
 });
 

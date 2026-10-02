@@ -9,11 +9,11 @@ import { methodEntries, reverseVariants } from "./_utils.ts";
  * `start` the first one the `**` may take.
  *
  * Same-node siblings are ordered by weight (one point per passing regex, one
- * for a `**:name`, which must take a segment), ties with the method-agnostic
- * (`""`) entries first, each in insertion order, or reversed within each with
- * `reverse` (findRoute takes the last match, and ties go to the
- * first-registered there; a route's own variants are always so, see
- * `reverseVariants`).
+ * for a `**:name`, which must take a segment, plus `rank`, a tie-break), ties
+ * with the method-agnostic (`""`) entries first, each in insertion order, or
+ * reversed within each with `reverse` (findRoute takes the last match, and
+ * ties go to the first-registered there; a route's own variants are always
+ * so, see `reverseVariants`).
  */
 export function collectSuffix<T>(
   node: Node<T>,
@@ -48,7 +48,7 @@ export function collectSuffix<T>(
         }
       }
       if (weight >= 0) {
-        weighted.push([m, weight]);
+        weighted.push([m, weight + m.rank]);
       }
     }
     for (const [m] of weighted.sort((a, b) => a[1] - b[1])) {

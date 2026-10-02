@@ -1,4 +1,5 @@
 import type { RouteShape } from "./_overlap.ts";
+import { segmentCovers } from "./_segment-pieces.ts";
 
 /**
  * Whether shape `a` certainly matches a superset of the paths shape `b`
@@ -152,8 +153,9 @@ function _segmentEqual(x: string | RegExp | undefined, y: string | RegExp | unde
 /**
  * Whether single-segment matcher `x` certainly matches every value `y`
  * matches. `any` covers everything; literals must be equal; an (anchored)
- * regex provably covers a literal it tests true on, and another regex only
- * when their sources are identical (modulo named-group names); `NON_EMPTY`
+ * regex provably covers a literal it tests true on, and another regex when
+ * their sources are identical (modulo named-group names) or, for segments
+ * `getParamRegexp` built, piece by piece (`segmentCovers`); `NON_EMPTY`
  * covers a regex that can't match `""`.
  */
 function _segmentSubsumes(x: string | RegExp | undefined, y: string | RegExp | undefined): boolean {
@@ -162,7 +164,11 @@ function _segmentSubsumes(x: string | RegExp | undefined, y: string | RegExp | u
   if (typeof y === "string") return x.test(y);
   // Any value but `""` covers a constraint that can't match it
   if (x === NON_EMPTY && y) return y === NON_EMPTY || !y.test("");
-  return y instanceof RegExp && x.flags === y.flags && _regExpKey(x) === _regExpKey(y);
+  // A mixed segment covers another piece by piece (`:a.:b` ⊇ `:a.png`)
+  return (
+    y instanceof RegExp &&
+    ((x.flags === y.flags && _regExpKey(x) === _regExpKey(y)) || segmentCovers(x, y, NON_EMPTY))
+  );
 }
 
 // Comparison keys are stable per RegExp instance; cache across pairwise calls.

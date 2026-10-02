@@ -168,8 +168,8 @@
         { "path": "/files/report.pdf", "name": "report" }
       ],
       "cases": [
-        { "path": "/files/a.png", "match": "image", "params": { "name": "a", "ext": "png" }, "all": ["path", "any-ext", "image"], "bug": "a strictly narrower mixed-segment sibling (`:name.:ext(png|jpg|webp)` ⊂ `:name.:ext`) ties on weight, so registration order decides and the image route never wins (compareRoutes also says partial)" },
-        { "path": "/files/photo.final.webp", "match": "any-ext", "params": { "name": "photo", "ext": "final.webp" }, "note": "same tie: the first-registered any-ext wins" },
+        { "path": "/files/a.png", "match": "image", "params": { "name": "a", "ext": "png" }, "all": ["path", "any-ext", "image"], "note": "`:name.:ext(png|jpg|webp)` ⊊ `:name.:ext`: same weight, but a constraint in the segment ranks higher" },
+        { "path": "/files/photo.final.webp", "match": "image", "params": { "name": "photo.final", "ext": "webp" }, "note": "the image route's lazy name backtracks to leave `webp` for its constraint" },
         { "path": "/files/a.PNG", "match": "any-ext", "params": { "name": "a", "ext": "PNG" } },
         { "path": "/files/archive.tar.gz", "match": "any-ext", "params": { "name": "archive", "ext": "tar.gz" }, "all": ["path", "any-ext"] },
         { "path": "/files/report.pdf", "match": "report", "params": {}, "all": ["path", "pdf", "any-ext", "report"] },
@@ -583,9 +583,9 @@
         { "path": "/assets/a/b.css.gz", "match": "gz", "params": { "0": "a/b.css" }, "all": ["assets", "gz"] },
         { "path": "/assets/app.js", "match": "assets", "params": { "0": "app.js" } },
         { "path": "/assets/.br", "match": "br", "params": { "0": "" } },
-        { "path": "/thumbs/a.png", "match": "thumb-png", "params": { "name": "a" }, "all": ["thumb-any", "thumb-png"], "bug": "`:name.png` ⊂ `:name.:ext` (literal extension) ties on weight with the first-registered `:name.:ext`, so the literal-extension route never wins" },
+        { "path": "/thumbs/a.png", "match": "thumb-png", "params": { "name": "a" }, "all": ["thumb-any", "thumb-png"], "note": "`:name.png` ⊊ `:name.:ext`: more literal text ranks higher" },
         { "path": "/thumbs/a.jpg", "match": "thumb-any", "params": { "name": "a", "ext": "jpg" } },
-        { "path": "/thumbs/a.b.png", "match": "thumb-any", "params": { "name": "a", "ext": "b.png" } },
+        { "path": "/thumbs/a.b.png", "match": "thumb-png", "params": { "name": "a.b" } },
         { "path": "/files/*.txt", "match": "star-literal", "params": {}, "all": ["file", "star-literal"] },
         { "path": "/files/a.txt", "match": "file", "params": { "name": "a.txt" } }
       ]

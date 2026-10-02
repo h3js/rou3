@@ -134,7 +134,9 @@ function _lookupTree<T>(
  * first-registered (so duplicate registrations return the first). Weight is
  * the same model as `pushSorted` in find-all.ts and the compiled matcher: one
  * point per passing regex-constrained param, plus one or two for a required
- * last param (see `pushSorted`). An entry whose regex fails is skipped
+ * last param (see `pushSorted`), plus `MethodData.rank`, a fraction of a
+ * point (literal text, then constraints of its regex segments: it only
+ * breaks ties). An entry whose regex fails is skipped
  * entirely, so lookup falls through to less specific siblings or other node
  * kinds instead of aborting.
  *
@@ -184,7 +186,9 @@ function _selectMatcher<T>(
       // which matches the same paths, one to break the tie below any regex);
       // a failed regex drops the entry below any candidate (bestWeight starts
       // at -1)
-      let weight = last && !last[2] ? (last[0] < 0 && last[3] ? 1 : 2) : 0;
+      // (plus its `rank`, a fraction of a point: literal text, then
+      // constraints, see `getParamRegexp`)
+      let weight = m.rank + (last && !last[2] ? (last[0] < 0 && last[3] ? 1 : 2) : 0);
       const regexps = m.paramsRegexp;
       for (let i = 0; i < regexps.length; i++) {
         if (regexps[i]) {

@@ -535,7 +535,7 @@
       "cases": [
         { "path": "/files/report.pdf", "match": "file-ext", "params": { "name": "report", "ext": "pdf" }, "all": ["files-any", "file", "file-ext"] },
         { "path": "/files/a.tar.gz", "match": "file-ext", "params": { "name": "a", "ext": "tar.gz" } },
-        { "path": "/files/data.json", "match": "file-json", "params": { "name": "data" }, "all": ["files-any", "file", "file-ext", "file-json"], "note": "containment: `:name` ⊋ `:name.:ext` ⊋ `:name.json`", "bug": "`:name.:ext` and `:name.json` tie on weight, so registration order (not specificity) orders them: the narrower `:name.json` is listed first" },
+        { "path": "/files/data.json", "match": "file-json", "params": { "name": "data" }, "all": ["files-any", "file", "file-ext", "file-json"], "note": "containment: `:name` ⊋ `:name.:ext` ⊋ `:name.json` (on their shared node, more literal text ranks higher)" },
         { "path": "/files/a.b.json", "match": "file-json", "params": { "name": "a.b" } },
         { "path": "/files/.json", "match": "file", "params": { "name": ".json" }, "all": ["files-any", "file"], "note": "`:name` before `.json` / `.:ext` needs a value" },
         { "path": "/files/.env", "match": "file", "params": { "name": ".env" } },
@@ -563,7 +563,7 @@
         { "path": "/files/:name.json", "name": "file-json" }
       ],
       "cases": [
-        { "path": "/files/data.json", "match": "file-json", "params": { "name": "data" }, "all": ["file", "file-ext", "file-json"], "bug": "`:name.:ext` ties `:name.json` on weight, so the first-registered (broader) `:name.:ext` wins: { name: 'data', ext: 'json' }" },
+        { "path": "/files/data.json", "match": "file-json", "params": { "name": "data" }, "all": ["file", "file-ext", "file-json"], "note": "`:name.json` has more literal text than `:name.:ext`: it wins in either registration order" },
         { "path": "/files/data.csv", "match": "file-ext", "params": { "name": "data", "ext": "csv" }, "all": ["file", "file-ext"] },
         { "path": "/files/data", "match": "file", "params": { "name": "data" }, "all": ["file"] }
       ]

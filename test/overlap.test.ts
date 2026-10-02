@@ -545,6 +545,14 @@ describe("segments after `**`", () => {
       "/a-*",
       "/a/b/**/b",
       "/:x(\\d+)/**/b",
+      // mixed segments, compared piece by piece (`segmentCovers`)
+      "/:x.png",
+      "/:x.:y",
+      "/q.:y",
+      "/:x.:y(png|jpg)",
+      "/:x.:y?",
+      "/**/:x.png",
+      "/*.:y",
     ];
     // `""`: an empty segment, which a `:x` / `**:r` can't take (#229)
     const alphabet = ["a", "b", "x", "1", "q.png", ""];
@@ -560,9 +568,17 @@ describe("segments after `**`", () => {
         return [pattern, new Set(paths.filter((path) => findRoute(router, "", path)))];
       }),
     );
-    // A constraint, or a `*` inside a segment (a regex for its text)
+    // A constraint, a `*` inside a segment or a mixed one (a regex for its
+    // text; the alphabet is too small for exact verdicts there)
     const hasRegex = (pattern: string) =>
-      pattern.split("/").some((s) => s.includes("(") || (/\*/.test(s) && !/^\*\*?$/.test(s)));
+      pattern
+        .split("/")
+        .some(
+          (s) =>
+            s.includes("(") ||
+            (/\*/.test(s) && !/^\*\*?$/.test(s)) ||
+            (s.includes(":") && !/^(?:\*\*)?:\w+$/.test(s)),
+        );
     const failures: string[] = [];
     for (const a of patterns) {
       for (const b of patterns) {

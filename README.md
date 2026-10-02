@@ -414,6 +414,7 @@ In short:
 
 - Static segments beat params, and params beat wildcards.
 - On the same kind of segment, a constrained or required param beats an optional or unconstrained one.
+- In a segment mixing params and text, more literal text wins (`/f/:name.png` beats `/f/:name.:ext`).
 - Registration order only breaks exact ties: `findRoute` returns the first-registered of the tied routes, and `findAllRoutes` lists them in registration order (so there the winner is not the last entry).
 
 Each route is listed once, even when several variants of an optional pattern match the path. It gets the params `findRoute` would give it, and its position is that variant's. Registering the same pattern twice adds two routes, and both are listed:
@@ -434,9 +435,10 @@ findAllRoutes(router, "GET", "/shop/shoes");
 - **Routes on the same tree node** (for example `/foo/:id` and `/foo/:id(\d+)`, or `/foo/**`, `/foo/*` and `/foo/**:rest`, see [Route node keys](#route-node-keys)):
   - Optional and unconstrained routes come before required and regex-constrained ones.
   - Among catch-alls: `**`, then a trailing `*` (it matches the same paths), then `**:name` (it needs a value).
+  - Between segments that mix params and text (`/f/:name.:ext`), the one with more literal text comes last, then the one with more regex constraints, then the one with fewer captures that may be empty (a `*`, an optional `:x?`). On `/f/a.png`: `/f/:name.:ext`, `/f/:name.:ext(png|jpg)`, `/f/:name.png`, whatever the registration order.
   - Ties keep registration order.
   - Method-agnostic routes are sorted together with the method's own routes. On a tie, the method-agnostic one comes first, so `findRoute` picks the method's own.
-  - An optional param inside a segment (`/e/:a:b?`) makes the segment one regex-constrained route. On its node it beats a plain `:id` sibling on every path, also on deeper routes (`/e/:a:b?/x` beats `/e/:id/x`, though both match the same paths), and it ties `/e/:id(\d+)` (registration order decides).
+  - An optional param inside a segment (`/e/:a:b?`) makes the segment one regex-constrained route. On its node it beats a plain `:id` sibling on every path, also on deeper routes (`/e/:a:b?/x` beats `/e/:id/x`, though both match the same paths), and it comes before `/e/:id(\d+)` (a constraint ranks higher).
 - **Consistent with containment:** when no pattern uses optional syntax and each pattern contains the next (a `"superset"` per [`compareRoutes`](#pattern-overlap)), the result order is broadest first, except for the catch-all carve-out below.
 - **Carve-out: optional syntax.** A pattern with `:name?`, `:name*` or `{...}?` registers one entry per variant, and results are ordered by the variant that matched (the one `findRoute` picks, when several do), not by the whole pattern. So a broader pattern can come **last**:
 
@@ -608,6 +610,7 @@ These utilities understand the full pattern syntax (groups, modifiers, escapes) 
 
 - **Answers are safe, not always exact.** Whenever `compareRoutes` claims containment or disjointness, it is proven. When something can't be decided, it answers with a weaker verdict (usually `"partial"`), never a wrong one.
 - **Regex constraints** are checked exactly against literal segments (`/user/:id(\d+)` does not overlap `/user/abc`). Two dynamic segments where at least one has a regex are assumed to overlap: `routesOverlap("/user/:id(\d+)", "/user/:name([a-z]+)")` returns `true` although no path matches both. For the same reason, two different regexes compare as `"partial"`, even when they are equivalent.
+- **Segments mixing params and text** are compared piece by piece: `compareRoutes("/f/:name.:ext", "/f/:name.png")` and `compareRoutes("/f/:name.:ext(png|jpg)", "/f/:name.png")` are `"superset"`.
 - An actually equal pair that is only provable in one direction reports that containment: `/u/:id(42)` vs `/u/42` is `"superset"`.
 - **Segment counts:**
   - `**` and a trailing `*`: zero or more segments (so `/a/**` overlaps `/a`).
@@ -615,7 +618,7 @@ These utilities understand the full pattern syntax (groups, modifiers, escapes) 
   - A `*` elsewhere: one or more.
   - `:name`: exactly one.
   - Segments after a `**` are aligned to the end of the path: `compareRoutes("/**/_payload.json", "/blog/:slug/_payload.json")` is `"superset"`.
-- **Optional syntax:** a pattern with `:x?`, `:x*` or `{...}?` expands into several variants, and two patterns overlap when any pair of variants does. A `?` param after a capture in its segment (`/a/*-:x?`) is one regex instead, so it compares as `"partial"` with its variants (`/a/*-:x`).
+- **Optional syntax:** a pattern with `:x?`, `:x*` or `{...}?` expands into several variants, and two patterns overlap when any pair of variants does. A `?` param after a capture in its segment (`/a/*-:x?`) is one regex instead, compared piece by piece (`"superset"` of `/a/*-:x`).
 - In `findOverlappingRoutes`, different routes (another pattern or method) are always reported separately, even when they share the same `data`. Registering the same route twice with the same `data` reports it once. A route with segments after `**` comes right after the bare `**` it follows.
 
 </details>

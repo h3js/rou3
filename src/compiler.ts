@@ -600,7 +600,8 @@ function compileFinalMatch(
     (conditions.length > 0 ? `if(${conditions.join("&&")})` : "") +
     (ctx.opts?.matchAll ? push : `return ${ret};`);
 
-  return { code, weight: 4 * (conditions.length - guardConditions) + starWeight };
+  // `rank` breaks ties (a fraction of a point, see `_selectMatcher`)
+  return { code, weight: 4 * (conditions.length - guardConditions) + starWeight + data.rank };
 }
 
 function compileNode(

@@ -239,8 +239,14 @@ describe("benchmark", () => {
     // up to the first such text, a `*` before params ends where they start
     // latest), where the backtracking regex was cubic (a 4KB path took
     // seconds). Two `replace` calls at insert time; lookup is untouched.
-    expect(bytes).toBeLessThanOrEqual(14822); // <14.83kb
-    expect(gzipSize).toBeLessThanOrEqual(6355); // <6.36kb
+    // +271B raw / +143B gzip: same-node siblings that tie on weight are
+    // ranked by their regex segments' literal text, then constraints and
+    // captures that may be `""` (`getParamRegexp` counts them on the pattern,
+    // before `linearRegExp`; `MethodData.rank` adds a fraction of a point in
+    // every matcher), so `/f/:name.png` and `/f/:name.:ext(png|jpg)` beat
+    // `/f/:name.:ext` in either order.
+    expect(bytes).toBeLessThanOrEqual(15099); // <15.10kb
+    expect(gzipSize).toBeLessThanOrEqual(6489); // <6.49kb
   });
 });
 
