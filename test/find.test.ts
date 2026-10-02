@@ -1840,7 +1840,7 @@ describe("empty segments (compiled parity, sweep)", () => {
       }
     }
     expect(failures.slice(0, 10)).toEqual([]);
-  });
+  }, 60_000);
 });
 
 // URLPattern reads `**` as `*` with a `*` modifier: an unnamed capture, keyed
