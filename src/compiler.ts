@@ -1,5 +1,6 @@
 import { ESCAPED_GROUP_PREFIX, fromGroupName, UNNAMED_GROUP_PREFIX } from "./_group-names.ts";
 import { NullProtoObj } from "./object.ts";
+import { reverseVariants } from "./operations/_utils.ts";
 import type { MatchedRoute, MethodData, Node, RouterContext } from "./types.ts";
 
 /** A compiled single-match lookup (`compileRouter(router)`), like `findRoute`. */
@@ -209,6 +210,13 @@ interface CompilerContext {
   // Some matcher reads `t`, whether the path had a trailing slash (a `*`
   // over zero segments, see `matchesZero`)
   slash?: boolean;
+  // matchAll lists a route with several variants once (see `variantCode`):
+  // the number of each `variants` token that needs it, and the tree's
+  // variants (`variantInfo`)
+  variants?: Map<object, number>;
+  variantInfo?: VariantInfo;
+  // ... ranked: a token is the `g` of its rank descriptors, read by `RANKG`
+  variantRank?: boolean;
 }
 
 function compileRouteMatch(ctx: CompilerContext): string {
@@ -239,6 +247,9 @@ function compileRouteMatch(ctx: CompilerContext): string {
     // to "/a/") has a real empty last segment (#209).
     const tempNames = Array.from({ length: ctx.regexTemps || 0 }, (_, i) => `_m${i}`);
     if (ctx.starStarTemp) tempNames.push("_w");
+    if (ctx.variants && !ctx.rank) {
+      for (let i = 0; i < ctx.variants.size; i++) tempNames.push(`_g${i}`);
+    }
     const temps = tempNames.length > 0 ? `let ${tempNames.join(",")};` : "";
     code += `let s=p.split("/");let l=s.length;${temps}${match}`;
   }
@@ -331,9 +342,13 @@ function compileStaticMatch(ctx: CompilerContext): string {
       if (matchers && matchers.length > 0) {
         if (jitMethods) {
           // findRoute resolves duplicates to the first-registered entry
-          jitMethods[method] = matchAll ? matchers.map((m) => m.data) : matchers[0].data;
+          jitMethods[method] = matchAll
+            ? staticOnce(matchers).map((m) => m.data)
+            : matchers[0].data;
         } else {
-          const refs = matchers.map((m) => serializeData(ctx, m));
+          const refs = (matchAll ? staticOnce(matchers) : matchers).map((m) =>
+            serializeData(ctx, m),
+          );
           methodsCode += `${JSON.stringify(method)}:${matchAll ? `[${refs.join(",")}]` : refs[0]},`;
         }
       }
@@ -377,13 +392,15 @@ function compileMethodMatch(
   // Emit order: the most specific matcher first. matchAll emits via `r.push`
   // + one final `r.reverse()` (final array least->most specific); the reverse
   // flips emit order, so pre-reverse to keep equal-weight siblings in
-  // insertion order (issue #187). Single-match returns on the first hit, so
-  // ties stay in insertion order (mirrors findRoute).
+  // insertion order (issue #187), but a route's own variants (see
+  // `reverseVariants`). Single-match returns on the first hit, so ties stay in
+  // insertion order (mirrors findRoute).
   const compile = (matchers: MethodData<any>[]) => {
-    const compiled = matchers.map((m) =>
+    const all = ctx.opts?.matchAll && !ctx.collector;
+    const compiled = (all ? reverseVariants(staticOnce(matchers)) : matchers).map((m) =>
       compileFinalMatch(ctx, m, currentIdx, params, suffixGuard),
     );
-    return ctx.opts?.matchAll && !ctx.collector ? compiled.reverse() : compiled;
+    return all ? compiled.reverse() : compiled;
   };
   const emit = (compiled: { code: string; weight: number }[]) =>
     compiled
@@ -570,9 +587,15 @@ function compileFinalMatch(
   }
   ret += "}";
 
+  const variant = variantCode(ctx, data);
+  if (variant) {
+    conditions.unshift(...variant);
+    guardConditions += variant.length;
+  }
+  const flag = variant && !ctx.rank ? `_g${ctx.variants!.get(data.variants!)}=` : "";
   const push = ctx.rank
     ? `{r.push(${ret});k.push(${rankDescriptor(ctx, data)})}`
-    : `r.push(${ret});`;
+    : `${flag}r.push(${ret});`;
   const code =
     (conditions.length > 0 ? `if(${conditions.join("&&")})` : "") +
     (ctx.opts?.matchAll ? push : `return ${ret};`);
@@ -832,8 +855,105 @@ const RANK = `(r,k,n)=>{if(!k.some((d)=>d[1]>0))return r;const K=(d,p)=>{const e
 // Whether `s[c]` to `s[e-1]` are all non-empty (see `nonEmptyGuard`)
 const VALUES = `(s,c,e)=>{for(;c<e;c++)if(!s[c])return false;return true}`;
 
+// `RANK`, then a route with several variants listed once: the last one of
+// each `variants` token (`g` of its descriptors), where two such matches are
+// among them (`RANK` alone otherwise)
+const RANKG = `(()=>{const R=${RANK};return(r,k,n)=>{let c=0;for(const d of k)if(d.g!==void 0)c++;if(c<2)return R(r,k,n);const x=R(r.map((_,i)=>i),k,n),o=[],g=[];for(let i=x.length-1;i>=0;i--){const d=k[x[i]].g;if(d!==void 0){if(g.includes(d))continue;g.push(d)}o.push(r[x[i]])}return o.reverse()}})()`;
+
 function rankRef(ctx: CompilerContext): string {
-  return helperRef(ctx, RANK);
+  return helperRef(ctx, ctx.variantRank && !ctx.collector ? RANKG : RANK);
+}
+
+/**
+ * The conditions that list a dynamic variant of a route only where no other
+ * one is (matchAll: `findAllRoutes` lists the route once, as the one it would
+ * pick). It is pushed after the more specific ones (emit order), so it is
+ * skipped where one of them, or a static variant (always the most specific,
+ * also from the end), matched: by a flag (`_gN`, set by the push) or, ranked,
+ * by `RANKG` (the descriptor's `g`).
+ */
+function variantCode(ctx: CompilerContext, data: MethodData<any>): string[] | undefined {
+  const token = data.variants;
+  if (!token || !data.paramsMap || !ctx.opts?.matchAll || ctx.collector) return;
+  const { ranges, listed, statics } = (ctx.variantInfo ??= variantInfo(ctx.router.root));
+  if (!listed.has(token)) return;
+  const variants = (ctx.variants ??= new Map());
+  if (!variants.has(token)) variants.set(token, variants.size);
+  const [min, max] = ranges.get(data)!;
+  const conditions: string[] = [];
+  for (const [m, path] of statics) {
+    const length = ranges.get(m)![0];
+    if (m.variants === token && length >= min && length <= max) {
+      conditions.push(`p!==${JSON.stringify(path)}`);
+    }
+  }
+  if (ctx.rank) {
+    ctx.variantRank = true;
+  } else {
+    conditions.unshift(`!_g${variants.get(token)}`);
+  }
+  return conditions;
+}
+
+interface VariantInfo {
+  // How many segments each entry with a `variants` token matches
+  ranges: Map<MethodData<any>, [min: number, max: number]>;
+  // The tokens one path may match several entries of (ranges overlap)
+  listed: Set<object>;
+  // Their static entries, with the path they are on
+  statics: [MethodData<any>, string][];
+}
+
+/**
+ * The tree's entries with a `variants` token: how many segments each matches
+ * (a catch-all that may take none, one less, and any number more; a suffix
+ * route at least its prefix and suffix) and which tokens need listing once:
+ * one path can't match two of `/admin/:page?`'s entries.
+ */
+function variantInfo(root: Node<any>): VariantInfo {
+  const info: VariantInfo = { ranges: new Map(), listed: new Set(), statics: [] };
+  const byToken = new Map<object, [number, number][]>();
+  const walk = (node: Node<any>, depth: number, path?: string, trie?: boolean) => {
+    for (const method in node.methods) {
+      for (const m of node.methods[method]!) {
+        if (!m.variants) continue;
+        const c = m.paramsMap?.find((e) => e[0] < 0);
+        const range: [number, number] = trie
+          ? [m.suffix![0] + m.suffix![1], Infinity]
+          : c
+            ? [depth - (c[2] || c[3] ? 1 : 0), Infinity]
+            : [depth, depth];
+        info.ranges.set(m, range);
+        const ranges = byToken.get(m.variants) || [];
+        if (ranges.some(([lo, hi]) => lo <= range[1] && range[0] <= hi))
+          info.listed.add(m.variants);
+        byToken.set(m.variants, ranges.concat([range]));
+        // A static entry is reached through static segments only
+        if (!m.paramsMap) info.statics.push([m, path!]);
+      }
+    }
+    for (const key in node.static) {
+      walk(node.static[key], depth + 1, path === undefined ? path : `${path}/${key}`, trie);
+    }
+    if (node.param) walk(node.param, depth + 1, undefined, trie);
+    if (node.wildcard) walk(node.wildcard, depth + 1, undefined, trie);
+    if (node.suffix) walk(node.suffix, depth, undefined, true);
+  };
+  walk(root, 0, "");
+  return info;
+}
+
+/**
+ * matchAll: a route's static variants on one node (`/a{/b}?{/b}?` has two
+ * `/a/b`) are one entry, the first, as `findAllRoutes` lists them.
+ */
+function staticOnce(matchers: MethodData<any>[]): MethodData<any>[] {
+  return matchers.filter(
+    (m, i) =>
+      !m.variants ||
+      m.paramsMap ||
+      matchers.findIndex((x) => x.variants === m.variants && !x.paramsMap) === i,
+  );
 }
 
 /** The data slot of a helper function (`RANK`, `VALUES`), from its source. */
@@ -857,7 +977,13 @@ function rankDescriptor(ctx: CompilerContext, data?: MethodData<any>): string {
       descriptor.push(index, typeof name === "string" || plain ? 0 : 2);
     }
   }
-  const key = JSON.stringify(descriptor);
+  // A dynamic variant of a route listed once: its token's number (`RANKG`)
+  const g = data?.paramsMap && ctx.variantRank ? ctx.variants?.get(data.variants!) : undefined;
+  let key = JSON.stringify(descriptor);
+  if (g !== undefined) {
+    key = `Object.assign(${key},{g:${g}})`;
+    Object.assign(descriptor, { g });
+  }
   const rankMap = (ctx.rankMap ??= new Map());
   let slot = rankMap.get(key);
   if (slot === undefined) {

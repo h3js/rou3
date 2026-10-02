@@ -66,9 +66,16 @@ export function addRoute<T>(
   // `.` / `..` segments resolved (errors quote `path`, as written)
   const resolved = dotSegments(path);
   const [route, unnamed] = starGroups(resolved);
+  variants = undefined;
   // A `:name(.*)` keys its `*`: an identity of its own (not the `*` route's)
   _add(ctx, method, route, data, unnamed && expandedRouteId(resolved), path, unnamed);
 }
+
+/**
+ * The `variants` token of the `addRoute` call in progress: set once it
+ * registers several entries (see `MethodData.variants`).
+ */
+let variants: object | undefined;
 
 /**
  * `route` is the registration identity `removeRoute` splices entries by. A
@@ -95,7 +102,10 @@ function _add<T>(
   const groupExpanded = expandGroupDelimiters(path, input);
   if (groupExpanded) {
     // A single expansion (`/a/*-{:x}?` is `/a/*-:x?`) is that route
-    if (groupExpanded[1] !== undefined) route ??= expandedRouteId(path);
+    if (groupExpanded[1] !== undefined) {
+      route ??= expandedRouteId(path);
+      variants ??= {};
+    }
     _add(ctx, method, groupExpanded[0], data, route, input, unnamed);
     if (groupExpanded[1] !== undefined) {
       // A pattern without a `*` or `(` has no unnamed capture to renumber
@@ -120,6 +130,7 @@ function _add<T>(
   const expanded = expandModifiers(segments, input);
   if (expanded) {
     route ??= expandedRouteId(path);
+    variants ??= {};
     let count = 0;
     for (const p of expanded) {
       count = _add(ctx, method, p, data, route, input, unnamed);
@@ -132,7 +143,10 @@ function _add<T>(
   const split = star ? splitStar(segments, input) : undefined;
   if (split) {
     const [routes, join, head] = split;
-    if (routes.length > 1) route ??= expandedRouteId(path);
+    if (routes.length > 1) {
+      route ??= expandedRouteId(path);
+      variants ??= {};
+    }
     let count = 0;
     for (const r of routes) {
       count = _insert(
@@ -339,6 +353,7 @@ function _insert<T>(
     paramsMap: hasParams ? paramsMap : undefined,
     route: route ?? key,
     suffix: suffix && [wildcardIndex, suffix.length],
+    variants,
   });
 
   // Static (keyed by the lookup form after its one trailing-slash strip, so

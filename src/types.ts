@@ -45,6 +45,13 @@ export type MethodData<T = unknown> = {
    * the path.
    */
   suffix?: [wildcard: number, length: number];
+  /**
+   * Set on every entry (variant) of an `addRoute` call that registers several
+   * (optional syntax, a `*` inside a segment): a token they share (identity
+   * only, never data equality). One path may match several of them
+   * (`/a/:x?/:y?`: `/a/:x` and `/a/:y`); `findAllRoutes` lists the route once.
+   */
+  variants?: object;
 };
 
 export interface Node<T = unknown> {

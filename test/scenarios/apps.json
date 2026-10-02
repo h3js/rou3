@@ -307,7 +307,7 @@
         { "path": "/docs", "match": "docs-home", "all": ["docs-home"] },
         { "path": "/docs/v2", "match": "docs-version-index", "params": { "version": "v2" }, "all": ["docs-page", "docs-version-index"] },
         { "path": "/docs/latest/", "match": "docs-version-index", "params": { "version": "latest" } },
-        { "path": "/docs/v2/getting-started/install", "match": "docs-page", "params": { "version": "v2", "slug": "getting-started/install" }, "all": ["docs-page", "docs-page"] },
+        { "path": "/docs/v2/getting-started/install", "match": "docs-page", "params": { "version": "v2", "slug": "getting-started/install" }, "all": ["docs-page"], "note": "listed once (`/docs/**:slug` and `/docs/:version/**:slug` match), with findRoute's params" },
         { "path": "/docs/getting-started/install", "match": "docs-page", "params": { "slug": "getting-started/install" } },
         { "path": "/docs/v10/a/b/c", "match": "docs-page", "params": { "version": "v10", "slug": "a/b/c" } },
         { "path": "/docs/V2/guide", "match": "docs-page", "params": { "slug": "V2/guide" } },

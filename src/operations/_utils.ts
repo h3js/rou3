@@ -525,6 +525,22 @@ export function methodEntries<T>(
 }
 
 /**
+ * Same-node `entries` in registration order, each run of one route's variants
+ * (`variants`, added together) reversed: on a tie, `findRoute` picks the
+ * first-registered variant, so `findAllRoutes` lists it last of them (the one
+ * it keeps), as the `reverse` order does. The input itself when there is none.
+ */
+export function reverseVariants<T>(entries: MethodData<T>[]): MethodData<T>[] {
+  let out: MethodData<T>[] | undefined;
+  for (let i = 0, j; i < entries.length; i = j) {
+    const token = entries[i].variants;
+    for (j = i + 1; token && entries[j]?.variants === token; j++);
+    if (j - i > 1) (out ??= entries.slice()).splice(i, j - i, ...entries.slice(i, j).reverse());
+  }
+  return out || entries;
+}
+
+/**
  * A `*` inside a segment is split around a `**` (see `splitStar`): the pieces
  * after its first one (`join`) add theirs after a `/`.
  */

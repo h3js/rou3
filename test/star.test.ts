@@ -703,9 +703,9 @@ describe("`*` vs `**` priority and ordering", () => {
       ["/x-*/:y", "/x-a/b"],
       ["/a/pre*/c/d", "/a/pre1/c/d"],
       ["/x-*", "/x-a"],
-      // With and without the optional segment, as `/a/**/:y?` on `main`
-      ["/a/x-*/:y?", "/a/x-1/b", 2],
-      ["/x-*{/b}?", "/x-a/b", 2],
+      // Both with and without the optional segment match: listed once too
+      ["/a/x-*/:y?", "/a/x-1/b"],
+      ["/x-*{/b}?", "/x-a/b"],
     ] as [string, string, number?][]) {
       const router = createRouter<string>();
       addRoute(router, "GET", route, route);

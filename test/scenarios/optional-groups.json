@@ -358,9 +358,9 @@
       ],
       "cases": [
         { "path": "/shop", "match": "shop", "params": {} },
-        { "path": "/shop/shoes", "match": "shop", "params": { "category": "shoes" }, "all": ["shop"], "bug": "findAllRoutes lists the one route twice, once per expansion (/shop/:category and /shop/:product): [{category}, {product}]" },
+        { "path": "/shop/shoes", "match": "shop", "params": { "category": "shoes" }, "all": ["shop"], "note": "listed once (both /shop/:category and /shop/:product match), with findRoute's params" },
         { "path": "/shop/shoes/nike", "match": "shop", "params": { "category": "shoes", "product": "nike" } },
-        { "path": "/shop/sale", "match": "sale", "params": {}, "all": ["shop", "sale"], "bug": "the optional route is listed twice: [shop, shop, sale]" },
+        { "path": "/shop/sale", "match": "sale", "params": {}, "all": ["shop", "sale"] },
         { "path": "/shop/sale/nike", "match": "shop", "params": { "category": "sale", "product": "nike" } },
         { "path": "/shop/shoes/nike/x", "match": null },
         { "path": "/shop//nike", "match": null }

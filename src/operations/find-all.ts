@@ -6,6 +6,7 @@ import {
   matchesZero,
   methodEntries,
   normalizePath,
+  reverseVariants,
   splitPath,
 } from "./_utils.ts";
 
@@ -32,6 +33,16 @@ export function findAllRoutes<T>(
   }
   const segments = splitPath(path);
   const matches = _findRanked(ctx, method, segments);
+  // A route with several variants matching (optional syntax) is listed once:
+  // the last of them is the one `findRoute` picks (see `reverseVariants`)
+  let seen: object[] | undefined;
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const token = matches[i].variants;
+    if (token) {
+      if (seen?.includes(token)) matches.splice(i, 1);
+      else (seen ??= []).push(token);
+    }
+  }
 
   // Fresh objects (the entries are internal); static routes and
   // `params: false` carry no `params` key, as in `findRoute` and compiled
@@ -90,7 +101,11 @@ export function _findAll<T>(
     const match = node.wildcard.methods && methodEntries(node.wildcard.methods, method, reverse);
     if (match) {
       // Zero segments remain: a `**` or a `*` (mirrors findRoute)
-      pushSorted(matches, index < segments.length ? match : match.filter((m) => matchesZero(m)));
+      pushSorted(
+        matches,
+        index < segments.length ? match : match.filter((m) => matchesZero(m)),
+        reverse,
+      );
     }
     // Routes with segments after the `**` (narrower than a bare one)
     if (node.wildcard.suffix) {
@@ -133,7 +148,7 @@ export function _findAll<T>(
   if (index === segments.length && node.methods) {
     const match = methodEntries(node.methods, method, reverse);
     if (match) {
-      pushSorted(matches, match);
+      pushSorted(matches, match, reverse);
     }
   }
 
@@ -153,10 +168,12 @@ export function _findAll<T>(
  * a wildcard node (`**` none, a trailing `*`, which matches the same paths,
  * one: below any regex, `**:name` two, as a regex);
  * elsewhere it adds the same to all, which the compiler leaves out.
+ * A route's own tied variants are listed last-registered first (see
+ * `reverseVariants`; `reverse` already does).
  */
-function pushSorted<T>(matches: MethodData<T>[], match: MethodData<T>[]): void {
+function pushSorted<T>(matches: MethodData<T>[], match: MethodData<T>[], reverse?: boolean): void {
   if (match.length > 1) {
-    match = match
+    match = (reverse ? match : reverseVariants(match))
       .map((m): [MethodData<T>, number] => {
         let w = 0;
         const { paramsRegexp: rx, paramsMap: pm } = m;

@@ -9,7 +9,8 @@ import {
   routeToRegExp,
 } from "../src/index.ts";
 import { compileRouter, compileRouterToString } from "../src/compiler.ts";
-import { normalizePath } from "../src/operations/_utils.ts";
+import { getMatchParams, normalizePath } from "../src/operations/_utils.ts";
+import { _findRanked } from "../src/operations/find-all.ts";
 import { format } from "oxfmt";
 import { isDeepStrictEqual } from "node:util";
 import { DUPLICATE_NAMED_GROUPS, needsDuplicateNames } from "./_regexp-cases.ts";
@@ -2019,8 +2020,14 @@ describe("unnamed captures are numbered over the whole pattern", () => {
   it("gives a capture one key in every route a pattern registers", () => {
     const router = createEmptyRouter<string>();
     addRoute(router, "GET", "/a{/**}?/(\\d+).png", "png");
-    // Both routes match (the `**` over zero segments), the file is `1` in each
+    // Both routes match (the `**` over zero segments), the file is `1` in
+    // each (listed once)
     expect(findAllRoutes(router, "GET", "/a/1.png").map((m) => ({ ...m.params }))).toEqual([
+      { 1: "1" },
+    ]);
+    const segments = ["a", "1.png"];
+    const entries = _findRanked(router, "GET", segments);
+    expect(entries.map((m) => ({ ...getMatchParams(segments, m.paramsMap!, m.suffix) }))).toEqual([
       { 1: "1" },
       { 1: "1" },
     ]);

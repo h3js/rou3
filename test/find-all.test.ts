@@ -405,6 +405,10 @@ const KNOWN_CARVE_OUTS = [
   // A1: identical matched entries, registration order decides
   "/p/:x0, /p/:x0{/p}? @ /p/p",
   "/p/:x0/**:r, /p/:x0/:x1* @ /p/p/p",
+  // A4: listed once, by the variant `findRoute` picks (`/p/*/p`, ranked from
+  // the end); its broader `/p/*` variant, listed before, is left out
+  "/p/*{/p}?, /p/p/:x0 @ /p/p/p",
+  "/p/p/:x0, /p/*{/p}? @ /p/p/p",
   // B: a `**:name` before a `:name` and a catch-all over its segments
   "/p/:x0/*, /p/:x0+ @ /p/p/p",
   "/p/:x0+, /p/:x0/** @ /p/p",
@@ -491,12 +495,16 @@ function orderMisses(
         if (!optional) return { failure: `${a} ⊋ ${b} listed after it: ${at}`, carveOuts };
         // Every optional-syntax carve-out is A1: an entry of `b` before one
         // of `a` with the same match set (A2 / A3 have no strict instance,
-        // see matching.md)
+        // see matching.md), or A4: a route is listed once, by the entry
+        // `findRoute` picks, and an entry of `a` before `b`'s is left out
         const a1 = list.some(
           (x, k) =>
             x.data === b && list.slice(k + 1).some((y) => y.data === a && broader(y, x, true)),
         );
-        if (!a1) return { failure: `carve-out other than A1: ${at}`, carveOuts };
+        const a4 =
+          list.findIndex((x) => x.data === a) < list.findIndex((x) => x.data === b) &&
+          list.filter((x) => x.data === a).length > 1;
+        if (!a1 && !a4) return { failure: `carve-out other than A1 / A4: ${at}`, carveOuts };
       }
       carveOuts.push(path);
     }
@@ -599,18 +607,36 @@ describe("matcher: ordering contract: optional-syntax carve-out", () => {
   it("A3: matched entries in different nodes, traversal order decides (both orders)", () => {
     // `/p/:id{/**}?` matches `/p/a/` twice: through `/p/:id/**` (a child,
     // first) and `/p/:id` (the node itself, after the `*` child of
-    // `/p/:id/*`). The two match the same paths (a trailing `*` is
-    // optional), so this pins the order only.
+    // `/p/:id/*`). It is listed once, by the entry `findRoute` picks
+    // (`/p/:id`). The two match the same paths (a trailing `*` is optional),
+    // so this pins the order only.
     expect(compareRoutes("/p/:id{/**}?", "/p/:id/*")).toBe("equal");
     for (const routes of [
       ["/p/:id{/**}?", "/p/:id/*"],
       ["/p/:id/*", "/p/:id{/**}?"],
     ]) {
       expect(_findAllRoutes(createRouter(routes), "GET", "/p/a/")).toEqual([
-        "/p/:id{/**}?",
         "/p/:id/*",
         "/p/:id{/**}?",
       ]);
+    }
+  });
+
+  it("A4: listed by the entry findRoute picks, a broader one left out (both orders)", () => {
+    // `/p/*{/p}?` ⊋ `/p/p/:x` matches `/p/p/p` through `/p/*` (before
+    // `/p/p/:x`) and `/p/*/p` (ranked after it from the end: a literal last
+    // segment). Listed once, by `/p/*/p`, so the broader pattern comes last.
+    expect(compareRoutes("/p/*{/p}?", "/p/p/:x")).toBe("superset");
+    for (const routes of [
+      ["/p/*{/p}?", "/p/p/:x"],
+      ["/p/p/:x", "/p/*{/p}?"],
+    ]) {
+      const router = createRouter(routes);
+      expect(_findAllRoutes(router, "GET", "/p/p/p")).toEqual(["/p/p/:x", "/p/*{/p}?"]);
+      expect(findRoute(router, "GET", "/p/p/p")).toEqual({
+        data: { path: "/p/*{/p}?" },
+        params: { "0": "p" },
+      });
     }
   });
 });
@@ -638,6 +664,169 @@ describe("matcher: ordering contract: catch-all carve-out (B)", () => {
       expect(_findAllRoutes(router, "GET", path)).toEqual([narrower, broader]);
       expect(findRoute(router, "GET", path)?.data).toEqual({ path: broader });
     }
+  });
+});
+
+describe("matcher: each route listed once (optional syntax)", () => {
+  // A pattern with optional syntax registers one entry per variant, and
+  // several can match one path (`/a/:x?/:y?` on `/a/b`: `/a/:x` and `/a/:y`).
+  // The route is listed once, with the params and at the position of the
+  // variant `findRoute` picks; separate registrations stay separate.
+  type Data = { path: string; id?: string };
+  const listAll = (routes: (string | [string, string])[], path: string) => {
+    const router = createEmptyRouter<Data>();
+    for (const r of routes) {
+      const [route, id] = typeof r === "string" ? [r, undefined] : r;
+      addRoute(router, "GET", route, id ? { path: route, id } : { path: route });
+    }
+    const all = findAllRoutes(router, "GET", path);
+    const jit = compileRouter(router, { matchAll: true });
+    const aot = new Function(`return ${compileRouterToString(router, { matchAll: true })}`)();
+    expect(jit("GET", path), `JIT ${path}`).toEqual(all);
+    expect(aot("GET", path), `AOT ${path}`).toEqual(all);
+    return { all, one: findRoute(router, "GET", path) };
+  };
+
+  it.each([
+    ["/a/:x?/:y?", "/a/b", { x: "b" }],
+    ["/a{/:x}?{/:y}?", "/a/b", { x: "b" }],
+    ["/a/:x?/:y(\\d+)?", "/a/1", { y: "1" }],
+    ["/a/:x?/:y(\\d+)?", "/a/b", { x: "b" }],
+    ["/a/:x(\\d+)?/:y(\\w+)?", "/a/1", { x: "1" }],
+    ["/a/:x(\\d+)?/:y(\\w+)?", "/a/b", { y: "b" }],
+    ["/v1/:version?/:platform?", "/v1/123", { version: "123" }],
+    ["/docs/:version(v\\d+|latest)?/**:slug", "/docs/v2/a/b", { version: "v2", slug: "a/b" }],
+    ["/users/:id{.json}?", "/users/1.json", { id: "1" }],
+    ["/a{/b}?/:x?", "/a/b", undefined],
+    ["/p/:id{/**}?", "/p/a/", { id: "a" }],
+    ["/:a?/b/:c?", "/b/b", { c: "b" }],
+  ])("%s on %s: one entry, findRoute's params", (route, path, params) => {
+    const { all, one } = listAll([route], path);
+    expect(all).toEqual([params ? { data: { path: route }, params } : { data: { path: route } }]);
+    expect(all).toEqual([one]);
+  });
+
+  it("at the position of the variant findRoute picks", () => {
+    // `/docs/**:slug` (before `/docs/:v/**`) and `/docs/:version/**:slug`
+    // (after it) both match: listed once, after it
+    const route = "/docs/:version(v\\d+)?/**:slug";
+    for (const routes of [
+      [route, "/docs/:v/**"],
+      ["/docs/:v/**", route],
+    ]) {
+      const { all, one } = listAll(routes, "/docs/v2/a");
+      expect(all.map((m) => m.data.path)).toEqual(["/docs/:v/**", route]);
+      expect(all.at(-1)).toEqual(one);
+    }
+    // From-end ranking (a suffix route matches): `/:a/b` pins the last segment
+    // and beats `/b/:c` there, as in `findRoute`
+    for (const routes of [
+      ["/:a?/b/:c?", "/**/b"],
+      ["/**/b", "/:a?/b/:c?"],
+    ]) {
+      const { all, one } = listAll(routes, "/b/b");
+      expect(all).toEqual([
+        { data: { path: "/**/b" }, params: { "0": "b", _: "b" } },
+        { data: { path: "/:a?/b/:c?" }, params: { a: "b" } },
+      ]);
+      expect(all.at(-1)).toEqual(one);
+    }
+  });
+
+  it("separate registrations of one pattern stay separate", () => {
+    const { all, one } = listAll(
+      [
+        ["/a/:x?/:y?", "first"],
+        ["/a/:x?/:y?", "second"],
+      ],
+      "/a/b",
+    );
+    expect(all).toEqual([
+      { data: { path: "/a/:x?/:y?", id: "first" }, params: { x: "b" } },
+      { data: { path: "/a/:x?/:y?", id: "second" }, params: { x: "b" } },
+    ]);
+    expect(one).toEqual(all[0]);
+  });
+
+  it("a route alone is listed as findRoute finds it (sweep)", () => {
+    const failures: string[] = [];
+    for (const route of SWEEP_PATTERNS) {
+      const router = createEmptyRouter<string>();
+      addRoute(router, "", route, route);
+      const jit = compileRouter(router, { matchAll: true });
+      const aot = new Function(`return ${compileRouterToString(router, { matchAll: true })}`)();
+      for (const path of SWEEP_PATHS) {
+        const one = findRoute(router, "", path);
+        const json = JSON.stringify(one ? [one] : []);
+        for (const [kind, all] of [
+          ["findAllRoutes", findAllRoutes(router, "", path)],
+          ["JIT", jit("", path)],
+          ["AOT", aot("", path)],
+        ] as const) {
+          if (JSON.stringify(all) !== json) {
+            failures.push(`${kind} ${route} @ ${path}: ${JSON.stringify(all)} vs ${json}`);
+          }
+        }
+      }
+    }
+    expect(failures.slice(0, 20)).toEqual([]);
+  });
+
+  it("lists each registration once, as findRoute finds it, in every matcher (random routers)", () => {
+    // Variants on one node (ties, regexes), on several, ranked from the end
+    // (`/**/b`), static ones (`/a{/b}?{/b}?`; above 8 static paths the
+    // compiler uses a map), duplicate registrations and method-agnostic ones
+    const pool = [
+      "/a/:x?/:y?",
+      "/a{/:x}?{/:y}?",
+      "/a/:x(\\d+)?/:y(\\w+)?",
+      "/a/:x?/:y(\\d+)?",
+      "/:a?/b/:c?",
+      "/a{/b}?/:x?",
+      "/a{/b}?{/b}?",
+      "/a/:id{/**}?",
+      "/a/*{/b}?",
+      "/a/:x/*",
+      "/a/:x?/**:r",
+      "/**/b",
+      "/:x/**",
+      "/a/:x",
+      "/a/b",
+      "/a",
+    ];
+    const statics = Array.from({ length: 9 }, (_, i) => `/s${i}`);
+    const paths = ["/", "//"];
+    for (let depth = 1, prev = [""]; depth <= 3; depth++) {
+      prev = prev.flatMap((path) => ["a", "b", "1", ""].map((s) => `${path}/${s}`));
+      paths.push(...prev, ...prev.map((p) => `${p}/`));
+    }
+    let seed = 11;
+    const random = () => (seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648) / 2_147_483_648;
+    const failures: string[] = [];
+    for (let n = 0; n < 200 && failures.length === 0; n++) {
+      const router = createEmptyRouter<string>();
+      const routes = pool.filter(() => random() < 0.3);
+      if (random() < 0.5) routes.push(...statics);
+      // A duplicate registration
+      if (routes.length > 0 && random() < 0.5) routes.push(routes[0]);
+      routes.forEach((route, i) =>
+        addRoute(router, random() < 0.2 ? "" : "GET", route, `${route}#${i}`),
+      );
+      const jit = compileRouter(router, { matchAll: true });
+      const aot = new Function(`return ${compileRouterToString(router, { matchAll: true })}`)();
+      for (const path of paths) {
+        const all = findAllRoutes(router, "GET", path);
+        const json = JSON.stringify(all);
+        const at = `[${routes.join(", ")}] @ ${path}: ${json}`;
+        if (JSON.stringify(jit("GET", path)) !== json) failures.push(`JIT ${at}`);
+        if (JSON.stringify(aot("GET", path)) !== json) failures.push(`AOT ${at}`);
+        if (new Set(all.map((m) => m.data)).size !== all.length) failures.push(`twice ${at}`);
+        const one = findRoute(router, "GET", path);
+        const listed = all.find((m) => m.data === one?.data);
+        if (JSON.stringify(listed) !== JSON.stringify(one)) failures.push(`findRoute ${at}`);
+      }
+    }
+    expect(failures.slice(0, 10)).toEqual([]);
   });
 });
 

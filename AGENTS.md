@@ -19,7 +19,7 @@ Read the relevant doc before changing that area:
 ## Core invariants
 
 - Interpreter (`findRoute` / `findAllRoutes`) and compiled matchers (JIT and AOT) return identical results; tests compare them.
-- `findAllRoutes` order (least → most specific) is a public contract (README "Result ordering"), with documented carve-outs (see [matching.md](.agents/matching.md#findallroutes-ordering-public-contract)).
+- `findAllRoutes` order (least → most specific) is a public contract (README "Result ordering"), with documented carve-outs (see [matching.md](.agents/matching.md#findallroutes-ordering-public-contract)). It lists each `addRoute` call once, by the variant `findRoute` picks (a shared `variants` token, never data equality); a pattern registered twice is two routes.
 - `routeToRegExp(p)` matches exactly the paths `findRoute` matches on a router holding only `p` (consumers use it as a security guard). The one exception: a constraint that can match `/` (`(.+)`, `(.*?)`, `([^x]*)`) also matches across segments in the regex, so it over-matches, never under-matches. A `(.*)` group is no such constraint: it is a `*` (below), exact.
 - Never write a second pattern parser: derived APIs (`routeToRegExp` validation and dynamic segments, overlap, `routeNodeKeys`) run the real `addRoute` (or its `getParamRegexp`) on a throwaway router.
 - Lookup ignores at most one trailing slash; middle empty segments are meaningful. The one reader of that slash is a trailing `*` over zero segments, for its capture only: `/a/*` matches `/a` (no key; optional, as in 0.11, unlike URLPattern) and `/a/` (`""`).

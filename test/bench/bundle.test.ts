@@ -227,8 +227,14 @@ describe("benchmark", () => {
     // like `new URL()` resolves a path, as in URLPattern (`dotSegments`,
     // behind one `test`), and throw next to a param, catch-all or group
     // (also inside a `{…}` group, checked per expansion).
-    expect(bytes).toBeLessThanOrEqual(13790); // <13.79kb
-    expect(gzipSize).toBeLessThanOrEqual(5925); // <5.93kb
+    // +365B raw / +145B gzip: `findAllRoutes` lists a route with several
+    // matching variants once (`/a/:x?/:y?` on `/a/b`): `addRoute` stamps a
+    // shared `variants` token on the entries of a call that registers
+    // several, a same-node tie lists the route's own variants reversed
+    // (`reverseVariants`) and one backwards pass keeps the last of each token
+    // (routes without optional syntax pay a property read per match).
+    expect(bytes).toBeLessThanOrEqual(14155); // <14.16kb
+    expect(gzipSize).toBeLessThanOrEqual(6074); // <6.08kb
   });
 });
 

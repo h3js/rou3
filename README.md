@@ -414,6 +414,17 @@ In short:
 - On the same kind of segment, a constrained or required param beats an optional or unconstrained one.
 - Registration order only breaks exact ties: `findRoute` returns the first-registered of the tied routes, and `findAllRoutes` lists them in registration order (so there the winner is not the last entry).
 
+Each route is listed once, even when several variants of an optional pattern match the path. It gets the params `findRoute` would give it, and its position is that variant's. Registering the same pattern twice adds two routes, and both are listed:
+
+```js
+const router = createRouter();
+addRoute(router, "GET", "/shop/:category?/:product?", { name: "shop" });
+
+// Both `/shop/:category` and `/shop/:product` match
+findAllRoutes(router, "GET", "/shop/shoes");
+// [{ data: { name: "shop" }, params: { category: "shoes" } }]
+```
+
 <details>
 <summary>Detailed ordering rules</summary>
 
@@ -425,7 +436,7 @@ In short:
   - Method-agnostic routes are sorted together with the method's own routes. On a tie, the method-agnostic one comes first, so `findRoute` picks the method's own.
   - An optional param inside a segment (`/e/:a:b?`) makes the segment one regex-constrained route. On its node it beats a plain `:id` sibling on every path, also on deeper routes (`/e/:a:b?/x` beats `/e/:id/x`, though both match the same paths), and it ties `/e/:id(\d+)` (registration order decides).
 - **Consistent with containment:** when no pattern uses optional syntax and each pattern contains the next (a `"superset"` per [`compareRoutes`](#pattern-overlap)), the result order is broadest first, except for the catch-all carve-out below.
-- **Carve-out: optional syntax.** A pattern with `:name?`, `:name*` or `{...}?` registers one entry per variant, and results are ordered by the variant that matched, not by the whole pattern. So a broader pattern can come **last**:
+- **Carve-out: optional syntax.** A pattern with `:name?`, `:name*` or `{...}?` registers one entry per variant, and results are ordered by the variant that matched (the one `findRoute` picks, when several do), not by the whole pattern. So a broader pattern can come **last**:
 
   ```js
   const router = createRouter();
@@ -436,7 +447,7 @@ In short:
   // ["admin", "admin-page"] (the broader pattern is last)
   ```
 
-  Both routes match `/admin` with an identical entry, so registration order decides: adding `/admin/:page?` first swaps them. If you need a strict pattern-level order with optional syntax, sort the result with [`compareRoutes`](#pattern-overlap).
+  Both routes match `/admin` with an identical entry, so registration order decides: adding `/admin/:page?` first swaps them. A pattern is also listed by the variant `findRoute` picks when a broader one matches too: `/p/*{/p}?` contains `/p/p/:x`, but on `/p/p/p` it comes after it, as `/p/*/p` (a literal last segment ranks higher, see below), not before it as `/p/*`. If you need a strict pattern-level order with optional syntax, sort the result with [`compareRoutes`](#pattern-overlap).
 
 - **Carve-out: `:name+` vs. a param followed by a catch-all.** No segment of a `:name+`, `:name*` or `**:name` can be empty, so a route with a `:name` and then a `*` / `**` over the same segments is broader (`/p/:id/**` also takes `/p/a//b`). Wildcards still come before params, so the narrower route comes first and `findRoute` picks the broader one:
 
