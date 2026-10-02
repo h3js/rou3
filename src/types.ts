@@ -1,5 +1,7 @@
 export interface RouterContext<T = unknown> {
+  /** @internal The shape of the tree may change between versions. */
   root: Node<T>;
+  /** @internal The shape of the static map may change between versions. */
   static: Record<string, Node<T> | undefined>;
 }
 
