@@ -289,11 +289,19 @@ describe("routeToRegExp", () => {
   // The one documented exception to "regex ≡ router": a constraint that can
   // match `/` spans segments in the inline regex, while the tree splits
   // first. The regex may match more (a guard still runs), never less (#227).
+  // A `(.*)` / `:name(.*)` is no constraint but a `*` (below).
   it("over-matches only for constraints that can match `/`", () => {
     const paths = sweepPaths();
     const underMatches: string[] = [];
     let overMatches = 0;
-    for (const pattern of ["/foo/(.*)", "/:x(.*)", "/a/:x([^b]+)", "/a/:x(\\D+)/b", "/:x(.+)?"]) {
+    for (const pattern of [
+      "/foo/(.+)",
+      "/:x(.*?)",
+      "/a/([^x]*)",
+      "/a/:x([^b]+)",
+      "/a/:x(\\D+)/b",
+      "/:x(.+)?",
+    ]) {
       const router = createRouter();
       addRoute(router, "", pattern, true);
       const regex = routeToRegExp(pattern);
@@ -305,6 +313,66 @@ describe("routeToRegExp", () => {
     }
     expect(underMatches).toEqual([]);
     expect(overMatches).toBeGreaterThan(0);
+  });
+
+  // ... while a `(.*)` group is a `*` (as in URLPattern), and a `:name(.*)` a
+  // `*` keyed by name, in the tree too: the regex matches and captures exactly
+  // A trailing `*` before optional segments may start with an empty segment,
+  // so it doesn't nest in a preceding `:x?` group (which needs a value)
+  it("matches what findRoute matches for a `*` after an optional param", () => {
+    const paths = sweepPaths();
+    const mismatches: string[] = [];
+    for (const pattern of [
+      "/a/:x?/*/:y?",
+      "/a/:x?/(.*)/:y?",
+      "/a/:x?/:p(.*)/:y?",
+      "/a/b/:x?/*/:y?",
+      "/:z/:x?/*/:y?",
+      "/a/:x?/*/:y?/:w?",
+    ]) {
+      const router = createRouter();
+      addRoute(router, "", pattern, true);
+      const regex = routeToRegExp(pattern);
+      for (const path of [...paths, "/a//a", "/a//", "/a/b//a", "/z//a"]) {
+        const routed = findRoute(router, "", path) !== undefined;
+        if (routed !== regex.test(path)) mismatches.push(`${pattern} ${path} (router: ${routed})`);
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
+
+  it("matches and captures a `(.*)` / `:name(.*)` like findRoute", () => {
+    const paths = sweepPaths();
+    const mismatches: string[] = [];
+    for (const pattern of [
+      "/foo/(.*)",
+      "/:x(.*)",
+      "/a/(.*)/b",
+      "/a/:x(.*)/:y",
+      "/a-(.*).png",
+      "/a-:x(.*).png",
+      "/{:x}(.*)",
+      "/(\\d+)(.*)",
+      "/a/:x(.*)/:y?",
+    ]) {
+      const router = createRouter();
+      addRoute(router, "", pattern, true);
+      const regex = routeToRegExp(pattern);
+      for (const path of paths) {
+        const routed = findRoute(router, "", path);
+        const match = path.match(regex);
+        if (!routed !== !match) {
+          mismatches.push(`${pattern} ${path} (${routed ? "router" : "regex"} only)`);
+        } else if (
+          match &&
+          JSON.stringify(normalizeGroups(match.groups) || {}) !==
+            JSON.stringify(routerCaptures(router, routed?.params))
+        ) {
+          mismatches.push(`${pattern} ${path}: captures`);
+        }
+      }
+    }
+    expect(mismatches).toEqual([]);
   });
 
   // The router splits paths on `/` only, so a line terminator is an ordinary
@@ -392,7 +460,6 @@ describe("routeToRegExp", () => {
       ":x([^.]+)?",
       ":x(.+\\.png)",
       ":x(.*)",
-      ":x(.*)?",
     ];
     const mismatches: string[] = [];
     for (const prefix of ["", "/a"]) {
@@ -737,7 +804,7 @@ describe("reserved pattern syntax", () => {
     // and a mid-segment `**`: it states where each one goes (none after a
     // `**:name`).
     const message =
-      "misplaced `?` / `+` / `*`: `?` follows `:name` or `:name(…)`, `+` / `*` a whole-segment `:name`, not `**:name`; escape a literal one with `\\`";
+      "misplaced `?` / `+` / `*`: `?` follows `:name` or `:name(…)`, `+` / `*` a whole-segment `:name`, none a catch-all (`(.*)` too); escape a literal one with `\\`";
     for (const route of [
       "/a/**:x+",
       "/a/**:x*",

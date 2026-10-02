@@ -121,13 +121,16 @@ export function joinGroup(a: string, b: string, input?: string): string {
   // `a` ends in a `:name` (not a `**:name`, which ends its segment anyway; an
   // invalid name throws later), a group of its segment (a stray `)` is a
   // literal) or a `*`, none escaped, and `b` starts with a `(`, `?`, `+` or
-  // `*` (an empty `b` appends `"undefined"`, which ends in none of them)
-  const m = /(?<!\\)(\\\\)*((?<!\*\*):\w+|\([^/]*[^\\]\)|\*)([(?+*])$/.exec(a + b[0]);
+  // `*` (an empty `b` appends `"undefined"`, which ends in none of them), or
+  // with the U+FFFF before a `(.*)` group's `*` (see `starGroups`), which
+  // stays there only (so the `*` is no modifier)
+  const m = /(?<!\\)(\\\\)*((?<!\*\*):\w+|\([^/]*[^\\]\)|\*)([(?+*\uFFFF])$/.exec(a + b[0]);
   if (m) {
+    if (m[3] === "\uFFFF") return a + b;
     // `m[3]` is no `(` (`?`, `+` and `*` sort after it)
     if (m[3] > "(") invalidSyntax(MISPLACED_MODIFIER, input!);
     // Only a `:name` starts with a char after `*` (`(` and `*` don't)
     if (m[2] > "*") a += "([^\\x2f]+?)";
   }
-  return a + b;
+  return a + (b.charCodeAt(0) === 0xffff ? b.slice(1) : b);
 }

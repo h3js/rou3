@@ -445,7 +445,7 @@ function compileFinalMatch(
     const lastParam = paramsMap[paramsMap.length - 1];
     if (currentIdx !== -1) {
       // A trailing `*` matches zero segments like a `**` (see `matchesZero`)
-      const star = !lastParam[2] && (lastParam[1] as string) < ":" && !lastParam[5];
+      const star = !lastParam[2] && !!lastParam[3] && !lastParam[5];
       if (star) starWeight = 2;
       if (!lastParam[2] && !star) {
         // It needs a segment (a `**:name`)

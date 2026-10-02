@@ -49,6 +49,25 @@ describe("types", () => {
       expectTypeOf<NonNullable<MatchedRoute["params"]>>().toEqualTypeOf<Record<string, string>>();
     });
 
+    it("should read `(.*)` and `:name(.*)` like a `*`", () => {
+      // Optional as a whole segment ending the route, set otherwise
+      expectTypeOf<InferRouteParams<"/test/(.*)">>().toEqualTypeOf<{ "0": string | undefined }>();
+      expectTypeOf<InferRouteParams<"/(.*)">>().toEqualTypeOf<{ "0": string | undefined }>();
+      expectTypeOf<InferRouteParams<"/test/(.*){.png}?">>().toEqualTypeOf<{
+        "0": string | undefined;
+      }>();
+      expectTypeOf<InferRouteParams<"/test/(.*)/x">>().toEqualTypeOf<{ "0": string }>();
+      expectTypeOf<InferRouteParams<"/test/a-(.*)">>().toEqualTypeOf<{ "0": string }>();
+      expectTypeOf<InferRouteParams<"/test/(\\d+)">>().toEqualTypeOf<{ "0": string }>();
+      expectTypeOf<InferRouteParams<"/test/:p(.*)">>().toEqualTypeOf<{ p: string | undefined }>();
+      expectTypeOf<InferRouteParams<"/:p(.*)">>().toEqualTypeOf<{ p: string | undefined }>();
+      expectTypeOf<InferRouteParams<"/test/:p(.*)/">>().toEqualTypeOf<{ p: string | undefined }>();
+      expectTypeOf<InferRouteParams<"/test/:p(.*)/x">>().toEqualTypeOf<{ p: string }>();
+      expectTypeOf<InferRouteParams<"/test/a-:p(.*)">>().toEqualTypeOf<{ p: string }>();
+      expectTypeOf<InferRouteParams<"/test/:p(.*).png">>().toEqualTypeOf<{ p: string }>();
+      expectTypeOf<InferRouteParams<"/test/:p(\\d+)">>().toEqualTypeOf<{ p: string }>();
+    });
+
     it("should infer wildcard params numbered with params around them", () => {
       expectTypeOf<InferRouteParams<"/test/:id/*">>().toEqualTypeOf<{
         id: string;
@@ -125,7 +144,7 @@ describe("types", () => {
         "0": string;
         file: string | undefined;
       }>();
-      expectTypeOf<InferRouteParams<"/**:p/:f(.*)">>().toEqualTypeOf<{ p: string; f: string }>();
+      expectTypeOf<InferRouteParams<"/**:p/:f(\\d+)">>().toEqualTypeOf<{ p: string; f: string }>();
       // `**<rest>` reads like `*<rest>`: one capture, no `_` alias
       expectTypeOf<InferRouteParams<"/**.md">>().toEqualTypeOf<{ "0": string }>();
       expectTypeOf<InferRouteParams<"/docs/:v/**.md">>().toEqualTypeOf<{

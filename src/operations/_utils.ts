@@ -96,7 +96,7 @@ export function encodeLiteral(text: string): string {
 
 /**
  * Throws on U+FFFD-U+FFFF: internal placeholders (`encodeEscapes`, `\uFFFE` in
- * `getParamRegexp`; U+FFFF is kept free for the next one), which a route
+ * `getParamRegexp`, `\uFFFF` before a `*` in `starGroups`), which a route
  * could otherwise write as syntax (`\uFFFD0` read as an escaped `:`).
  *
  * Throws when a `(...)` group in `route` never closes (`/files/(2024`, #199)
@@ -108,7 +108,8 @@ export function encodeLiteral(text: string): string {
  * a `^` / `$` / look-around in a group: the tree tests a segment on its own,
  * where they see its ends, and `routeToRegExp` inline, where they see the rest
  * of the path (#227), and on a capturing group inside a group (a stray
- * numbered or named param; only `(?:…)` is fine). Called by `addRoute` (and
+ * numbered or named param; only `(?:…)` is fine), also inside a class
+ * (`[(.*)]`, `[()]`: read as one). Called by `addRoute` (and
  * so by `routeToRegExp`). A stray `)` stays a literal.
  *
  * Escapes are dropped first (`\(` is no group; `\/` stays, the split cuts
@@ -127,7 +128,9 @@ export function checkConstraints(route: string): void {
   while (
     s !==
     (s = s.replace(/\([^()/]*\)/g, (group) => {
-      if (/[$^\0]|^\(\?<?[=!]/.test(group.replace(/\[[^\]]*\]/g, ""))) {
+      // A capture inside a class too (`[(.*)]`, `[()]`): read as one, and
+      // URLPattern rejects it
+      if (/[$^]|^\(\?<?[=!]/.test(group.replace(/\[[^\]]*\]/g, "")) || group.includes("\0")) {
         invalidSyntax(
           "an anchor, look-around, backreference or capturing group in a constraint",
           route,
@@ -151,6 +154,49 @@ export function checkConstraints(route: string): void {
 }
 
 /**
+ * Maps the index of an unnamed capture in a route to its key in a pattern: a
+ * number, or the name of a `:name(.*)` (see `starGroups`).
+ */
+export type Unnamed = (index: number) => number | string;
+
+/**
+ * `path` (checked by `checkConstraints`) with every `(.*)` group written as
+ * the `*` it is, as in URLPattern (the same token there): a greedy
+ * catch-all, also inside a segment. A `:name(.*)` is that `*` keyed by
+ * `name`, which may be `""`; returns the `unnamed` map that keys it (the
+ * `*` takes an unnamed index in the rewritten route, the `(…)` groups before
+ * it numbered as written). Where a `*` would read as a modifier or a `**`
+ * (after a `:name`, a group or a `*`), or a group's `{` / `}` may put it
+ * there, it is written after U+FFFF, which `joinGroup` drops where no such
+ * thing is before it and `getParamRegexp` skips. A `(.*)*` stays, so its
+ * modifier throws; a `(.*)?` / `(.*)+` is a `*?` / `*+`, which throw too.
+ * Shared by `addRoute`, `removeRoute` and `routeToRegExp`.
+ */
+export function starGroups(path: string): [path: string, unnamed?: Unnamed] {
+  if (!path.includes("(.*)")) return [path];
+  // Unnamed groups so far (a `*` before a `:name(.*)` throws anyway). Only a
+  // `(?:` nests (`checkConstraints`), so every other `(` is a capture.
+  let count = 0;
+  let unnamed: Unnamed | undefined;
+  const out = path.replace(
+    /\\[\s\S]|(:[A-Za-z_]\w*)?\((?!\?)(\.\*\)(?!\*))?/g,
+    (m, name: string | undefined, star, at: number) => {
+      // An escape, a constraint or another group
+      if (m[0] === "\\" || !star) {
+        if (m[0] === "(") count++;
+        return m;
+      }
+      if (name) {
+        const k = count;
+        unnamed = (index) => (index === k ? name.slice(1) : index > k ? index - 1 : index);
+      } else count++;
+      return /(^|[^\\])(\\\\)*([)*}?]|:[A-Za-z_]\w*)\{?$/.test(path.slice(0, at)) ? "\uFFFF*" : "*";
+    },
+  );
+  return [out, unnamed];
+}
+
+/**
  * A relative pattern (`foo/:id`) with a `/` in front, as `addRoute`,
  * `removeRoute` and `routeToRegExp` read it. A pattern starting with a `{`
  * group is left alone: `expandGroupDelimiters` reads each expansion of it
@@ -171,12 +217,13 @@ export function invalidSyntax(what: string, route: string): never {
 
 /**
  * `?` / `+` / `*` anywhere but after a whole-segment `:name` (a `?` also after
- * `:name(…)` or in a mixed segment; none after `**:name`), which covers a raw
+ * `:name(…)` or in a mixed segment; none on a catch-all: `*`, `(.*)`, which
+ * `starGroups` writes as a `*`, `**:name`), which covers a raw
  * `?` in plain text and a `**` in the middle of a segment too (one message,
  * bundle size; see README).
  */
 export const MISPLACED_MODIFIER =
-  "misplaced `?` / `+` / `*`: `?` follows `:name` or `:name(…)`, `+` / `*` a whole-segment `:name`, not `**:name`; escape a literal one with `\\`";
+  "misplaced `?` / `+` / `*`: `?` follows `:name` or `:name(…)`, `+` / `*` a whole-segment `:name`, none a catch-all (`(.*)` too); escape a literal one with `\\`";
 
 /**
  * A segment ending in a param's modifier: the text before the param, the
@@ -276,30 +323,33 @@ export function oneCatchAll(input: string): never {
 /**
  * Whether matching `m` on `segments` gives a `:name` an empty segment, or a
  * `**:name` (`:name+`, `:name*`) an empty one among those it takes: every
- * segment needs a value, as in URLPattern (`[^/]+(?:/[^/]+)*`). A `*`, a `**`
- * and a constraint (it decides: `:id(\d*)`) may be empty. Callers check only
- * paths with an empty segment.
+ * segment needs a value, as in URLPattern (`[^/]+(?:/[^/]+)*`). A `*` (also a
+ * `:name(.*)`, any segment of it), a `**` and a constraint (it decides:
+ * `:id(\d*)`) may be empty. Callers check only paths with an empty segment.
  */
 export function emptyParam(m: MethodData<unknown>, segments: string[]): boolean {
   const pMap = m.paramsMap;
   const params = pMap && getMatchParams(segments, pMap, m.suffix)!;
-  // A `*` and a bare `**` are named by a digit and a constraint is a RegExp
-  // (`/^…$/`), all `< ":"`. A value holds an empty segment where it is `""`,
-  // or starts, ends or holds `//` (a `:name`'s has no `/`).
+  // A `*` (also a `:name(.*)`) is `empty`, a bare `**` is named by a digit
+  // and a constraint is a RegExp (`/^…$/`), both `< ":"`. A value holds an
+  // empty segment where it is `""`, or starts, ends or holds `//` (a
+  // `:name`'s has no `/`).
   return !!pMap?.some(
-    ([, name]) => (name as string) > ":" && /(^|\/)(\/|$)/.test(params![name as string]),
+    ([, name, , empty]) =>
+      !empty && (name as string) > ":" && /(^|\/)(\/|$)/.test(params![name as string]),
   );
 }
 
 /**
  * Whether entry `m` of a wildcard node (a route ending in its catch-all)
- * matches zero segments there: a bare `**` and a `*` (named by a digit, a
- * `**:name` by a letter or `_`). A trailing `*` is optional, as in 0.11:
- * `/foo/*` matches `/foo` (no key, see `getMatchParams`) and `/foo/` (`""`).
+ * matches zero segments there: a bare `**` (`optional`) and a `*` (`empty`,
+ * also a `:name(.*)`; not the `**` of a split one), not a `**:name`. A
+ * trailing `*` is optional, as in 0.11: `/foo/*` matches `/foo` (no key, see
+ * `getMatchParams`) and `/foo/` (`""`).
  */
 export function matchesZero(m: MethodData<unknown>): boolean {
   const last = m.paramsMap![m.paramsMap!.length - 1];
-  return last[2] || ((last[1] as string) < ":" && !last[5]);
+  return last[2] || (!!last[3] && !last[5]);
 }
 
 export function normalizePath(path: string): string {

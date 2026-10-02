@@ -200,19 +200,19 @@ describe("regExpToRoute", () => {
     expect(routingDiffs(route, back, pathsUnder(route))).toEqual([]);
   });
 
-  // rou3's catch-alls match any char (`[\s\S]*`); a `.*` is a constraint the
-  // user wrote, and keeps its own ending, so the two no longer collide.
-  it("tells a `(.*)` constraint apart from a catch-all", () => {
+  // A `:x(.*)` is a `*` keyed `x` (it may be `""`), a `:x+` / `:x*` needs a
+  // value: their regexes differ, and each reads back as itself.
+  it("tells a `:x(.*)` catch-all apart from `:x+` / `:x*`", () => {
     for (const route of [
       "/a/:x(.*)",
-      "/a/:x(.*)?",
       "/:x(.*)",
-      "/:x(.*)?",
-      "/a/(.*)",
+      "/a/:x(.*)/b",
+      "/a/pre-:x(.*)",
+      "/a/:x(.*).png",
+      "/a/:x(.*)/:y?",
       // In endings with the trailing-slash rule built in.
-      "/a/:x/:y(.*)?",
+      "/a/:x/:y(.*)",
       "/a{/b/:x(.*)}?",
-      "/a{/b/:x/:y(.*)?}?",
       "/a/:x+",
       "/a/:x*",
       "/:x+",
@@ -233,12 +233,14 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(source)).toBe(route);
   });
 
-  // 0.11 `:x*` forms, where a `:x*` could be empty (`[\s\S]*`): back to the
-  // route they were emitted for, which now needs a value.
+  // 0.11 `:x*` forms, where a `:x*` could be empty (`[\s\S]*`): an optional
+  // `:x(.*)` (a `*` keyed `x`, which may be empty too: the same paths as the
+  // regex; the first is what `/path{/:rest(.*)}?` emits now), and the root
+  // form back to the route it was emitted for, which now needs a value.
   it.each([
-    [String.raw`^\/path(?:\/(?<rest>(?:[\s\S]*[^/])?\/*?))??\/?$`, "/path/:rest*"],
+    [String.raw`^\/path(?:\/(?<rest>(?:[\s\S]*[^/])?\/*?))??\/?$`, "/path{/:rest(.*)}?"],
     [String.raw`^(?:\/?(?<path>(?:[\s\S]*[^/])?\/*?))??\/?$`, "/:path*"],
-    [String.raw`^\/path(?:\/(?<rest>[\s\S]*))??\/suffix\/?$`, "/path/:rest*/suffix"],
+    [String.raw`^\/path(?:\/(?<rest>[\s\S]*))??\/suffix\/?$`, "/path{/:rest(.*)}?/suffix"],
   ])("reverses the 0.11 `:x*` form %s", (source, route) => {
     expect(regExpToRoute(source)).toBe(route);
   });
@@ -372,16 +374,26 @@ describe("regExpToRoute", () => {
       expect(routeToRegExp(route).source, route).toContain("(?<x>[^\\x2f]+?)");
       expect(regExpToRoute(routeToRegExp(route)), route).toBe(route);
     }
-    // A `*` after a group would read as a modifier and a `*` after a `*` as a
-    // `**`: no route emits these, so they throw.
+    // A `*` after a `*` would read as a `**` (and is a second catch-all): no
+    // route emits these, so they throw.
     for (const re of [
       /^\/a(?<_0>[\s\S]*)(?<_1>[\s\S]*)\/?$/,
       /^\/a(?<_0>[\s\S]*)(?<_1>[\s\S]*)b\/?$/,
       /^\/(?<_0>[\s\S]*)(?<_1>[\s\S]*)\/?$/,
-      /^\/a\/(?<x>[^/]+)(?<_0>[\s\S]*)\/?$/,
-      /^\/a\/(?<x>\d+)(?<_0>[\s\S]*)\/?$/,
     ]) {
       expect(() => regExpToRoute(re), re.source).toThrow(/rou3: /);
+    }
+    // After a group a `*` would read as a modifier: it is the `(.*)` it is
+    // (a `*` in URLPattern too)
+    for (const [re, route] of [
+      [/^\/a\/(?<x>[^/]+)(?<_0>[\s\S]*)\/?$/, "/a/:x([^\\x2f]+)(.*)"],
+      [/^\/a\/(?<x>\d+)(?<_0>[\s\S]*)\/?$/, "/a/:x(\\d+)(.*)"],
+    ] as const) {
+      expect(regExpToRoute(re), re.source).toBe(route);
+      // (the stripped trailing slash aside: these regexes end in a plain `\/?`)
+      for (const path of ["/a/1", "/a/1x", "/a/1/x/y", "/a/x", "/a/", "/a"]) {
+        expect(routeToRegExp(route).exec(path)?.groups, path).toEqual(re.exec(path)?.groups);
+      }
     }
     // Group names no route param name decodes to are rejected.
     expect(() => regExpToRoute(/^\/a\/(?<__rou3_esc_x_h>[^/]+)\/?$/)).toThrow(/rou3: /);
@@ -462,8 +474,31 @@ describe("regExpToRoute", () => {
     }
   });
 
-  it("keeps a trailing unnamed `(.*)` a constraint", () => {
-    expect(regExpToRoute(routeToRegExp("/a/(.*)"))).toBe("/a/(.*)");
+  it("reads an optional `:name(.*)` group back as itself", () => {
+    // Its `*` tail may be empty (`/a//` gives `p: ""`): no `:p*`, which needs
+    // a value
+    for (const route of [
+      "/a{/:p(.*)}?",
+      "{/:p(.*)}?",
+      "/:x{/:p(.*)}?",
+      "/(\\d+){/:p(.*)}?/b",
+      "/a{/:p(.*)}?/b",
+    ]) {
+      const back = regExpToRoute(routeToRegExp(route));
+      expect(routeToRegExp(back).source, route).toBe(routeToRegExp(route).source);
+      expect(
+        routingDiffs(route, back, [...pathsUnder(route), "/a//", "//", "/1//b"]),
+        route,
+      ).toEqual([]);
+    }
+  });
+
+  it("reads a `(.*)` group back as the `*` it is", () => {
+    expect(regExpToRoute(routeToRegExp("/a/(.*)"))).toBe("/a/*");
+    expect(regExpToRoute(routeToRegExp("/a/(.*)/b"))).toBe("/a/*/b");
+    // Right after a name or group, where a `*` would be a modifier
+    expect(regExpToRoute(routeToRegExp("/a/(\\d+)(.*)"))).toBe("/a/(\\d+)(.*)");
+    expect(regExpToRoute(routeToRegExp("/a/{:x}(.*)"))).toBe("/a/:x([^\\x2f]+?)(.*)");
   });
 
   // Only the exact catch-all endings `routeToRegExp` emits are normalized: a
@@ -656,9 +691,9 @@ describe("regExpToRoute", () => {
 const KNOWN_NON_EQUIVALENT: Record<string, readonly [back: string, reason: string]> = {
   // A constraint spelled like rou3's catch-all body compiles to the catch-all
   // regex (constraints that can match `/` are not modeled, see AGENTS.md).
-  "/:x([\\s\\S]*)": ["/:x+", "a `[\\s\\S]*` constraint comes back as a catch-all"],
-  "/a/:x([\\s\\S]*)": ["/a/:x+", "a `[\\s\\S]*` constraint comes back as a catch-all"],
-  "/a/:x([\\s\\S]*)?": ["/a/:x*", "a `[\\s\\S]*` constraint comes back as a catch-all"],
+  "/:x([\\s\\S]*)": ["/:x(.*)", "a `[\\s\\S]*` constraint comes back as a catch-all"],
+  "/a/:x([\\s\\S]*)": ["/a/:x(.*)", "a `[\\s\\S]*` constraint comes back as a catch-all"],
+  "/a/:x([\\s\\S]*)?": ["/a{/:x(.*)}?", "a `[\\s\\S]*` constraint comes back as a catch-all"],
   // Optionals after a whole-segment `:x?` nest in its group (see
   // `routeToRegExpSegments`), so these compile to the regex of the `{/:x/…}?`
   // route and come back as it: the same paths, captured like the regex does,

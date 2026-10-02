@@ -18,7 +18,11 @@ import {
   segmentKey,
   splitRoute,
   splitStar,
+  starGroups,
+  type Unnamed,
 } from "./_utils.ts";
+
+export type { Unnamed };
 
 /**
  * Add a route to the router context.
@@ -33,6 +37,9 @@ import {
  * capture the segment is one regex, so a greedy capture takes what it can
  * (`/*-:x?` on `/--` is `{ 0: "-" }`, `/:a(\\d+):b?` on `/12` `{ a: "12" }`).
  *
+ * A `(.*)` group is a `*` (the same token in URLPattern), and a `:name(.*)` a
+ * `*` keyed by `name`, which may be `""` (see `starGroups`).
+ *
  * A pattern without a leading `/` gets one (`foo/:id`). One starting with a
  * group gets it per expansion (`absolutePattern`): `{/:a}?/b` is absolute, as
  * in URLPattern (`/:a/b` or `/b`), while `{a}?/b` is `/a/b` or `/b`. Text
@@ -46,7 +53,8 @@ import {
  * `}`: `/{:a}{*}`, `/{:a}?*`), a raw `?` after plain text
  * (`/foo?`), a `**` in the middle of a segment (`/a**b`), an empty or `(?`
  * group, a `:` without a valid name (`/:0`, `/:café`, `/:id$`), more after `**:name`
- * in its segment, a repeated param name, more than one `**`, a `\` that
+ * in its segment, a repeated param name, more than one catch-all (`*`,
+ * `**`, `(.*)`, `:name(.*)`, `:name+`, `:name*`), a `\` that
  * escapes no char of its segment (`\/`), an anchor, look-around,
  * backreference or capturing group in a constraint (`/:x((a))`; use `(?:…)`),
  * and a U+FFFD-U+FFFF char (internal placeholders).
@@ -60,7 +68,9 @@ export function addRoute<T>(
   method = method.toUpperCase();
   path = absolutePattern(path);
   checkConstraints(path);
-  _add(ctx, method, path, data);
+  const [route, unnamed] = starGroups(path);
+  // A `:name(.*)` keys its `*`: an identity of its own (not the `*` route's)
+  _add(ctx, method, route, data, unnamed && expandedRouteId(path), path, unnamed);
 }
 
 /**
@@ -173,6 +183,17 @@ function _insert<T>(
   const paramsRegexp: RegExp[] = [];
   // Param names of this expansion: a name declared twice throws
   const names: string[] = [];
+  // The key of unnamed capture `n`; a `:name(.*)`'s declares its name once
+  // (the pieces of a split `*` share it)
+  let named = false;
+  const captureKey = (n: number) => {
+    const k = unnamed(n);
+    if (typeof k === "string" && !named) {
+      named = true;
+      addName(names, k, input);
+    }
+    return k;
+  };
 
   // Segments after a `**` (static key, or `1` for a param) are inserted into
   // the wildcard's `suffix` trie last segment first, once the params are read
@@ -208,11 +229,11 @@ function _insert<T>(
       paramsMap.push([
         -(i + 1),
         i === join
-          ? String(unnamed(head ? _unnamedParamIndex - 1 : _unnamedParamIndex++))
+          ? String(captureKey(head ? _unnamedParamIndex - 1 : _unnamedParamIndex++))
           : segment.length === 2
             ? (addName(names, "_", input), String(unnamed(_unnamedParamIndex++)))
             : empty
-              ? String(unnamed(_unnamedParamIndex++))
+              ? String(captureKey(_unnamedParamIndex++))
               : addName(names, segment.slice(3), input),
         // optional, but not the `**` of a `pre*` ending its segment, before
         // more of the route too (its one segment case is the segment as
@@ -249,7 +270,7 @@ function _insert<T>(
           _unnamedParamIndex - (tail ? 1 : 0),
           names,
           input,
-          (n) => toUnnamedGroupKey(unnamed(n)),
+          (n) => toUnnamedGroupKey(captureKey(n)),
         );
         _unnamedParamIndex = nextIndex;
         paramsRegexp[i] = regexp;
@@ -331,9 +352,6 @@ function _insert<T>(
   return _unnamedParamIndex;
 }
 
-/** Maps the index of an unnamed capture in a route to its key in a pattern. */
-export type Unnamed = (index: number) => number;
-
 const same: Unnamed = (index) => index;
 
 /**
@@ -412,6 +430,12 @@ export function getParamRegexp(
   for (let j = 0; j < segment.length; j++) {
     const c = segment.charCodeAt(j);
     if (_d === 0) {
+      // Before a `(.*)` group's `*` that follows a name, group or `*`: no
+      // modifier, nor a name's constraint (see `starGroups`); dropped below
+      if (c === 0xffff) {
+        _s += "\uFFFF";
+        continue;
+      }
       if (c === 58 /* : */) {
         // A name is `[A-Za-z_]\w*` (a `-` ends it); a `$` or non-ASCII char
         // can't follow it (part of the name in URLPattern: `:id$` is `id$`)
@@ -474,12 +498,12 @@ export function getParamRegexp(
       // `[^\x2f]+?` before a group is the `:name` `joinGroup` constrained,
       // emitted as `[^/]+?` (alone it stays as written).
       .replace(/(?<!\uFFFE):([A-Za-z_]\w*)(?:\(([^)]*)\))?(\?$)?/g, (m, id, p, o, i, s) => {
-        const group = `(?<${toGroupName(id)}>${p && p + s[i + m.length] != "[^\\x2f]+?(" ? p : "[^/]+?"})`;
+        const group = `(?<${toGroupName(id)}>${p && (p != "[^\\x2f]+?" || !/[(\uFFFF]/.test(s[i + m.length])) ? p : "[^/]+?"})`;
         return o ? ((_o = id), `(?:${group})?`) : group;
       })
       .replace(/\((?![?<])/g, () => `(?<${groupKey(_i++)}>`),
     "\uFFFE",
-  ).replace(/\uFFFE([\s\S])/g, (_, c) => (/[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c));
+  ).replace(/\uFFFE([\s\S])|\uFFFF/g, (_, c = "") => (/[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c));
 
   return [new RegExp(`^${regex}$`), _i, _o];
 }

@@ -173,11 +173,13 @@ function normalizeGroups(groups: Record<string, string> | undefined): Record<str
  * Known semantic differences between rou3 and URLPattern:
  *
  * 1. Trailing slash: rou3 ignores at most one trailing `/`
- * 2. `*` semantics: a greedy catch-all `(.*)` in both; rou3 allows one
- *    catch-all per route (two `*` are reserved), and a whole-segment `*`
- *    ending the route is optional (`/foo/*` matches `/foo`, no key)
- * 3. `(.*)` semantics: URLPattern `(.*)` matches across `/`; so does
- *    `routeToRegExp`, while the tree's `(.*)` is segment-scoped
+ * 2. `*` semantics: a greedy catch-all `(.*)` in both (a `(.*)` group is a
+ *    `*`, a `:name(.*)` one keyed by name); rou3 allows one catch-all per
+ *    route (two `*` are reserved), and a whole-segment `*` ending the route
+ *    is optional (`/foo/*` matches `/foo`, no key)
+ * 3. Other constraints that can match `/` (`(.+)`): URLPattern matches them
+ *    across `/`, and so does `routeToRegExp`, while the tree's are
+ *    segment-scoped (no WPT case reaches this)
  * 4. `**` semantics: URLPattern parses `**` as `*` with a `*` modifier (a
  *    catch-all across `/` captured as `"0"`, unset over zero segments); rou3
  *    `**` is a catch-all over whole segments keyed the same way, one per
@@ -226,13 +228,6 @@ const diffs = <T>(entries: Record<string, T>) => new Map(Object.entries(entries)
 // result, so any change in what rou3 returns fails: update the entry, or drop
 // it once rou3 agrees with URLPattern.
 const KNOWN_DIFFS = diffs<Result | Split>({
-  // Trailing slash — rou3 ignores at most one trailing slash, so `/foo/` is
-  // `/foo` (no empty last segment; only a trailing `*` takes nothing after
-  // it, as in URLPattern). URLPattern matches `/foo/` with an empty capture.
-  // routeToRegExp reproduces the router here (#200).
-  "/foo/(.*) → /foo/ [match]": null,
-  "/foo/:bar(.*) → /foo/ [match]": null,
-
   // Trailing slash after `**`: `/foo/` is `/foo`, zero segments, where the
   // `**` is unset (URLPattern: an empty capture)
   "/foo/** → /foo/ [match]": split({ "0": undefined }, {}),
@@ -240,6 +235,10 @@ const KNOWN_DIFFS = diffs<Result | Split>({
   // A trailing `*` is optional, as in 0.11 (`use("/api/*")` scopes cover
   // `/api`): no key (URLPattern: no match)
   "/foo/* → /foo [no match]": split({ "0": undefined }, {}),
+  // ... and so is a `(.*)` group, a `*`, and a `:name(.*)`, a `*` keyed by
+  // name
+  "/foo/(.*) → /foo [no match]": split({ "0": undefined }, {}),
+  "/foo/:bar(.*) → /foo [no match]": split({ bar: undefined }, {}),
 
   // Patterns without leading `/` — rou3 prefixes `/` (a leading `{:foo}`
   // group's expansions too), so the regex never matches a relative input
@@ -337,13 +336,10 @@ const REGEXP_ONLY_KNOWN_DIFFS = diffs<Result>({
 });
 
 // Known diffs that only apply to the tree (routeToRegExp agrees with
-// URLPattern), with the tree's result
-const ROUTER_KNOWN_DIFFS = diffs<Result>({
-  // `(.*)` cross-segment — routeToRegExp matches `bar/baz` (regex `.` spans `/`),
-  // but the segment-scoped tree stops at one segment.
-  "/foo/(.*) → /foo/bar/baz [match]": null,
-  "/foo/:bar(.*) → /foo/bar/baz [match]": null,
-});
+// URLPattern), with the tree's result: none since a `(.*)` group is a `*` (a
+// constraint that can match `/`, `(.+)`, is segment-scoped in the tree only,
+// but no WPT case reaches one)
+const ROUTER_KNOWN_DIFFS = diffs<Result>({});
 
 // Patterns URLPattern rejects (`expected_obj: "error"`) but rou3 accepts.
 // Every other rejected pattern must throw a `rou3:` error.
@@ -442,9 +438,21 @@ function planTest(strategy: MatchStrategy, test: PathnameTest, reached: Set<stri
     const stored = DIFF_SETS[set].get(test.label)!;
     const result =
       stored && SPLIT in stored ? stored[strategy.router ? "router" : "regexp"] : stored;
-    return { kind: "known diff", set, result };
+    return noDuplicateNames(strategy, test.pattern) ?? { kind: "known diff", set, result };
   }
-  return { kind: "run" };
+  return noDuplicateNames(strategy, test.pattern) ?? { kind: "run" };
+}
+
+/**
+ * Without duplicate named groups (Node 22), `routeToRegExp` throws for a
+ * pattern whose regex is an alternation repeating a group (`{:foo}?(.*)`: a
+ * `(.*)` is a `*`, so its route and the one without the group each have
+ * one): skipped, after its diff-set entry is reached.
+ */
+function noDuplicateNames(strategy: MatchStrategy, pattern: string): Plan | undefined {
+  if (!strategy.router && !DUPLICATE_NAMED_GROUPS && needsDuplicateNames(pattern)) {
+    return { kind: "skipped", reason: "needs duplicate named groups (Node 22)" };
+  }
 }
 
 const URLPatternCtor = (globalThis as { URLPattern?: any }).URLPattern;
@@ -797,10 +805,15 @@ const GROUP_PARAM_RESERVED = [
 describe("wpt urlpattern compatibility: a regex group after a param's group", () => {
   for (const strategy of strategies) {
     for (const [pattern, input, groups] of GROUP_PARAM_CASES) {
-      it(`${strategy.name}: ${pattern} → ${input}`, () => {
-        const { matched, params } = strategy.match(pattern, input);
-        expect(matched ? params : null).toStrictEqual(expectedGroups(strategy, groups));
-      });
+      // Without duplicate named groups (Node 22) an alternation regex throws
+      // (`/{:foo}?(.*)`)
+      it.skipIf(!strategy.router && !DUPLICATE_NAMED_GROUPS && needsDuplicateNames(pattern))(
+        `${strategy.name}: ${pattern} → ${input}`,
+        () => {
+          const { matched, params } = strategy.match(pattern, input);
+          expect(matched ? params : null).toStrictEqual(expectedGroups(strategy, groups));
+        },
+      );
     }
     it.each(GROUP_PARAM_RESERVED)(`${strategy.name}: %s throws`, (pattern) => {
       expect(() => strategy.match(pattern, "/")).toThrow(/^rou3: /);

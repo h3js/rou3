@@ -14,8 +14,9 @@ export const UNNAMED_GROUP_PREFIX = "__rou3_unnamed_";
 
 export const ESCAPED_GROUP_PREFIX = "__rou3_esc_";
 
-export function toUnnamedGroupKey(index: number): string {
-  return `${UNNAMED_GROUP_PREFIX}${index}`;
+/** The group name of an unnamed capture's key (a `:name(.*)`'s is its name). */
+export function toUnnamedGroupKey(key: number | string): string {
+  return typeof key === "string" ? toGroupName(key) : `${UNNAMED_GROUP_PREFIX}${key}`;
 }
 
 /**
