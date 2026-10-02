@@ -8,7 +8,7 @@
 
 import { expandGroupDelimiters, scanFirstGroup } from "./_group-delimiters.ts";
 import { fromGroupName } from "./_group-names.ts";
-import { encodeLiteral } from "./operations/_utils.ts";
+import { classSetOp, encodeLiteral } from "./operations/_utils.ts";
 
 // Chars a literal is backslash-escaped as so `routeToRegExp` re-emits them
 // verbatim: rou3 route syntax (`: ( ) * \`), `+` (a modifier after a param)
@@ -650,6 +650,12 @@ function constraint(body: string): string {
   // A capturing group inside a constraint has no route form (`addRoute` rejects it)
   if (/\((?!\?(?!<[^=!]))/.test(body.replace(/\\[\s\S]|\[(?:\\[\s\S]|[^\]])*\]/g, ""))) {
     throw new Error(`rou3: param constraint "(${body})" cannot contain a capturing group`);
+  }
+  // Nor a `--` / `&&` in a class (a set operation in URLPattern)
+  if (classSetOp(body.replace(/\\[\s\S]/g, "_"))) {
+    throw new Error(
+      `rou3: param constraint "(${body})" cannot contain a \`--\` / \`&&\` in a class`,
+    );
   }
   return `(${body})`;
 }

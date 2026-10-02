@@ -317,6 +317,22 @@ describe("regExpToRoute", () => {
     expect(regExpToRoute(/^\/a\/(?<x>[(]\(a)\/?$/)).toBe("/a/:x([(]\\(a)");
   });
 
+  it("rejects a `--` / `&&` in a class of a constraint", () => {
+    // `addRoute` rejects it (a `v`-flag set operation in URLPattern), so it
+    // has no route form.
+    for (const re of [
+      /^\/a\/(?<x>[!--z])\/?$/,
+      /^\/a\/([a&&b])\/?$/,
+      /^\/a\/(?<x>(?:[a&&b]))\/?$/,
+      /^\/a\/(?<x>[a\]&&b])\/?$/,
+    ]) {
+      expect(() => regExpToRoute(re), re.source).toThrow(/^rou3: /);
+    }
+    expect(regExpToRoute(/^\/a\/(?<x>a--b&&c)\/?$/)).toBe("/a/:x(a--b&&c)");
+    expect(regExpToRoute(/^\/a\/(?<x>[a]--[b])\/?$/)).toBe("/a/:x([a]--[b])");
+    expect(regExpToRoute(/^\/a\/(?<x>[a\-\-b])\/?$/)).toBe("/a/:x([a\\-\\-b])");
+  });
+
   it("writes a lone optional param ending its segment as `:x?`", () => {
     expect(regExpToRoute(/^\/a\/pre-(?:(?<x>[^/]+?))?\/?$/)).toBe("/a/pre-:x?");
     expect(regExpToRoute(/^\/a\/pre-(?:(?<x>\d+))?\/b\/?$/)).toBe("/a/pre-:x(\\d+)?/b");

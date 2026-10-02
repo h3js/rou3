@@ -2001,6 +2001,22 @@ export const RESERVED_SYNTAX_ROUTES: readonly string[] = [
   "/:a/:b(x)(\\1)",
   "/:a/((x)\\2)",
   "/a/:x((a)\\1)",
+  // A `--` / `&&` in a class of a constraint: URLPattern's `v` flag reads it
+  // as a set operation (`[[a-z]--a]` is `b`-`z`), rou3's RegExp as plain
+  // chars (`[[a-z]` then a literal `--a]`), nested classes and escaped
+  // brackets included.
+  "/([[a-z]--a])",
+  "/([\\d&&[0-1]])",
+  "/a/:x([a-z--a])",
+  "/a/:x([\\w&&b])",
+  "/a/x([a&&b])y",
+  "/a/:x([[a]&&[b]])",
+  "/a/:x([^[a]--b])",
+  "/a/:x((?:[a--b]))",
+  "/a/:x([a\\]--b])",
+  "/a/:x([\\[--b])",
+  "/a/:x([\\\\--])",
+  "/a/:x(\\d+)/:y([[a]--b])",
   // A `?` / `+` / `*` right after a group that ends in a param joined onto it
   // as a modifier (`/{:x}{*}` was `/:x*`, URLPattern's is `:x` then `*`).
   "/a/{:x}{*}",
