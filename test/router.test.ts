@@ -834,7 +834,8 @@ const PERCENT_ENCODED_CASES: [string, string, Record<string, string> | null][] =
   ["/a`b", "/a%60b", {}],
   ["/a\\{b\\}", "/a%7Bb%7D", {}],
   ["/a\x01\x7Fb", "/a%01%7Fb", {}],
-  ["/a\tb", "/a%09b", {}],
+  // A tab / LF / CR throws (URLPattern drops it): write it as `%XX`
+  ["/a%09b%0A", "/a%09b%0A", {}],
   ["/x/^:id", "/x/%5E1", { id: "1" }],
   ["/x/:id\\{\\}", "/x/1%7B%7D", { id: "1" }],
   ["/x/:id\\?", "/x/1%3F", { id: "1" }],
@@ -995,6 +996,14 @@ describe("Router: percent-encoded literal text", () => {
     );
     // An unescaped `?` after text is still a misplaced modifier
     expect(() => addRoute(createRouter([]), "GET", "/a?")).toThrow(/^rou3: misplaced/);
+  });
+
+  it("throws on a tab, LF or CR, which URLPattern drops", () => {
+    for (const route of ["/a\tb", "/a/\n", "/a\r/:id", "/:x(a\tb)"]) {
+      expect(() => addRoute(createRouter([]), "GET", route), JSON.stringify(route)).toThrow(
+        `rou3: a tab, LF, CR (use %09, %0A, %0D) or U+FFFD-U+FFFF char (${route})`,
+      );
+    }
   });
 
   it("removes a route by any spelling of its encoded text", () => {

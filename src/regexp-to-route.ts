@@ -647,6 +647,10 @@ function constraint(body: string): string {
   if (body.includes("/")) {
     throw new Error(`rou3: param constraint "(${body})" cannot contain "/"`);
   }
+  // A raw tab / LF / CR has no route form (`addRoute` rejects it; `\t` is fine)
+  if (/[\t\n\r]/.test(body)) {
+    throw new Error(`rou3: param constraint "(${body})" cannot contain a raw tab, LF or CR`);
+  }
   // A capturing group inside a constraint has no route form (`addRoute` rejects it)
   if (/\((?!\?(?!<[^=!]))/.test(body.replace(/\\[\s\S]|\[(?:\\[\s\S]|[^\]])*\]/g, ""))) {
     throw new Error(`rou3: param constraint "(${body})" cannot contain a capturing group`);

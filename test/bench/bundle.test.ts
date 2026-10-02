@@ -220,8 +220,11 @@ describe("benchmark", () => {
     // (a `v`-flag set operation in URLPattern, plain chars in rou3's RegExp),
     // behind a `/--|&&/` bail per group; `classSetOp` is shared with
     // `regExpToRoute` (no second scanner).
-    expect(bytes).toBeLessThanOrEqual(13247); // <13.25kb
-    expect(gzipSize).toBeLessThanOrEqual(5688); // <5.69kb
+    // +47B raw / +33B gzip: a tab / LF / CR in a pattern throws (URLPattern
+    // drops it, the router encoded it), in `checkConstraints`' early bail and
+    // sharing the U+FFFD-U+FFFF check and message.
+    expect(bytes).toBeLessThanOrEqual(13294); // <13.30kb
+    expect(gzipSize).toBeLessThanOrEqual(5721); // <5.73kb
   });
 });
 

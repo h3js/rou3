@@ -667,6 +667,34 @@ describe("wpt urlpattern compatibility: percent-encoding", () => {
   });
 });
 
+// Not in the WPT data: URLPattern drops a tab / LF / CR from a pathname
+// pattern outside a regexp group (URL parsing; kept in a group, where no
+// pathname has it), so `/a\tb` matches `/ab`. rou3 throws instead of matching
+// something else: `[pattern, URLPattern's canonical pathname]`.
+const TAB_NEWLINE_PATTERNS: [string, string][] = [
+  ["/a\tb", "/ab"],
+  ["/a\nb", "/ab"],
+  ["/a\rb", "/ab"],
+  ["/a/\n:id", "/a/{:id}"],
+  ["/:x(a\tb)", "/:x(a\tb)"],
+];
+
+describe("wpt urlpattern compatibility: tab / LF / CR", () => {
+  for (const strategy of strategies) {
+    for (const [pattern] of TAB_NEWLINE_PATTERNS) {
+      it(`${strategy.name}: ${JSON.stringify(pattern)} throws`, () => {
+        expect(() => strategy.match(pattern, "/ab")).toThrow(/^rou3: a tab, LF, CR /);
+      });
+    }
+  }
+
+  it.runIf(URLPatternCtor)("URLPattern drops them outside a group", () => {
+    for (const [pattern, canonical] of TAB_NEWLINE_PATTERNS) {
+      expect(new URLPatternCtor({ pathname: pattern }).pathname, pattern).toBe(canonical);
+    }
+  });
+});
+
 // Not in the WPT data (only as `expected_obj`: `/:foo\bar` is `{/:foo}bar`):
 // a pattern starting with a `{/…}` group is absolute, so it gets no `/` in
 // front (`{/:a}?/b` is `/:a?/b`, never `//b`). `[pattern, input, groups]` (as

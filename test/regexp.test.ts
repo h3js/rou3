@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { routeToRegExp, createRouter, addRoute, findRoute, routeNodeKeys } from "../src/index.ts";
+import {
+  routeToRegExp,
+  createRouter,
+  addRoute,
+  findRoute,
+  routeNodeKeys,
+  routesOverlap,
+} from "../src/index.ts";
 import { withoutAlias } from "./_utils.ts";
 import { fromGroupName } from "../src/_group-names.ts";
 import { expandGroupDelimiters } from "../src/_group-delimiters.ts";
@@ -739,6 +746,7 @@ describe("reserved pattern syntax", () => {
     expect(() => addRoute(createRouter(), "", route)).toThrow(message);
     expect(() => routeToRegExp(route)).toThrow(message);
     expect(() => routeNodeKeys(route)).toThrow(message);
+    expect(() => routesOverlap(route, "/")).toThrow(message);
   });
 
   it.each([
@@ -811,6 +819,10 @@ describe("reserved pattern syntax", () => {
     "/a--b/&&",
     "/a/[x--y]/:z",
     "/a/[x&&y]-:z",
+    // A tab / LF / CR as `%XX`, or as a regex escape in a constraint
+    "/a%09b/%0A",
+    "/a/:x(a\\tb)",
+    "/a/(\\r\\n)",
   ])("%s is accepted", (route) => {
     expect(() => addRoute(createRouter(), "", route)).not.toThrow();
     // Accepted syntax whose regex is an alternation repeating a named group

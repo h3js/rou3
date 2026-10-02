@@ -83,7 +83,7 @@ export function routeId(id: string): string {
  * Only for text already read as literal (static keys, `getParamRegexp`): an
  * escape or a `:name` must be parsed first. U+FFFD-U+FFFF are left alone:
  * internal placeholders or reserved (`checkConstraints` rejects them in a
- * route).
+ * route, and a tab / LF / CR, which URLPattern drops).
  */
 export function encodeLiteral(text: string): string {
   // A `test` bails early on plain text (a no-match `replace` costs more)
@@ -95,9 +95,13 @@ export function encodeLiteral(text: string): string {
 }
 
 /**
- * Throws on U+FFFD-U+FFFF: internal placeholders (`encodeEscapes`, `\uFFFE` in
- * `getParamRegexp`, `\uFFFF` before a `*` in `starGroups`), which a route
- * could otherwise write as syntax (`\uFFFD0` read as an escaped `:`).
+ * Throws on a tab, LF or CR anywhere: URLPattern drops them from a pattern
+ * (URL parsing) where `encodeLiteral` would encode them (`%09`), so the same
+ * pattern would match other paths, and no pathname has one raw (in a
+ * constraint). Throws on U+FFFD-U+FFFF: internal placeholders
+ * (`encodeEscapes`, `\uFFFE` in `getParamRegexp`, `\uFFFF` before a `*` in
+ * `starGroups`), which a route could otherwise write as syntax (`\uFFFD0`
+ * read as an escaped `:`). One check and message for both (bundle size).
  *
  * Throws when a `(...)` group in `route` never closes (`/files/(2024`, #199)
  * or contains a `/` (`:id([^/]+)`): the pattern is split on `/` before groups
@@ -120,9 +124,9 @@ export function encodeLiteral(text: string): string {
  * escapes nothing. Braces inside a group are regex.
  */
 export function checkConstraints(route: string): void {
-  if (!/[\\({}\uFFFD-\uFFFF]/.test(route)) return;
-  if (/[\uFFFD-\uFFFF]/.test(route)) {
-    invalidSyntax("a U+FFFD-U+FFFF char", route);
+  if (!/[\t\n\r\\({}\uFFFD-\uFFFF]/.test(route)) return;
+  if (/[\t\n\r\uFFFD-\uFFFF]/.test(route)) {
+    invalidSyntax("a tab, LF, CR (use %09, %0A, %0D) or U+FFFD-U+FFFF char", route);
   }
   // `\1`-`\9` -> `\0` (a backreference), any other escape -> `_` (a literal,
   // so `\(?=` is no look-ahead)
