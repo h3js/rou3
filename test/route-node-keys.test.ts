@@ -240,6 +240,8 @@ describe("routeNodeKeys", () => {
       const collisions: string[] = [];
       const reachable = new Set<string>();
       for (const segment of segments) {
+        // A `.` / `..` segment is resolved: no node of its own
+        if (segment === "." || segment === "..") continue;
         // Skip anything addRoute rejects or that expands to several nodes —
         // this test is about the static-key encoding, not modifier expansion.
         const node = classifySegment(segment);

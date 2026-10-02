@@ -3,9 +3,12 @@ import type { RouterContext } from "../src/types.ts";
 import { createRouter, formatTree } from "./_utils.ts";
 import {
   addRoute,
+  compareRoutes,
   findOverlappingRoutes,
   findRoute,
+  regExpToRoute,
   removeRoute,
+  routeNodeKeys,
   routeToRegExp,
 } from "../src/index.ts";
 import { compileRouter, compileRouterToString } from "../src/compiler.ts";
@@ -1048,6 +1051,216 @@ describe("Router: percent-encoded literal text", () => {
       expect(formatTree(router.root), `${route} - ${remove}`).not.toBe("<root>");
     }
   });
+});
+
+// `.` / `..` segments in a pattern are resolved like `new URL()` resolves a
+// path, as URLPattern canonicalizes a pattern: [pattern, the route it is,
+// URLPattern differs]. URLPattern keeps a relative pattern relative.
+const DOT_SEGMENT_CASES: [string, string, urlPatternDiffers?: boolean][] = [
+  ["/foo/../bar", "/bar"],
+  ["/foo/./bar", "/foo/bar"],
+  ["/..", "/"],
+  ["/.", "/"],
+  ["/a/..", "/"],
+  ["/a/.", "/a/"],
+  ["/a/b/..", "/a/"],
+  ["/a/b/../..", "/"],
+  ["/../a", "/a"],
+  ["/a/../../b", "/b"],
+  ["/a/b/c/../../d", "/a/d"],
+  ["/a/.././b", "/b"],
+  ["/a/../", "/"],
+  // Empty segments are segments
+  ["/a//../b", "/a/b"],
+  ["/a/..//b", "//b"],
+  ["/a/.//b", "/a//b"],
+  // Percent-encoded dots, any case
+  ["/a/%2e%2e/b", "/b"],
+  ["/a/.%2E/b", "/b"],
+  ["/a/%2E./b", "/b"],
+  ["/a/%2e/b", "/a/b"],
+  // Relative patterns get a `/` first
+  ["foo/../bar", "/bar", true],
+  ["../foo", "/foo", true],
+  ["./foo", "/foo", true],
+  // Next to dynamic syntax, where it removes or precedes plain text only
+  ["/:id/./x", "/:id/x"],
+  ["/:id/.", "/:id/"],
+  ["/:id/a/..", "/:id/"],
+  ["/:id/a/../b", "/:id/b"],
+  ["/a/../b/:id", "/b/:id"],
+  ["/a/./b-:id", "/a/b-:id"],
+  ["/a/../b/*", "/b/*"],
+  ["/x/**/a/../b", "/x/**/b"],
+  ["/x/:p+/a/../b", "/x/:p+/b"],
+  ["/a/../b/:id(\\d+)/c/./d", "/b/:id(\\d+)/c/d"],
+  ["/a/../b{.json}?", "/b{.json}?"],
+  ["/a/./{b}?", "/a/{b}?"],
+  ["/a/../{/b}?", "/{/b}?"],
+  ["/a/{b}?/./c", "/a/{b}?/c"],
+  ["/a{/b/../c}?", "/a{/c}?"],
+  ["/a/../b/*-{:x}?", "/b/*-{:x}?"],
+];
+
+// Where URLPattern resolves each part of the pattern on its own, so the
+// result is no path (`/:id/..` is `/:id/`, `/a/../:id` `//:id`, `/a{/..}?/b`
+// `/a{/}?/b`): a `..` removing a segment that isn't plain text, a dot segment
+// right before a `:name` / `*` / `(…)` segment, or one in a `{…}` group
+const DOT_SEGMENT_INVALID = [
+  "/:id/..",
+  "/a/:id/../b",
+  "/a/b-:id/..",
+  "/*/..",
+  "/a/**/..",
+  "/a/:x?/..",
+  "/a/:p+/..",
+  "/a/(\\d+)/..",
+  "/a/{b}?/..",
+  "/a{/b}?/../c",
+  "{/a}?/../b",
+  "/a/../:id",
+  "/a/./:id",
+  "/../:id",
+  "/./:id",
+  "/a/../*",
+  "/a/../**:x",
+  "/a/./:x+",
+  "/a/../(\\d+)",
+  "/a/b/../:id(\\d+)",
+  "/a/b/../:id?",
+  "/a/%2e%2e/:id",
+  "/a/{..}?/b",
+  "/a{/..}?/b",
+  "/a/{/b/..}?/c",
+  "/a/..{x}?/b",
+  "/a/{.}./b",
+  "/a/{..}/b",
+  "{/..}?/a",
+  "{..}?/a",
+];
+
+const DOT_SEGMENT_PATHS = [
+  "/",
+  "//",
+  "/a",
+  "/a/",
+  "/b",
+  "/b/",
+  "//b",
+  "/a//b",
+  "/a/b",
+  "/a/c",
+  "/a/d",
+  "/a/b/c",
+  "/a/b-1",
+  "/bar",
+  "/foo",
+  "/foo/bar",
+  "/foo/../bar",
+  "/a/../b",
+  "/1/x",
+  "/1/b",
+  "/1/",
+  "/b/1",
+  "/b/x/y",
+  "/b/1/c/d",
+  "/b/x/c/d",
+  "/b.json",
+  "/b/x-1",
+  "/x/b",
+  "/x/y/z/b",
+  "/x/y/b",
+];
+
+describe("Router: `.` / `..` segments in patterns", () => {
+  const match = (pattern: string, path: string) => {
+    const router = createRouter([pattern]);
+    const found = findRoute(router, "GET", path);
+    const result = found && { params: { ...found.params } };
+    const aot = new Function(`return ${compileRouterToString(router)}`)();
+    for (const [label, m] of [
+      ["JIT", compileRouter(router)("GET", path)],
+      ["AOT", aot("GET", path)],
+    ]) {
+      expect(m && { params: { ...m.params } }, `${label} ${pattern} on ${path}`).toEqual(result);
+    }
+    return result;
+  };
+
+  for (const [pattern, route] of DOT_SEGMENT_CASES) {
+    it(`${pattern} is ${route}`, () => {
+      for (const path of DOT_SEGMENT_PATHS) {
+        expect(match(pattern, path), `${pattern} on ${path}`).toEqual(match(route, path));
+      }
+      expect(routeToRegExp(pattern).source).toBe(routeToRegExp(route).source);
+      expect(routeNodeKeys(pattern)).toEqual(routeNodeKeys(route));
+      expect(compareRoutes(pattern, route)).toBe("equal");
+      // Removal by either spelling
+      for (const [add, remove] of [
+        [pattern, route],
+        [route, pattern],
+      ]) {
+        const router = createRouter([add]);
+        removeRoute(router, "GET", remove);
+        expect(formatTree(router.root), `${add} - ${remove}`).toBe("<root>");
+        expect(router.static, `${add} - ${remove}`).toEqual({});
+      }
+    });
+  }
+
+  it("keeps a segment with an escape literal", () => {
+    expect(match("/\\.\\./bar", "/../bar")).toEqual({ params: {} });
+    expect(match("/\\.\\./bar", "/bar")).toBeUndefined();
+    expect(match("/a/\\./b", "/a/./b")).toEqual({ params: {} });
+    expect(match("/a/.\\./b", "/a/../b")).toEqual({ params: {} });
+    expect(match("/a/\\%2e\\%2e/b", "/a/%2e%2e/b")).toEqual({ params: {} });
+    expect(match("/a/\\%2e\\%2e/b", "/b")).toBeUndefined();
+    expect(routeToRegExp("/\\.\\./bar").test("/../bar")).toBe(true);
+    expect(routeToRegExp("/\\.\\./bar").test("/bar")).toBe(false);
+    // Other dot runs are plain text
+    for (const p of ["/a/.../b", "/a/..x/b", "/a/x../b", "/a/.x/b"]) {
+      expect(match(p, p), p).toEqual({ params: {} });
+    }
+    expect(match("/a/..:x", "/a/..b")).toEqual({ params: { x: "b" } });
+    // `regExpToRoute` gives a literal one back escaped
+    for (const [route, reversed] of [
+      ["/\\.\\./bar", "/\\.\\./bar"],
+      ["/a/\\%2e\\%2E/b", "/a/\\%2e\\%2E/b"],
+      ["/a{/(\\d+)}?/\\.", "/a{/(\\d+)}?/\\."],
+      ["/a/:x/\\.", "/a/:x/\\."],
+    ]) {
+      const re = routeToRegExp(route);
+      expect(regExpToRoute(re), route).toBe(reversed);
+      expect(routeToRegExp(reversed).source, route).toBe(re.source);
+    }
+  });
+
+  for (const pattern of DOT_SEGMENT_INVALID) {
+    it(`throws for ${pattern}`, () => {
+      const error = /^rou3: `\.` \/ `\.\.` segment next to a param, catch-all or group \(/;
+      expect(() => addRoute(createRouter([]), "GET", pattern)).toThrow(error);
+      // Quoting the pattern as written
+      expect(() => addRoute(createRouter([]), "GET", pattern)).toThrow(`(${pattern})`);
+      expect(() => routeToRegExp(pattern)).toThrow(error);
+      expect(() => routeNodeKeys(pattern)).toThrow(error);
+      expect(() => removeRoute(createRouter([]), "GET", pattern)).toThrow(error);
+    });
+  }
+
+  it.skipIf(typeof (globalThis as any).URLPattern !== "function")(
+    "resolves like the runtime's URLPattern",
+    () => {
+      const URLPattern = (globalThis as any).URLPattern;
+      const canonical = (p: string) => new URLPattern({ pathname: p }).pathname;
+      for (const [pattern, route, differs] of DOT_SEGMENT_CASES) {
+        if (differs) {
+          expect(canonical(pattern), pattern).not.toBe(canonical(route));
+        } else {
+          expect(canonical(pattern), pattern).toBe(canonical(route));
+        }
+      }
+    },
+  );
 });
 
 describe("Router insert", () => {

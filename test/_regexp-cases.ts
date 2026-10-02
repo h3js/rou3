@@ -286,7 +286,7 @@ export const regexpCases: Record<string, RegExpCase> = {
     ],
     noMatch: ["/a/x", "/a//"],
   },
-  "/{/(\\d+)}?/.": {
+  "/{/(\\d+)}?/\\.": {
     regex: /^\/(?:\/(?<_0>\d+))?\/\.\/?$/,
     match: [
       ["//12/.", { "0": "12" }],

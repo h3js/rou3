@@ -7,6 +7,7 @@ import {
   absolutePattern,
   checkConstraints,
   decodeEscapes,
+  dotSegments,
   encodeEscapes,
   encodeLiteral,
   expandedRouteId,
@@ -42,12 +43,16 @@ export type { Unnamed };
  * Literal text is percent-encoded (`/café` is `/caf%C3%A9`), and a pattern
  * without a leading `/` gets one.
  *
+ * `.` / `..` segments are resolved like `new URL()` resolves a path
+ * (`/foo/../bar` is `/bar`, see README "Dot segments").
+ *
  * @throws a `rou3:` error quoting the pattern when its syntax has no meaning
  * (see README "Invalid patterns"): for example an unclosed `(` or `{`, a
  * misplaced modifier (`*?`, `/foo?`), an invalid or repeated param name (`/:0`,
  * `/a/:x/:x`), a second catch-all (`/*\/x/*`), a capturing group, anchor,
- * look-around or backreference in a regex constraint, or a raw tab, LF or CR
- * (URLPattern drops it; write `%09`, `%0A`, `%0D`).
+ * look-around or backreference in a regex constraint, a raw tab, LF or CR
+ * (URLPattern drops it; write `%09`, `%0A`, `%0D`), or a `.` / `..` segment
+ * next to a param, catch-all or group (`/:id/..`, `/a/../:id`).
  */
 export function addRoute<T>(
   ctx: RouterContext<T>,
@@ -58,9 +63,11 @@ export function addRoute<T>(
   method = method.toUpperCase();
   path = absolutePattern(path);
   checkConstraints(path);
-  const [route, unnamed] = starGroups(path);
+  // `.` / `..` segments resolved (errors quote `path`, as written)
+  const resolved = dotSegments(path);
+  const [route, unnamed] = starGroups(resolved);
   // A `:name(.*)` keys its `*`: an identity of its own (not the `*` route's)
-  _add(ctx, method, route, data, unnamed && expandedRouteId(path), path, unnamed);
+  _add(ctx, method, route, data, unnamed && expandedRouteId(resolved), path, unnamed);
 }
 
 /**

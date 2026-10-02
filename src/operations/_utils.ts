@@ -238,6 +238,55 @@ export function absolutePattern(path: string): string {
 }
 
 /**
+ * `path` with its `.` / `..` segments (`%2e` too, any case) resolved like
+ * `new URL()` resolves a path, as URLPattern canonicalizes a pattern:
+ * `/foo/../bar` is `/bar`, `/a/./b` is `/a/b`, a `..` at the root stays
+ * there, and one ending the path leaves a `/` (`/a/b/..` is `/a/`). A segment
+ * with an escape is text (`/\.\./bar`). URLPattern resolves each part of a
+ * pattern on its own, so next to dynamic syntax its result is no path
+ * (`/:id/..` is `/:id/`, `/a/../:id` is `//:id`, the `/` before a `:name`
+ * being the param's): a `..` removing anything but plain text and a dot
+ * segment right before a `:name` / `*` / `(…)` segment throw, and so does
+ * one in a `{…}` group (`DOT_SEGMENT` in `expandGroupDelimiters`). Shared by
+ * `addRoute`, `removeRoute` and `routeToRegExp`; after `checkConstraints`, so
+ * every `/` splits segments (a group's `/` too: `/a{/b/../c}?` is
+ * `/a{/c}?`, as in URLPattern).
+ */
+export function dotSegments(path: string): string {
+  if (!DOT_SEGMENT.test(path)) return path;
+  const s = path.split("/");
+  const out = [s[0]];
+  // The last segment was a dot segment
+  let dot = false;
+  for (let i = 1; i < s.length; i++) {
+    const m = /^(?:\.|%2e)(\.|%2e)?$/i.exec(s[i]);
+    if (m) {
+      // A leading-group pattern's first piece is no root (`{a}/..`)
+      if (m[1] && (out.length > 1 || out[0]) && !isText(out.pop()!)) {
+        invalidSyntax(DOT_SEGMENT_NEXT_TO, path);
+      }
+      dot = true;
+      continue;
+    }
+    if (dot && /^[:*(]/.test(s[i])) invalidSyntax(DOT_SEGMENT_NEXT_TO, path);
+    out.push(s[i]);
+    dot = false;
+  }
+  if (dot) out.push("");
+  return out.join("/");
+}
+
+/** A segment of plain text: no param, catch-all, group or raw `?`. */
+const isText = (segment: string) =>
+  typeof segmentKey((segment = encodeEscapes(segment))) === "string" &&
+  !/[{}]|(^|[^\\])\?/.test(segment);
+
+/** A `.` / `..` segment (`%2e` too) somewhere in a pattern. */
+export const DOT_SEGMENT: RegExp = /(?:^|\/)(?:\.|%2e){1,2}(?=\/|$)/i;
+
+export const DOT_SEGMENT_NEXT_TO = "`.` / `..` segment next to a param, catch-all or group";
+
+/**
  * Throws a `rou3:` error for pattern syntax with no meaning (yet), quoting the
  * route as written.
  */

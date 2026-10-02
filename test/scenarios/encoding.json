@@ -295,6 +295,33 @@
       "routes": [{ "path": "/ok/:caf\\é", "name": "ok" }],
       "cases": [{ "path": "/ok/x%C3%A9", "match": "ok", "params": { "caf": "x" } }],
       "invalid": ["/:café", "/x/:id$", "/a/�", "/a￿", "/a￾/b", "/a\\/b", "/a\\", "/what?", "/:x(é", "/tag/{oops"]
+    },
+    {
+      "name": "`.` / `..` segments in patterns",
+      "description": "README Path normalization: a pattern's `.` / `..` segments (`%2e` too) are resolved like `new URL()` resolves a path, as in URLPattern; an escaped one is text; next to a param, catch-all or group they throw",
+      "routes": [
+        { "path": "/docs/../api/:id", "name": "api" },
+        { "path": "/static/./assets/*", "name": "assets" },
+        { "path": "/v1/%2e%2e/health", "name": "health" },
+        { "path": "/raw/\\.\\./etc", "name": "literal" },
+        { "path": "/users/:id/./posts/latest/..", "name": "posts" }
+      ],
+      "cases": [
+        { "path": "/api/1", "match": "api", "params": { "id": "1" } },
+        { "path": "/docs/api/1", "match": null },
+        { "path": "/docs/../api/1", "match": null },
+        { "path": "/docs/../api/1", "normalize": true, "match": "api", "params": { "id": "1" } },
+        { "path": "/static/assets/app.js", "match": "assets", "params": { "0": "app.js" } },
+        { "path": "/static/./assets/app.js", "match": null },
+        { "path": "/health", "match": "health", "params": {} },
+        { "path": "/v1/health", "match": null },
+        { "path": "/raw/../etc", "match": "literal", "params": {} },
+        { "path": "/etc", "match": null },
+        { "path": "/users/1/posts", "match": "posts", "params": { "id": "1" } },
+        { "path": "/users/1/posts/", "match": "posts", "params": { "id": "1" } },
+        { "path": "/users/1/posts/latest", "match": null }
+      ],
+      "invalid": ["/users/:id/..", "/docs/../:id", "/static/./*", "/a/{..}?/b", "/a{/b/..}?/c", "/a/{b}?/../c"]
     }
   ]
 }

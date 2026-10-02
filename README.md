@@ -208,6 +208,16 @@ Groups can't be nested or repeated (`{...}+` and `{...}*` throw).
 - `/{/:lang}?/docs` starts with an empty segment: it matches `//docs` and `//en/docs`.
 - Text right after a leading `{/…}?` throws (`{/a}?b`, `{/:id}?.png`, `{/a}?{.json}?`): without the group, the route would not start with `/`. Follow the group with `/`, another `{/…}` group, or nothing.
 
+### Dot segments
+
+`.` and `..` segments in a pattern are resolved like `new URL()` resolves a path, as in URLPattern: `/docs/../api/:id` is `/api/:id`, `/a/./b` is `/a/b`, and a `..` at the root stays there (`/../a` is `/a`). Percent-encoded dots count too (`%2e`, `.%2E`, `%2e%2e`). Escape a dot to keep the segment literal: `/raw/\\.\\./etc` matches `/raw/../etc` (lookup paths are never resolved unless you pass [`normalize`](#path-normalization)).
+
+URLPattern resolves each part of a pattern on its own, so next to a param its result is no longer a path (`/:id/..` stays `/:id/`, `/a/../:id` becomes `//:id`). rou3 throws instead when:
+
+- a `..` would remove a segment that isn't plain text (`/:id/..`, `/*/..`, `/a/{b}?/..`);
+- a `.` or `..` comes right before a segment that starts with a param, a catch-all or a regex group (`/a/../:id`, `/a/./*`);
+- a `.` or `..` segment is inside a `{...}` group or touches one (`/a{/..}?/b`, `/a/{..}/b`, `/a/..{x}?`).
+
 ### Escaping
 
 Escape `:`, `*`, `?`, `+`, `(`, `)`, `{` and `}` with a backslash to match them literally. Outside a regex constraint, any escaped character is literal (`\\.` is `.`, `\\\\` is `\`), as in URLPattern. A `\` can't escape `/` or end a segment.
@@ -251,6 +261,7 @@ Every API sees the encoded text: `removeRoute`, `routeToRegExp`, `routeNodeKeys`
 - A `\/`.
 - Text right after a leading `{/…}?` group (`{/a}?b`).
 - A tab, newline or carriage return (write `%09`, `%0A`, `%0D`).
+- A `.` or `..` segment next to a param, catch-all or group (`/:id/..`, `/a/../:id`, `/a{/..}?/b`, see [dot segments](#dot-segments)).
 - A character from U+FFFD to U+FFFF (used internally).
 - In a regex constraint:
   - a capturing group, also in a class (`/:x((a))`, `/:x([(a)])`): use `(?:…)`, or escape a class paren (`[\\(]`);
@@ -273,7 +284,7 @@ rou3 matches HTTP request paths segment by segment in a tree. That leads to a fe
 | Optional segment after a catch-all (`/*/:x?` on `/x/y`) | The catch-all takes it: `{ 0: "x/y" }`        | Segments after a catch-all match from the end: `{ 0: "x", x: "y" }`                                    |
 | Optional segment before a trailing `*` (`/a/:x?/*` on `/a/b`) | The `*` takes it: `{ 0: "b" }` (as in rou3 0.11) | The optional segment takes it: `{ x: "b" }` (`routeToRegExp` too)                                       |
 | Patterns without a leading `/` (`users/:id`) | Relative: never match a pathname                         | Read as `/users/:id`                                                                                    |
-| `.` and `..` segments                     | Resolved                                                    | Not resolved in input paths unless `{ normalize: true }`                                                |
+| `.` and `..` segments                     | Resolved                                                    | Resolved in patterns (an escaped one is literal; next to a param or group they throw, see [dot segments](#dot-segments)). Not resolved in input paths unless `{ normalize: true }` |
 | Case                                      | Can be case-insensitive                                     | Always case-sensitive                                                                                   |
 | Input paths                               | Any URL; percent-encoded for you                            | Must start with `/` and be percent-encoded already (`new URL().pathname`); never decoded               |
 | Param names                               | Unicode identifiers                                         | ASCII `[A-Za-z_]\w*`; a non-ASCII char or `$` right after one throws                                    |
@@ -289,6 +300,7 @@ rou3 matches HTTP request paths segment by segment in a tree. That leads to a fe
 | `/a/*{/b}?` on `/a/x/b` (optional group after a catch-all)          | `{ 0: "x/b" }`                   | `{ 0: "x" }`; likewise `/:a+/:b?` on `/x/y` gives `{ a: "x", b: "y" }`                                       |
 | `{/:a}?/*` on `/b` (optional segment before a trailing `*`)          | `{ 0: "b" }`                     | `{ a: "b" }`                                                                                                 |
 | `/:x?/a/*` on `/a/a/b` (optional segment before a static one)        | `{ x: "a", 0: "b" }` (left to right, as `routeToRegExp` gives) | `{ 0: "a/b" }`: a static segment beats a param, so the route without the optional one wins (`**` too) |
+| `/\\.\\./bar` (escaped dot segment)                                 | Resolved: `/bar`                 | Literal: matches `/../bar` only. URLPattern can't write a literal dot segment (its input paths have none) |
 | `{v2}?/api` (leading group without `/`)                              | Matches `/api` only (`v2/api` is relative) | Each variant gets a `/`: matches `/v2/api` and `/api`                                              |
 | `/*{.webp}?` on `/a.webp` (optional text after a greedy capture)     | `{ 0: "a.webp" }`                | `{ 0: "a" }`: the route with the group wins                                                                  |
 | `/*-{:x}?(y)` on `/a--y` (group holding a param, before more of its segment) | `{ 0: "a-", 1: "y" }`    | `{ 0: "a", x: "-", 1: "y" }`. A group holding only a param that ends its segment is that param, as in URLPattern (`/*-{:x}?` is `/*-:x?`, `/a/*{:x}?` is `/a/*:x?`) |
@@ -358,7 +370,7 @@ findRoute(router, "GET", "/raw//"); // params: { "0": "" } (the trailing slash i
 
 ### Path normalization
 
-`.` and `..` segments are **not** resolved by default. If your input paths may contain them, enable `normalize`:
+`.` and `..` segments in input paths are **not** resolved by default (in patterns they are, see [dot segments](#dot-segments)). If your input paths may contain them, enable `normalize`:
 
 ```js
 findRoute(router, "GET", "/foo/bar/../baz", { normalize: true }); // matches "/foo/baz"
@@ -474,8 +486,8 @@ addRoute(router, "GET", "/path/:name", { b: true });
 removeRoute(router, "GET", "/path/:name"); // "/path/:id" is still registered
 ```
 
-- **Pass the pattern as you registered it.** Only spellings the tree can't tell apart are equivalent (`/a/` and `/a`, `/**.md` and `/*.md`): `/path/*` doesn't remove `/path/:name`, and `/ab` doesn't remove `/a{b}`.
-- **Errors:** `removeRoute` throws the same `rou3:` error as `addRoute` for a reserved group or modifier: `{...}+` / `{...}*`, text right after a leading `{/…}?` (`{/a}?b`), or a misplaced `+` / `*` (`/a/pre-:x+`). Other [invalid patterns](#invalid-patterns) can't have been added, so they remove nothing (`{oops/x`).
+- **Pass the pattern as you registered it.** Only spellings the tree can't tell apart are equivalent (`/a/` and `/a`, `/**.md` and `/*.md`, `/docs/../api` and `/api`): `/path/*` doesn't remove `/path/:name`, and `/ab` doesn't remove `/a{b}`.
+- **Errors:** `removeRoute` throws the same `rou3:` error as `addRoute` for a reserved group or modifier: `{...}+` / `{...}*`, text right after a leading `{/…}?` (`{/a}?b`), a misplaced `+` / `*` (`/a/pre-:x+`), or a `.` / `..` segment next to a param or group (`/:id/..`). Other [invalid patterns](#invalid-patterns) can't have been added, so they remove nothing (`{oops/x`).
 
 ## Compiler
 
@@ -660,7 +672,7 @@ It understands the regexes `routeToRegExp` emits, and every one of them round-tr
 - A constraint that can match `/` (`:x(.+)`, `:x([^.]+)`) can span several segments in the regex (`/a/:x(.+)` matches `/a/b/c`), while the router splits the path into segments first. A `(.*)` / `:x(.*)` is a `*`, matched exactly.
 - The empty path `""`: the router treats it as `/` (with no trailing slash for a `*`: `/*` doesn't match it). The regex matches it only for root routes whose first segment is optional (`/**`, `/:x*`, `/:x?`), not for `/` itself.
 - In PCRE and Perl, `$` also matches before a final `\n`, so there the regex also matches `<path>\n`.
-- `.` and `..` are not resolved. Normalize the path first if your router uses `normalize: true`.
+- `.` and `..` in the path are not resolved (in the pattern they are, as in `addRoute`). Normalize the path first if your router uses `normalize: true`.
 
 **Params.** Unnamed captures are named `_0`, `_1`, … in the regex (`"0"`, `"1"`, … in the router). A regex can't capture one group under two names, so there is no group for the router's deprecated `_` alias of a bare `**`: read the numbered one. A `**:name` / `:name+` / `:name*` is `[^/]+(?:\/[^/]+)*`, as in URLPattern. When optional segments meet a constrained optional, or several optional segments follow a catch-all, the regex can assign a segment to a different param than the router (`/a/:x?/:y(\d+)?` on `/a/1` sets `x`, the router sets `y`). The set of matched paths is still the same.
 

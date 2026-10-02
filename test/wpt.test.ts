@@ -273,10 +273,6 @@ const KNOWN_DIFFS = diffs<Result | Split>({
   // reads it as absolute
   'foo/bar → /foo/bar (from "https://example.com/foo/bar") [no match]': {},
 
-  // `.`/`..` in a pattern — URLPattern resolves them (`/foo/../bar` is
-  // `/bar`); rou3 reads them as literal segments
-  "/foo/../bar → /bar [match]": null,
-
   // Trailing slash on a no-match case — rou3 ignores one trailing `/`, so
   // `/foo/bar/` is `/foo/bar` (a second one is an empty last segment)
   "/foo/bar → /foo/bar/ [no match]": {},
