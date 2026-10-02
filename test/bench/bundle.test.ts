@@ -233,8 +233,14 @@ describe("benchmark", () => {
     // several, a same-node tie lists the route's own variants reversed
     // (`reverseVariants`) and one backwards pass keeps the last of each token
     // (routes without optional syntax pay a property read per match).
-    expect(bytes).toBeLessThanOrEqual(14155); // <14.16kb
-    expect(gzipSize).toBeLessThanOrEqual(6074); // <6.08kb
+    // +667B raw / +279B gzip: several captures in one segment
+    // (`:year-:month-:day.html`) match in linear time: `linearRegExp` rewrites
+    // the tree's segment regex (a lazy `:name` before text and a capture takes
+    // up to the first such text, a `*` before params ends where they start
+    // latest), where the backtracking regex was cubic (a 4KB path took
+    // seconds). Two `replace` calls at insert time; lookup is untouched.
+    expect(bytes).toBeLessThanOrEqual(14822); // <14.83kb
+    expect(gzipSize).toBeLessThanOrEqual(6355); // <6.36kb
   });
 });
 

@@ -129,6 +129,8 @@ rou3 supports [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_
 
 A group holding only the param works the same: `/*-{:x}?` is `/*-:x?`.
 
+The router matches such a segment in time linear in its length (before 0.12, `/blog/:year-:month-:day.html` on a long run of `-` took seconds). A regex constraint keeps its own cost and may still try its matches against the params after it (`/:a(\\d+):b:c.json`).
+
 <details>
 <summary>Param naming rules</summary>
 

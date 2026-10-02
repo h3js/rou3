@@ -3,6 +3,7 @@ import { toGroupName, toUnnamedGroupKey } from "../_group-names.ts";
 import { createRouter } from "../context.ts";
 import { NullProtoObj } from "../object.ts";
 import type { Node, RouterContext, ParamsIndexMap } from "../types.ts";
+import { linearRegExp } from "./_linear.ts";
 import {
   absolutePattern,
   checkConstraints,
@@ -276,7 +277,7 @@ function _insert<T>(
       if (!/^:[A-Za-z_]\w*$/.test(segment)) {
         // The last piece of a split `*` starts with it: its number
         const tail = i === join + 1 && segment.charCodeAt(0) === 42; /* * */
-        const [regexp, nextIndex, inPlace] = getParamRegexp(
+        const [source, nextIndex, inPlace] = getParamRegexp(
           segment,
           _unnamedParamIndex - (tail ? 1 : 0),
           names,
@@ -284,7 +285,8 @@ function _insert<T>(
           (n) => toUnnamedGroupKey(captureKey(n)),
         );
         _unnamedParamIndex = nextIndex;
-        paramsRegexp[i] = regexp;
+        // The same matches without polynomial backtracking (see `linearRegExp`)
+        const regexp = (paramsRegexp[i] = linearRegExp(source));
         if (!suffix) {
           node.hasRegexParam = true;
         }
