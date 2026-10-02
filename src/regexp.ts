@@ -15,6 +15,7 @@ import {
 import { appendsCleanly } from "./_optional-append.ts";
 import { canBeEmpty, isOptionalGroups } from "./_regexp-scan.ts";
 import { ANY_TAIL, openOptionals, withTrailingSlash } from "./_trailing-slash.ts";
+import { determinize } from "./_regexp-linear.ts";
 
 // Catch-all body. The router splits paths on `/` only, so a catch-all takes
 // any char, line terminators included; `.` would not (JS excludes `\n`, `\r`,
@@ -60,6 +61,11 @@ const STAR_SEGMENT = "*/";
  * 12.5+) or `PCRE2_DUPNAMES`. Without them (Node.js 22), `routeToRegExp` throws
  * a `rou3:` `SyntaxError` for these routes.
  *
+ * Params sharing a segment are spelled out where their split is forced
+ * (`/:a-:b` is `(?<a>[^/][^/-]*)-(?<b>[^/]+?)`), so the regex fails a path in
+ * linear time instead of retrying every split; a few shapes still backtrack
+ * quadratically in a long failing segment (see README).
+ *
  * @throws the `addRoute` error for an invalid pattern, and a `rou3:` error for
  * a pattern that declares the same param name twice in one variant
  * (`/files/:path/**:path`, `/a/:x{/b/:x}?`).
@@ -77,7 +83,9 @@ export function routeToRegExp(route: string = "/"): RegExp {
   // `(.*)` is a `*`, `:name(.*)` one keyed by `name` (see `starGroups`), after
   // `.` / `..` segments are resolved
   const [path, unnamed] = starGroups(dotSegments(route));
-  return toRegExp(path, route, unnamed);
+  // Params sharing a segment in a form that fails in linear time (see
+  // `determinize`)
+  return new RegExp(determinize(toRegExp(path, route, unnamed).source));
 }
 
 /**

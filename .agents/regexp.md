@@ -22,7 +22,7 @@ A path matches iff the body matches it with one trailing `/` stripped. The gener
 - Segments are classified like the tree (`segmentKey(encodeEscapes(s))`). Static keys are regex-escaped; dynamic segments (and the base of a `?`-modified one) are the tree's own `getParamRegexp` source with `_N` unnamed keys, so escapes and literal chars can't drift (see [syntax.md](syntax.md#escapes)).
 - Catch-alls (`**`, `**:x`, `:x+`, `:x*`) use `[\s\S]` (`ANY`), not `.`: the router splits on `/` only, and `.` skips line terminators (under-match). A user `.` inside a constraint keeps its JS meaning, so a trailing `(.*)` constraint gets lazy `.*?` / `.+?` tails.
 - The separator before a catch-all is never a bare `\/?` after a prefix (`/api/**` must not match `/apifoo`). A root `/**` is an optional group carrying its own separator, `^(?:\/(?<_0>…))??`. `**:name` and `:name+` emit identical regexes.
-- Whole-segment `:name` / `:name?` → `[^/]+` (needs a value, see [matching.md](matching.md#empty-segments-and-normalization)); inside a mixed segment lazy `[^/]+?` (mirrors `getParamRegexp`, URLPattern: the first of several params takes as little as possible, see [syntax.md](syntax.md#params-sharing-a-segment)). A `*` is `[\s\S]*` (above).
+- Whole-segment `:name` / `:name?` → `[^/]+` (needs a value, see [matching.md](matching.md#empty-segments-and-normalization)); inside a mixed segment lazy `[^/]+?` (mirrors `getParamRegexp`, URLPattern: the first of several params takes as little as possible, see [syntax.md](syntax.md#params-sharing-a-segment)), then pinned down by `determinize` (below). A `*` is `[\s\S]*` (above).
 - **In-segment optional param** `pre-:x?` (only the param is optional): the segment's own `getParamRegexp` source, which compiles it in place, `pre-(?:(?<x>[^/]+?))?`, `(?<_0>[^/]*)-(?:(?<x>[^/]+?))?`. After a capture that is the tree's regex; after plain text the tree's two routes (`pre-:x`, static `pre-`) match the same paths with the same split (see [syntax.md](syntax.md#params-sharing-a-segment)). No alternation, no look-ahead.
 - A root-level optional is `(?:/X)?` with no leading `/`, via the `ownSeparator` flag of `routeToRegExpSegments` (no in-band sentinel char).
 - Middle empty segments are re-emitted (`splitRoute()`).
@@ -44,9 +44,15 @@ The tree expands `{…}?` into two routes, but `routeToRegExp` inlines a single 
 - `normalize: true` (`.`/`..` resolved before matching).
 - PCRE/Perl `$` also matches before a final `\n` (over-match only).
 
-### Perf
+### Perf and backtracking
 
-Matching stays linear in path length except look-ahead-held captures (quadratic on long failing segments; JS has no atomic groups). The trailing-slash-run step is the price of avoiding look-behind.
+In `src/_regexp-linear.ts`. Lazy params sharing a segment backtrack polynomially on a path that fails after the segment (`/:a-:b-:c` cubic, a greedy `*` before them too; path-to-regexp's CVE-2024-45296), and JS/PCRE have no atomic groups or possessive quantifiers. `routeToRegExp` runs `determinize` over the finished source: it rewrites lazy params whose split is forced, so the regex matches the same paths with the same captures (pinned by "matches and captures like findRoute" and the fixtures; it also held old ≡ new over ~25k changed patterns × all short paths) and leaves no choice to retry. No look-arounds (RE2 sets unchanged). Its file comment is the spec; the shapes:
+
+- **First occurrence** (`FIRST`): a lazy param, literal text `L` and a param that can take any text (lazy, in-place optional, a `*`, a chain's last param): where the route matches with a later `L` it matches with the first (the next param takes the text between), so the lazy param is the first `L` at index ≥ 1. One char before none (`/:a:b` → `(?<a>[^/])`), `[^/][^/c]*` before one char, and for several (`firstBody`) the runs between `c`s that can't start `L`, where `L`'s first char `c` occurs only first (`%20`) or first and last (`-to-`, `--`); other separators stay lazy.
+- **Before an optional group** (`BEFORE_OPTIONAL`): `(?<x>[^/]+?)(?:c(?<y>[^/]+?))?` ending its segment (`/:x{.:e}?`) → `[^/][^/c]*c??` (the first `c` with text after it, or the whole segment).
+- **After a greedy `*`** (`STAR_CHAIN`): params separated by one same char `c` (or none) and literal text to the end of the segment. The `*` takes the largest `p` the rest matches after, and the valid `p`s in a segment are downward closed, so the shortest tail wins: its last param holds `c` only at its ends (`c?[^/c]*[^/]`, `[^/c]*[^/]` alone, `[^/]` with no `c`), an in-place optional one only first (`[^/][^/c]*`), or a later `c` would match. Each try of the `*` fails within the next few `c`s.
+
+Residual (quadratic in a long failing segment, documented in README "Backtracking"): a param before a constraint (`/:a-:b(\d+)-:c`), mixed or multi-char separators after a `*`, a lazy `*` before params (`/a{/*-:a}?`), constraints that can match `/`, look-ahead-held captures. The trailing-slash-run step is the price of avoiding look-behind. `regExpToRoute` reads the linear forms back through `undeterminize` (lazy again only where `determinize` would re-emit the input exactly), so round-trips hold.
 
 ## `regExpToRoute` (`src/regexp-to-route.ts`)
 

@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   routeToRegExp,
@@ -25,6 +26,7 @@ import {
   duplicateGroupNames,
   hasLookahead,
   hasLookbehind,
+  needsDuplicateNames,
   RESERVED_SYNTAX_ROUTES,
   TWO_CATCH_ALL_ROUTES,
   UNCLOSED_GROUP_ROUTES,
@@ -1195,3 +1197,126 @@ const KNOWN_CAPTURE_DIFFS: ReadonlyMap<string, CaptureDiff> = new Map([
   // The router prefers the constrained `y` (see `_selectMatcher`).
   ["/a/:x?/:y(\\d+)?", OPTIONAL_BEFORE_WILDCARD],
 ]);
+
+// Params sharing a segment are lazy (`[^/]+?`), so on a path that fails late
+// a naive regex retries every split of the segment: `/:a-:b-:c` is cubic, a
+// `*` before them as bad (CVE-2024-45296 in path-to-regexp). The emitted
+// regex must fail long paths in linear time (see `determinize`). Each match
+// runs in a `vm` context whose timeout interrupts a runaway one.
+describe("routeToRegExp: backtracking (ReDoS)", () => {
+  const LINEAR_ROUTES = [
+    "/:a-:b",
+    "/:a-:b-:c",
+    "/pre-:a-:b-:c-:d",
+    "/:a.:b.:c.json",
+    "/blog/:year-:month-:day.html",
+    "/:a-:b-:c?",
+    "/:a-:b-:c/x",
+    "/:a-:b-:c/:d?",
+    "/x/**/:a-:b-:c",
+    "/:a:b",
+    "/:a:b:c",
+    "/:a-*-:b",
+    "/*-:a",
+    "/*:a",
+    "/*.:ext",
+    "/a/*-:b",
+    "/*-:a/b",
+    "/*-:a-:b",
+    "/*-:a-:b-:c",
+    "/*.:a.:b.json",
+    "/*-:a?",
+    "/*-:a-:b?",
+    "/:a-to-:b-to-:c",
+    "/:a--:b--:c",
+    "/:a :b :c",
+    "/:a-:b{-:c}?",
+    "/:x{.:e}?",
+    "/files/:name{.:ext}?/raw",
+  ];
+  const N = 30_000;
+  // After the route's static prefix (`/blog/`), a long segment of separators
+  // (or text and separators) followed by more of a path the route rejects
+  const failingPaths = (prefix: string, sep: string) =>
+    [
+      `${sep.repeat(N)}/x/y`,
+      `${sep.repeat(N)}/b/x`,
+      `a${sep.repeat(N)}/x`,
+      `${`a${sep}`.repeat(N / 2)}/x`,
+      `${`a${sep}${sep}`.repeat(N / 3)}/x`,
+      `${sep.repeat(N)}//`,
+      `${"a/".repeat(N / 2)}x`,
+    ].map((rest) => prefix + rest);
+
+  // The linear forms pin the lazy split down: same paths, same captures, over
+  // every short path of the chars the routes use
+  it("matches and captures like findRoute", () => {
+    const sweeps: [patterns: string[], alphabet: string, length: number][] = [
+      [
+        LINEAR_ROUTES.filter((route) => !/to|%| |json|html|blog|pre|files/.test(route)).concat([
+          "/*:a:b",
+          "/*-:a-:b-a",
+          "/x/*-:a-:b/:c?",
+          "/a{/x-:a-:b}?",
+          "/:a-:b-*",
+          "/*-:a{-:b}?",
+          "/*:a?",
+          "/:a-:b-:c{/a}?",
+          "/*a:a",
+          "/*-:a:b",
+          "/:a-a:b-:c",
+          "/:a.:b-:c",
+          "/*.:a.:b.a",
+          "/a/:x{.:e}?/:y?",
+        ]),
+        "a-./",
+        7,
+      ],
+      [["/:a-to-:b-to-:c", "/:a-t-:b", "/*-to-:a", "/:a{-to-:b}?"], "-to/", 9],
+      [["/:a--:b--:c", "/:a-a-:b", "/:a-a:b"], "-a/", 9],
+      [["/:a :b :c", "/:a%2:b"], "%20/", 9],
+    ];
+    const mismatches: string[] = [];
+    for (const [patterns, alphabet, length] of sweeps) {
+      const paths = ["/"];
+      for (let i = 0; i < paths.length && paths[i].length < length; i++) {
+        for (const c of alphabet) paths.push(paths[i] + c);
+      }
+      // Alternations need duplicate named groups (Node 22 lacks them)
+      for (const pattern of patterns) {
+        if (!DUPLICATE_NAMED_GROUPS && needsDuplicateNames(pattern)) continue;
+        const router = createRouter();
+        addRoute(router, "", pattern, true);
+        const regex = routeToRegExp(pattern);
+        for (const path of paths) {
+          const found = findRoute(router, "", path);
+          const match = path.match(regex);
+          const groups = match ? definedCaptures(normalizeGroups(match.groups)) : null;
+          const params = found ? routerCaptures(router, found.params) : null;
+          if (JSON.stringify(groups) !== JSON.stringify(params)) {
+            mismatches.push(
+              `${pattern} ${path}: regex ${groups && fmt(groups)}, router ${params && fmt(params)}`,
+            );
+          }
+        }
+      }
+    }
+    expect(mismatches).toEqual([]);
+  }, 30_000);
+
+  for (const route of LINEAR_ROUTES) {
+    it(`fails long paths in linear time: ${route}`, () => {
+      const regex = routeToRegExp(route);
+      const prefix = route.slice(0, route.search(/[:*]/));
+      for (const sep of ["-", ".", "a", "-to-", "--", "%20"]) {
+        for (const path of failingPaths(prefix, sep)) {
+          const start = performance.now();
+          // Throws `ERR_SCRIPT_EXECUTION_TIMEOUT` on a runaway match
+          runInNewContext("regex.test(path)", { regex, path }, { timeout: 1000 });
+          const ms = performance.now() - start;
+          expect(ms, `${route} on ${JSON.stringify(path.slice(0, 12))}…`).toBeLessThan(200);
+        }
+      }
+    });
+  }
+});

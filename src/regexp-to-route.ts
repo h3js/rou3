@@ -1,14 +1,16 @@
 // Inverse of `routeToRegExp()`: parse an anchored, PCRE-compatible RegExp back
 // into a rou3 route pattern. Targets the dialect emitted by `routeToRegExp()`
-// (named groups `(?<name>...)`, `[^/]+`/`[^/]+?` segment matchers, `[\s\S]*`
-// / `[^/]+(?:\/[^/]+)*` catch-alls (`[\s\S]+`, `.*`/`.+` in older
-// versions), `(?:/...)?` optional groups, the trailing-slash suffix).
+// (named groups `(?<name>...)`, `[^/]+`/`[^/]+?` segment matchers and their
+// linear forms (see `undeterminize`), `[\s\S]*` / `[^/]+(?:\/[^/]+)*`
+// catch-alls (`[\s\S]+`, `.*`/`.+` in older versions), `(?:/...)?` optional
+// groups, the trailing-slash suffix).
 // Hand-written regexes that follow the same conventions convert too;
 // constructs outside the dialect throw.
 
 import { expandGroupDelimiters, scanFirstGroup } from "./_group-delimiters.ts";
 import { fromGroupName } from "./_group-names.ts";
 import { classSetOp, encodeLiteral } from "./operations/_utils.ts";
+import { undeterminize } from "./_regexp-linear.ts";
 
 // Chars a literal is backslash-escaped as so `routeToRegExp` re-emits them
 // verbatim: rou3 route syntax (`: ( ) * \`), `+` (a modifier after a param)
@@ -54,6 +56,10 @@ export function regExpToRoute(regexp: RegExp | string): string {
     throw new Error(`rou3: regexp must be anchored with \`^\` and \`$\` (${src})`);
   }
 
+  // Params sharing a segment in the linear-time form `routeToRegExp` emits
+  // (`[^/][^/-]*`, see `determinize`) back to lazy ones: the same paths and
+  // captures there, so the same route
+  src = undeterminize(src);
   // Strip anchors and the trailing-slash suffix `routeToRegExp` appends (or the
   // plain optional slash older versions and hand-written regexes use).
   src = src.slice(1, -1);

@@ -82,7 +82,7 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/pathx", "/pathx/"],
   },
   "/path/get-:file.:ext": {
-    regex: /^\/path\/get-(?<file>[^/]+?)\.(?<ext>[^/]+?)\/?$/,
+    regex: /^\/path\/get-(?<file>[^/][^/.]*)\.(?<ext>[^/]+?)\/?$/,
     match: [["/path/get-file.txt", { file: "file", ext: "txt" }]],
   },
   "/path/:param1/:param2": {
@@ -525,7 +525,7 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/"],
   },
   "/x/:a{-:b}?": {
-    regex: /^\/x\/(?<a>[^/]+?)(?:-(?<b>[^/]+?))?\/?$/,
+    regex: /^\/x\/(?<a>[^/][^/-]*-??)(?:-(?<b>[^/]+?))?\/?$/,
     match: [
       ["/x/q", { a: "q", b: undefined }],
       ["/x/q-r", { a: "q", b: "r" }],
@@ -561,7 +561,7 @@ export const regexpCases: Record<string, RegExpCase> = {
   // (URLPattern), so a lazy `name` tried before the group splits the same
   // way.
   "/files/:name{.:ext}?": {
-    regex: /^\/files\/(?<name>[^/]+?)(?:\.(?<ext>[^/]+?))?\/?$/,
+    regex: /^\/files\/(?<name>[^/][^/.]*\.??)(?:\.(?<ext>[^/]+?))?\/?$/,
     match: [
       ["/files/a", { name: "a", ext: undefined }],
       ["/files/a.b", { name: "a", ext: "b" }],
@@ -575,7 +575,7 @@ export const regexpCases: Record<string, RegExpCase> = {
   },
   // ... and in the middle of the route.
   "/files/:name{.:ext}?/raw": {
-    regex: /^\/files\/(?<name>[^/]+?)(?:\.(?<ext>[^/]+?))?\/raw\/?$/,
+    regex: /^\/files\/(?<name>[^/][^/.]*\.??)(?:\.(?<ext>[^/]+?))?\/raw\/?$/,
     match: [
       ["/files/a/raw", { name: "a", ext: undefined }],
       ["/files/archive.tar.gz/raw", { name: "archive", ext: "tar.gz" }],
@@ -587,7 +587,7 @@ export const regexpCases: Record<string, RegExpCase> = {
   // ranks against the route without it: an alternation, as for a `**`.
   "/files/*{.:ext}?/raw": {
     regex: duplicateNames(
-      String.raw`^(?:\/files\/(?<_0>[\s\S]*)\.(?<ext>[^/]+?)\/raw\/?|\/files\/(?<_0>[\s\S]*)\/raw\/?)$`,
+      String.raw`^(?:\/files\/(?<_0>[\s\S]*)\.(?<ext>[^/.]*[^/])\/raw\/?|\/files\/(?<_0>[\s\S]*)\/raw\/?)$`,
     ),
     match: [
       ["/files/a/raw", { "0": "a", ext: undefined }],
@@ -601,7 +601,7 @@ export const regexpCases: Record<string, RegExpCase> = {
   // More than one param in a segment: the first takes as little as possible,
   // as in URLPattern (`[^/]+?`); a `*` stays greedy (URLPattern's `(.*)`).
   "/:a-:b": {
-    regex: /^\/(?<a>[^/]+?)-(?<b>[^/]+?)\/?$/,
+    regex: /^\/(?<a>[^/][^/-]*)-(?<b>[^/]+?)\/?$/,
     match: [
       ["/x-y-z", { a: "x", b: "y-z" }],
       ["/x--", { a: "x", b: "-" }],
@@ -609,20 +609,71 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/x-", "/-x", "/x"],
   },
   "/:name.:ext": {
-    regex: /^\/(?<name>[^/]+?)\.(?<ext>[^/]+?)\/?$/,
+    regex: /^\/(?<name>[^/][^/.]*)\.(?<ext>[^/]+?)\/?$/,
     match: [
       ["/a.tar.gz", { name: "a", ext: "tar.gz" }],
       ["/.a.b", { name: ".a", ext: "b" }],
     ],
     noMatch: ["/a", "/a."],
   },
+  // Linear-time forms (see `determinize`): a param before a separator and a
+  // param ends at its first occurrence after its first char, where the
+  // separator has more chars too (runs between its first char that can't
+  // start it); the last param after a `*` holds the separator only at its
+  // ends.
+  "/:a-:b-:c": {
+    regex: /^\/(?<a>[^/][^/-]*)-(?<b>[^/][^/-]*)-(?<c>[^/]+?)\/?$/,
+    match: [
+      ["/x-y-z-w", { a: "x", b: "y", c: "z-w" }],
+      ["/--x--", { a: "-", b: "x", c: "-" }],
+      ["/x----", { a: "x", b: "-", c: "-" }],
+    ],
+    noMatch: ["/x-y", "/x-y-", "/--", "/x---", "/x-y-z/w"],
+  },
+  "/:a-to-:b": {
+    regex:
+      /^\/(?<a>[^/][^/-]*(?:-(?:[^/t-][^/-]*|t(?:[^/o-][^/-]*|o[^/-]+)?)?)*)-to-(?<b>[^/]+?)\/?$/,
+    match: [
+      ["/x-to-y-to-z", { a: "x", b: "y-to-z" }],
+      ["/-to-to-y", { a: "-to", b: "y" }],
+      ["/x-t-to--to-y", { a: "x-t", b: "-to-y" }],
+      ["/x-too-to-y", { a: "x-too", b: "y" }],
+    ],
+    noMatch: ["/x-to-", "/-to-y", "/x-toy"],
+  },
+  "/:a--:b": {
+    regex: /^\/(?<a>[^/][^/-]*(?:-[^/-]+)*)--(?<b>[^/]+?)\/?$/,
+    match: [
+      ["/x---y", { a: "x", b: "-y" }],
+      ["/x-y--z", { a: "x-y", b: "z" }],
+      ["/---y", { a: "-", b: "y" }],
+    ],
+    noMatch: ["/x--", "/--y", "/x-y"],
+  },
+  "/:a :b": {
+    regex: /^\/(?<a>[^/][^/%]*(?:%(?:[^/%2][^/%]*|2(?:[^/%0][^/%]*)?)?)*)%20(?<b>[^/]+?)\/?$/,
+    match: [
+      ["/x%20y%20z", { a: "x", b: "y%20z" }],
+      ["/x%2%20%20y", { a: "x%2", b: "%20y" }],
+    ],
+    noMatch: ["/x%20", "/x%2y"],
+  },
+  "/*-:a-:b": {
+    regex: /^\/(?<_0>[\s\S]*)-(?<a>[^/][^/-]*)-(?<b>-?[^/-]*[^/])\/?$/,
+    match: [
+      ["/x-y-z-w", { "0": "x-y", a: "z", b: "w" }],
+      ["/x-y--z", { "0": "x", a: "y", b: "-z" }],
+      ["/x/-y-z-", { "0": "x/", a: "y", b: "z-" }],
+    ],
+    noMatch: ["/x-y", "/x-y-", "/x-y-z/w"],
+  },
   "/:a:b": {
-    regex: /^\/(?<a>[^/]+?)(?<b>[^/]+?)\/?$/,
+    regex: /^\/(?<a>[^/])(?<b>[^/]+?)\/?$/,
     match: [["/xyz", { a: "x", b: "yz" }]],
     noMatch: ["/x"],
   },
   "/:a-*": {
-    regex: /^\/(?<a>[^/]+?)-(?<_0>(?:[\s\S]*[^/])?\/*?)\/?$/,
+    regex: /^\/(?<a>[^/][^/-]*)-(?<_0>(?:[\s\S]*[^/])?\/*?)\/?$/,
     match: [
       ["/x-y-z", { a: "x", "0": "y-z" }],
       ["/x-y/z", { a: "x", "0": "y/z" }],
@@ -631,7 +682,7 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/x/y-z"],
   },
   "/*-:a": {
-    regex: /^\/(?<_0>[\s\S]*)-(?<a>[^/]+?)\/?$/,
+    regex: /^\/(?<_0>[\s\S]*)-(?<a>[^/-]*[^/])\/?$/,
     match: [
       ["/x-y-z", { "0": "x-y", a: "z" }],
       ["/x-y/z-w", { "0": "x-y/z", a: "w" }],
@@ -666,7 +717,7 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/a/b", "/a/pre/b"],
   },
   "/a/:x-:y?": {
-    regex: /^\/a\/(?<x>[^/]+?)-(?:(?<y>[^/]+?))?\/?$/,
+    regex: /^\/a\/(?<x>[^/][^/-]*)-(?:(?<y>[^/]+?))?\/?$/,
     match: [
       ["/a/1-", { x: "1", y: undefined }],
       ["/a/1-2-3", { x: "1", y: "2-3" }],
@@ -677,7 +728,7 @@ export const regexpCases: Record<string, RegExpCase> = {
   // After a greedy `*` (or a constraint) too: the capture before it takes
   // what it can, as in URLPattern (`a-b-` is `0: "a-b"`, no `x`).
   "/f/*-:x?": {
-    regex: /^\/f\/(?<_0>[\s\S]*)-(?:(?<x>[^/]+?))?\/?$/,
+    regex: /^\/f\/(?<_0>[\s\S]*)-(?:(?<x>[^/][^/-]*))?\/?$/,
     match: [
       ["/f/a-b-", { "0": "a-b", x: undefined }],
       ["/f/a-b-c", { "0": "a-b", x: "c" }],
@@ -699,7 +750,7 @@ export const regexpCases: Record<string, RegExpCase> = {
   // After a lone `:a`, the route without `b` is the whole-segment `/:a`,
   // which needs a value too.
   "/:a:b?": {
-    regex: /^\/(?<a>[^/]+?)(?:(?<b>[^/]+?))?\/?$/,
+    regex: /^\/(?<a>[^/])(?:(?<b>[^/]+?))?\/?$/,
     match: [
       ["/xyz", { a: "x", b: "yz" }],
       ["/x", { a: "x", b: undefined }],
@@ -707,7 +758,7 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/", "//", "///"],
   },
   "/a/:a:b?/z": {
-    regex: /^\/a\/(?<a>[^/]+?)(?:(?<b>[^/]+?))?\/z\/?$/,
+    regex: /^\/a\/(?<a>[^/])(?:(?<b>[^/]+?))?\/z\/?$/,
     match: [["/a/xy/z", { a: "x", b: "y" }]],
     noMatch: ["/a/z", "/a//z"],
   },
@@ -818,7 +869,8 @@ export const regexpCases: Record<string, RegExpCase> = {
     noMatch: ["/files/readme.json"],
   },
   "/mix/:a-b.:a_b": {
-    regex: /^\/mix\/(?<a>[^/]+?)-b\.(?<a_b>[^/]+?)\/?$/,
+    regex:
+      /^\/mix\/(?<a>[^/][^/-]*(?:-(?:[^/b-][^/-]*|b(?:[^/.-][^/-]*)?)?)*)-b\.(?<a_b>[^/]+?)\/?$/,
     match: [["/mix/x-b.y", { a: "x", a_b: "y" }]],
     noMatch: ["/mix/x.y"],
   },
@@ -851,13 +903,13 @@ export const regexpCases: Record<string, RegExpCase> = {
   // The reserved prefixes must not collapse with the unnamed `*` (`_0`).
   "/run/:__rou3_esc_a.:__rou3_unnamed_1.*": {
     regex:
-      /^\/run\/(?<__rou3_esc_____rou3__esc__a>[^/]+?)\.(?<__rou3_esc_____rou3__unnamed__1>[^/]+?)\.(?<_0>(?:[\s\S]*[^/])?\/*?)\/?$/,
+      /^\/run\/(?<__rou3_esc_____rou3__esc__a>[^/][^/.]*)\.(?<__rou3_esc_____rou3__unnamed__1>[^/][^/.]*)\.(?<_0>(?:[\s\S]*[^/])?\/*?)\/?$/,
     match: [["/run/x.y.z", { __rou3_esc_a: "x", __rou3_unnamed_1: "y", "0": "z" }]],
   },
   // A `-` no word char follows ended a name before too (`[\w-]+` captured
   // `{ "year-": "2024-0", month: "5" }`).
   "/blog/:year-:month": {
-    regex: /^\/blog\/(?<year>[^/]+?)-(?<month>[^/]+?)\/?$/,
+    regex: /^\/blog\/(?<year>[^/][^/-]*)-(?<month>[^/]+?)\/?$/,
     match: [["/blog/2024-05", { year: "2024", month: "05" }]],
     noMatch: ["/blog/2024", "/blog/-05"],
   },

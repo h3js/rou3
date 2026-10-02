@@ -687,6 +687,8 @@ It understands the regexes `routeToRegExp` emits, and every one of them round-tr
 - In PCRE and Perl, `$` also matches before a final `\n`, so there the regex also matches `<path>\n`.
 - `.` and `..` in the path are not resolved (in the pattern they are, as in `addRoute`). Normalize the path first if your router uses `normalize: true`.
 
+**Backtracking.** Params that share a segment are lazy, so a naive regex retries every split of the segment on a path that fails after it (`/:a-:b-:c` would be cubic in the segment's length, the class of path-to-regexp's CVE-2024-45296). Where the split can be pinned down without look-arounds, the regex spells it out, with the same matches and captures: a param followed by a separator and another param ends at the separator's first occurrence (`/:a-:b` is `^\/(?<a>[^/][^/-]*)-(?<b>[^/]+?)\/?$`, also for separators like `-to-`, `--` or `%20`), a param before an optional `{.:ext}?` ending its segment at the first separator with text after it, and the last param after a greedy `*` and same-char separators holds no separator but at its ends (`/*.:ext` is `^\/(?<_0>[\s\S]*)\.(?<ext>[^/.]*[^/])\/?$`). These fail any path in linear time. A few shapes still backtrack, quadratically in the length of a long failing segment (on Node.js 24, about 50 to 200 ms for a 16 KB one, four times that for 32 KB): a param right before a constraint (`/:a-:b(\d+)-:c`), separators of several kinds or chars after a `*` (`/*-:a.:b`, `/*-to-:a`), a lazy `*` before params (`/a{/*-:a}?`), a constraint that can match `/` (`/:a(.+)-:b`), and the look-ahead forms below. Separators that repeat their first char inside (`/:a-x-x-:b-x-x-:c`) keep the lazy form, polynomial in the number of params. Cap the path length where that matters (most servers already do).
+
 **Params.** Unnamed captures are named `_0`, `_1`, … in the regex (`"0"`, `"1"`, … in the router). A regex can't capture one group under two names, so there is no group for the router's deprecated `_` alias of a bare `**`: read the numbered one. A `**:name` / `:name+` / `:name*` is `[^/]+(?:\/[^/]+)*`, as in URLPattern. When optional segments meet a constrained optional, or several optional segments follow a catch-all, the regex can assign a segment to a different param than the router (`/a/:x?/:y(\d+)?` on `/a/1` sets `x`, the router sets `y`). The set of matched paths is still the same.
 
 **Errors.** Patterns that `addRoute` rejects throw the same error, and so does a route that declares the same param name twice (`/files/:path/**:path`; a bare `**` takes the name `_`, its deprecated alias).
@@ -731,13 +733,13 @@ Fixed-length look-behinds work in JavaScript, PCRE and Perl, but not in RE2-fami
 routeToRegExp("/blog/:id(\\d+){-:title}?");
 // /^\/blog\/(?<id>\d+)(?:-(?<title>[^/]+?))?\/?$/
 routeToRegExp("/files/:name{.:ext}?");
-// /^\/files\/(?<name>[^/]+?)(?:\.(?<ext>[^/]+?))?\/?$/
+// /^\/files\/(?<name>[^/][^/.]*\.??)(?:\.(?<ext>[^/]+?))?\/?$/
 routeToRegExp("/users{/:id}?/posts/:post");
 // /^\/users(?:\/(?<id>[^/]+))?\/posts\/(?<post>[^/]+)\/?$/
 ```
 
 - A param in a segment with other text is lazy (`[^/]+?`), as in the router, so `/files/:name{.:ext}?` splits `archive.tar.gz` into `name: "archive"` and `ext: "tar.gz"`.
-- An optional param in a segment is compiled in place, as in the router: `/pre-:x?` is `^\/pre-(?:(?<x>[^/]+?))?\/?$`, and `/*-:x?` is `^\/(?<_0>[\s\S]*)-(?:(?<x>[^/]+?))?\/?$`.
+- An optional param in a segment is compiled in place, as in the router: `/pre-:x?` is `^\/pre-(?:(?<x>[^/]+?))?\/?$`, and `/*-:x?` is `^\/(?<_0>[\s\S]*)-(?:(?<x>[^/][^/-]*))?\/?$` (see "Backtracking" above).
 - An optional group that starts its segment before more of it is inlined too: `/x/{:id}?(\\d+)` is `^\/x\/(?:(?<id>[^/]+?))?(?<_0>\d+)\/?$`.
 - When the group follows a regex constraint in its segment (`/blog/:id(\d+){-:title}?`), the constraint is kept from taking the group's text, with a look-ahead where needed (RE2-family engines reject it). After a `*` (`/files/*{.:ext}?/raw`), the regex is an alternation.
 
@@ -759,7 +761,7 @@ Duplicate named groups work in JavaScript engines that support them (Node.js 23+
 <details>
 <summary>What <code>regExpToRoute</code> accepts</summary>
 
-- The dialect `routeToRegExp` emits: `(?<name>...)` groups, `[^/]+?` params inside a segment, `[\s\S]*` catch-alls (an unnamed one in a segment of its own or next to text is a `*`), `(?:/...)?` optional groups and the endings shown above. Unnamed groups such as `(\d+)` work too, and the regex inside a constraint is kept verbatim.
+- The dialect `routeToRegExp` emits: `(?<name>...)` groups, `[^/]+?` params inside a segment (and their linear forms, such as `[^/][^/-]*`, where `routeToRegExp` emits them), `[\s\S]*` catch-alls (an unnamed one in a segment of its own or next to text is a `*`), `(?:/...)?` optional groups and the endings shown above. Unnamed groups such as `(\d+)` work too, and the regex inside a constraint is kept verbatim.
 - Looser forms, as older versions emitted them: a plain `\/?` ending, `.*` / `.+` catch-alls, and `[^/]+` params, read as `:name`.
   - A `:name` inside a segment is lazy, so a hand-written greedy `(?<a>[^/]+)-(?<b>[^/]+)` comes back as `/:a-:b`, which splits `/x-y-z` as `x` and `y-z`.
   - An old catch-all inside an optional group is the exception: 0.9.2's regex for `/a{/:w*}?` throws, and its regex for `/a{/:w+}?` comes back as `/a/:w(.+)?` (the current regexes for both come back as `/a/:w*`, the same route).
