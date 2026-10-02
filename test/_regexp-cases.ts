@@ -2044,6 +2044,17 @@ export const RESERVED_SYNTAX_ROUTES: readonly string[] = [
   "/a/\uFFFD0x",
   "/a/\uFFFEx",
   "/a/:x\uFFFF",
+  // A tab / LF / CR: URLPattern drops it (URL parsing), the router encoded
+  // it (`%09`), so the same pattern matched different paths. Also escaped,
+  // in a param's text and in a constraint (no pathname holds the raw char).
+  "/a\tb",
+  "/a/\n",
+  "/\r/a",
+  "/a/\\\tb",
+  "/a/:x-\n",
+  "/a/{\t}?",
+  "/a/:x(a\tb)",
+  "/a/(\r)",
 ];
 
 /** Whether `addRoute` accepts `pattern`. */

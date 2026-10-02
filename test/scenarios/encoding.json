@@ -225,12 +225,12 @@
     },
     {
       "name": "lone surrogates and control characters",
-      "description": "README: a lone surrogate is encoded as U+FFFD (`%EF%BF%BD`); a tab or newline is encoded too (URLPattern strips it)",
+      "description": "README: a lone surrogate is encoded as U+FFFD (`%EF%BF%BD`); a raw tab, LF or CR throws (URLPattern strips it), so write it as `%09` / `%0A` / `%0D`",
       "routes": [
         { "path": "/x\ud800y", "name": "high" },
         { "path": "/z/\udc00", "name": "low" },
-        { "path": "/a\tb", "name": "tab" },
-        { "path": "/line\nbreak", "name": "newline" }
+        { "path": "/a%09b", "name": "tab" },
+        { "path": "/line%0Abreak", "name": "newline" }
       ],
       "cases": [
         { "path": "/x%EF%BF%BDy", "match": "high", "params": {} },
@@ -242,7 +242,8 @@
         { "path": "/a\tb", "match": null },
         { "path": "/line%0Abreak", "match": "newline", "params": {} },
         { "path": "/line%0abreak", "match": null }
-      ]
+      ],
+      "invalid": ["/a\tb", "/line\nbreak", "/cr\r", "/a/\\\tb", "/:x(a\tb)", "/a/{\n}?"]
     },
     {
       "name": "optional groups and in-segment optionals with encoded text",

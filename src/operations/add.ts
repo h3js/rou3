@@ -45,8 +45,9 @@ export type { Unnamed };
  * @throws a `rou3:` error quoting the pattern when its syntax has no meaning
  * (see README "Invalid patterns"): for example an unclosed `(` or `{`, a
  * misplaced modifier (`*?`, `/foo?`), an invalid or repeated param name (`/:0`,
- * `/a/:x/:x`), a second catch-all (`/*\/x/*`), or a capturing group, anchor,
- * look-around or backreference in a regex constraint.
+ * `/a/:x/:x`), a second catch-all (`/*\/x/*`), a capturing group, anchor,
+ * look-around or backreference in a regex constraint, or a raw tab, LF or CR
+ * (URLPattern drops it; write `%09`, `%0A`, `%0D`).
  */
 export function addRoute<T>(
   ctx: RouterContext<T>,

@@ -229,10 +229,11 @@ findRoute(router, "GET", "/caf%C3%A9/1"); // { data: {}, params: { id: "1" } }
 findRoute(router, "GET", "/café/1"); // undefined
 ```
 
-- **Encoded:** control characters (tab and newline too, which URLPattern drops), space, `"`, `#`, `<`, `>`, `?`, `^`, `` ` ``, `{`, `}`, and every non-ASCII character (as UTF-8, upper-case hex: `é` is `%C3%A9`). Escaped characters too: `\\?` matches `%3F`, `\\{` matches `%7B`.
+- **Encoded:** control characters, space, `"`, `#`, `<`, `>`, `?`, `^`, `` ` ``, `{`, `}`, and every non-ASCII character (as UTF-8, upper-case hex: `é` is `%C3%A9`). Escaped characters too: `\\?` matches `%3F`, `\\{` matches `%7B`.
 - **Not encoded:** `%`, so an existing `%xx` stays as written (`/caf%c3%a9` matches only `/caf%c3%a9`, not `/caf%C3%A9`), and other ASCII characters (`/a|b[c]` stays as is).
 - **Regex constraints are not encoded:** write `:x(%C3%A9)`, not `:x(é)`.
 - A lone surrogate is encoded as U+FFFD (`%EF%BF%BD`), as in URLPattern.
+- **Tab, newline (LF) and carriage return (CR) throw**, also in a regex constraint: URLPattern drops them from a pattern, so encoding them would match different paths. Write `%09`, `%0A` or `%0D`.
 - `^` is encoded, following the URL spec (as Node.js and Bun do). Deno (2.9) leaves it as is in `new URL().pathname` (`/a^b`), so on Deno, encode it before a lookup (`pathname.replaceAll("^", "%5E")`) if a route has a literal `^`.
 
 Every API sees the encoded text: `removeRoute`, `routeToRegExp`, `routeNodeKeys`, the overlap helpers and the compiler. `/café` and `/caf%C3%A9` are the same route, and so are `/café-:id` and `/caf%C3%A9-:id`. Regex constraints are not encoded, so `:x(é)` and `:x(%C3%A9)` stay different routes.
@@ -249,6 +250,7 @@ Every API sees the encoded text: `removeRoute`, `routeToRegExp`, `routeNodeKeys`
 - A second catch-all.
 - A `\/`.
 - Text right after a leading `{/…}?` group (`{/a}?b`).
+- A tab, newline or carriage return (write `%09`, `%0A`, `%0D`).
 - A character from U+FFFD to U+FFFF (used internally).
 - In a regex constraint:
   - a capturing group, also in a class (`/:x((a))`, `/:x([(a)])`): use `(?:…)`, or escape a class paren (`[\\(]`);
@@ -275,6 +277,7 @@ rou3 matches HTTP request paths segment by segment in a tree. That leads to a fe
 | Case                                      | Can be case-insensitive                                     | Always case-sensitive                                                                                   |
 | Input paths                               | Any URL; percent-encoded for you                            | Must start with `/` and be percent-encoded already (`new URL().pathname`); never decoded               |
 | Param names                               | Unicode identifiers                                         | ASCII `[A-Za-z_]\w*`; a non-ASCII char or `$` right after one throws                                    |
+| Tab, LF or CR in a pattern                | Dropped (`/a\tb` is `/ab`)                                  | Throw: write `%09`, `%0A` or `%0D`                                                                      |
 
 <details>
 <summary>Edge cases</summary>

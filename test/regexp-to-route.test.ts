@@ -460,6 +460,13 @@ describe("regExpToRoute", () => {
     // An escaped one too (a string: a lint autofix would drop the escape)
     expect(() => regExpToRoute(new RegExp("^\\/a\\é\\/?$"))).toThrow('literal "é" (');
     expect(() => regExpToRoute(/^\/caf\/?$/)).not.toThrow();
+    // A raw tab / LF / CR: no route has one (`addRoute` rejects it), also in
+    // a constraint, where the regex escape is kept as written
+    for (const ch of ["\t", "\n", "\r"]) {
+      expect(() => regExpToRoute(`^\\/a${ch}\\/?$`), ch).toThrow(/^rou3: /);
+      expect(() => regExpToRoute(`^\\/(?<x>a${ch})\\/?$`), ch).toThrow(/^rou3: /);
+    }
+    expect(regExpToRoute(/^\/(?<x>a\t\n\r)\/?$/)).toBe("/:x(a\\t\\n\\r)");
     // U+FFFD-U+FFFF are internal placeholders: no route has them either
     for (const code of [0xfffd, 0xfffe, 0xffff]) {
       const ch = String.fromCharCode(code);
