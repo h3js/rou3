@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## v0.12.1
+
+[compare changes](https://github.com/h3js/rou3/compare/v0.12.0...v0.12.1)
+
+### 🩹 Fixes
+
+- **regexp:** Build determinize patterns lazily ([700894c](https://github.com/h3js/rou3/commit/700894c))
+
+### 📖 Documentation
+
+- Add migration guide ([9cf551e](https://github.com/h3js/rou3/commit/9cf551e))
+
+### ❤️ Contributors
+
+- Pooya Parsa <pooya@pi0.io>
+
 ## v0.12.0
 
 [compare changes](https://github.com/h3js/rou3/compare/v0.11.0...v0.12.0)
