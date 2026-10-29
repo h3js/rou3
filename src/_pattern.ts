@@ -113,7 +113,8 @@ export function encodeLiteral(text: string): string {
  * `\` that escapes no char of its segment (a `\/` or a trailing `\`), and on
  * a `^` / `$` / look-around in a group: the tree tests a segment on its own,
  * where they see its ends, and `routeToRegExp` inline, where they see the rest
- * of the path (#227), and on a capturing group inside a group (a stray
+ * of the path (#227), and on a `\b` / `\B` outside a class of a group (it
+ * tests a hex digit where literal text was percent-encoded), and on a capturing group inside a group (a stray
  * numbered or named param; only `(?:…)` is fine), also inside a class
  * (`[(.*)]`, `[()]`: read as one), and on a `--` / `&&` in a class of a
  * group: URLPattern's `v` flag reads it as a set operation (`[[a-z]--a]`,
@@ -130,9 +131,12 @@ export function checkConstraints(route: string): void {
   if (/[\t\n\r\uFFFD-\uFFFF]/.test(route)) {
     invalidSyntax("a tab, LF, CR (use %09, %0A, %0D) or U+FFFD-U+FFFF char", route);
   }
-  // `\1`-`\9` -> `\0` (a backreference), any other escape -> `_` (a literal,
-  // so `\(?=` is no look-ahead)
-  let s = route.replace(/\\([^/])/g, (_, c) => (c > "0" && c <= "9" ? "\0" : "_"));
+  // `\1`-`\9` -> `\0` (a backreference), `\b` / `\B` -> `^` (an anchor; a
+  // backspace in a class), any other escape -> `_` (a literal, so `\(?=` is
+  // no look-ahead)
+  let s = route.replace(/\\([^/])/g, (_, c) =>
+    c > "0" && c <= "9" ? "\0" : /b/i.test(c) ? "^" : "_",
+  );
   while (
     s !==
     (s = s.replace(/\([^()/]*\)/g, (group) => {

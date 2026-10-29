@@ -46,8 +46,8 @@ import type { Node, RouterContext, ParamsIndexMap } from "../types.ts";
  * @throws a `rou3:` error quoting the pattern when its syntax has no meaning
  * (see docs/reference.md "Invalid patterns"): for example an unclosed `(` or `{`, a
  * misplaced modifier (`*?`, `/foo?`), an invalid or repeated param name (`/:0`,
- * `/a/:x/:x`), a second catch-all (`/*\/x/*`), a capturing group, anchor,
- * look-around or backreference in a regex constraint, a raw tab, LF or CR
+ * `/a/:x/:x`), a second catch-all (`/*\/x/*`), a capturing group, anchor
+ * (`\b` too), look-around or backreference in a regex constraint, a raw tab, LF or CR
  * (URLPattern drops it; write `%09`, `%0A`, `%0D`), or a `.` / `..` segment
  * next to a param, catch-all or group (`/:id/..`, `/a/../:id`).
  */

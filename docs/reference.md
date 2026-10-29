@@ -132,7 +132,8 @@ Every API sees the encoded text: `removeRoute`, `routeToRegExp`, `routeNodeKeys`
 - In a regex constraint:
   - a capturing group, also in a class (`/:x((a))`, `/:x([(a)])`): use `(?:…)`, or escape a class paren (`[\\(]`);
   - a `--` or `&&` inside a class (`/([[a-z]--a])`, `/:x([\\w&&b])`): URLPattern reads it as a set operation (`v` flag), rou3's RegExp as plain chars. Escape a literal one (`[a\\-\\-b]`);
-  - an anchor (`^`, `$`), a look-around or a numbered backreference (`\1`). The router tests a constraint against its segment alone, while `routeToRegExp` puts it inline, where it would see the rest of the path, so the two would match different paths.
+  - an anchor (`^`, `$`), a look-around or a numbered backreference (`\1`). The router tests a constraint against its segment alone, while `routeToRegExp` puts it inline, where it would see the rest of the path, so the two would match different paths;
+  - a word boundary (`\b`, `\B`) outside a class: it tests the character next to it, which is a hex digit where literal text was [percent-encoded](#percent-encoding) (`/é:x(\bfoo)` would never match `/%C3%A9foo`). In a class, `[\b]` is a backspace and stays valid.
 
 ### Differences from URLPattern
 

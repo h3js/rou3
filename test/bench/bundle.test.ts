@@ -248,8 +248,10 @@ describe("benchmark", () => {
     // +0B raw / +12B gzip: `src/` regrouped by concept (`_pattern.ts`,
     // `_match.ts`, `_segment-regexp.ts`); the same code in another module
     // order.
-    expect(bytes).toBeLessThanOrEqual(15099); // <15.10kb
-    expect(gzipSize).toBeLessThanOrEqual(6501); // <6.51kb
+    // +17B raw / +11B gzip: a `\b` / `\B` in a constraint throws (it tests a
+    // hex digit where literal text was percent-encoded).
+    expect(bytes).toBeLessThanOrEqual(15116); // <15.12kb
+    expect(gzipSize).toBeLessThanOrEqual(6512); // <6.52kb
   });
 
   it("unused exports of the single-file build leave no code behind", async () => {

@@ -2053,6 +2053,18 @@ export const RESERVED_SYNTAX_ROUTES: readonly string[] = [
   "/:a/:b(x)(\\1)",
   "/:a/((x)\\2)",
   "/a/:x((a)\\1)",
+  // A word boundary tests the char next to it, which is a hex digit where
+  // literal text was percent-encoded (`/é:x(\bfoo)` never matched `/%C3%A9foo`).
+  "/é:x(\\bfoo)",
+  "/:x(\\bfoo)",
+  "/a/:x(foo\\bbar)",
+  "/a/:x(foo\\b)",
+  "/:x(\\Bfoo)",
+  "/a/:x(foo\\Bbar)",
+  "/a/:x(foo\\B)",
+  "/a/(\\ba)",
+  "/a/:x((?:a\\b))",
+  "/a/:x([a]\\b)",
   // A `--` / `&&` in a class of a constraint: URLPattern's `v` flag reads it
   // as a set operation (`[[a-z]--a]` is `b`-`z`), rou3's RegExp as plain
   // chars (`[[a-z]` then a literal `--a]`), nested classes and escaped

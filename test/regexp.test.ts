@@ -807,6 +807,12 @@ describe("reserved pattern syntax", () => {
     "/a/:x(\\\\?=a)",
     "/a/:x(\\\\1)",
     "/a/:x([\\]$])",
+    "/a/:x([\\b])",
+    "/a/:x([^\\b]+)",
+    "/a/:x([\\]\\B])",
+    "/a/:x(\\\\b)",
+    "/a/:x(\\\\B)",
+    "/a/\\b:x",
     // `--` / `&&` outside a class, or escaped in one (see
     // `RESERVED_SYNTAX_ROUTES`), and as literal path text
     "/a/:x(a--b)",
