@@ -206,3 +206,47 @@ describe("compiled params (interpreter parity)", () => {
     );
   });
 });
+
+describe("compileRouter: single wildcard /** optimization", () => {
+  it("emits a minimal matcher for a single /** route (AOT and JIT)", () => {
+    const router = createRouter<string>();
+    addRoute(router, undefined, "/**", "all");
+
+    const aotCode = compileRouterToString(router);
+    expect(aotCode).toContain("const w=p.slice(1)");
+    expect(aotCode).not.toContain("p.split");
+
+    const aotMatchAllCode = compileRouterToString(router, { matchAll: true });
+    expect(aotMatchAllCode).toContain("const w=p.slice(1)");
+    expect(aotMatchAllCode).not.toContain("p.split");
+
+    const aot = evalAOT(aotCode);
+    const aotAll = evalAOT(aotMatchAllCode);
+    const jit = compileRouter(router);
+    const jitAll = compileRouter(router, { matchAll: true });
+
+    const paths = ["/", "", "//", "/foo", "/foo/", "/foo/bar", "/foo/bar/"];
+    for (const p of paths) {
+      const expected = findRoute(router, "GET", p);
+      expect(aot("GET", p)).toEqual(expected);
+      expect(jit("GET", p)).toEqual(expected);
+
+      const expectedAll = findAllRoutes(router, "GET", p);
+      expect(aotAll("GET", p)).toEqual(expectedAll);
+      expect(jitAll("GET", p)).toEqual(expectedAll);
+    }
+  });
+
+  it("falls back to standard compiler when additional routes or methods exist", () => {
+    const routerWithMethod = createRouter<string>();
+    addRoute(routerWithMethod, "GET", "/**", "all");
+    const codeMethod = compileRouterToString(routerWithMethod);
+    expect(codeMethod).toContain("p.split");
+
+    const routerWithMultiple = createRouter<string>();
+    addRoute(routerWithMultiple, undefined, "/**", "all");
+    addRoute(routerWithMultiple, undefined, "/api", "api");
+    const codeMultiple = compileRouterToString(routerWithMultiple);
+    expect(codeMultiple).toContain("p.split");
+  });
+});
