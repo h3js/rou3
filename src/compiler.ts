@@ -219,7 +219,51 @@ interface CompilerContext {
   variantRank?: boolean;
 }
 
+function getSingleWildcardRoute<T>(router: RouterContext<T>): MethodData<T> | undefined {
+  if (router.static && Object.keys(router.static).length > 0) {
+    return undefined;
+  }
+  const root = router.root;
+  if (!root || !root.wildcard || root.wildcard.key !== "**") {
+    return undefined;
+  }
+  if (
+    (root.static && Object.keys(root.static).length > 0) ||
+    (root.methods && Object.keys(root.methods).length > 0) ||
+    root.param ||
+    root.suffix
+  ) {
+    return undefined;
+  }
+  const wc = root.wildcard;
+  if ((wc.static && Object.keys(wc.static).length > 0) || wc.param || wc.suffix || wc.wildcard) {
+    return undefined;
+  }
+  if (!wc.methods) {
+    return undefined;
+  }
+  const methodKeys = Object.keys(wc.methods);
+  if (methodKeys.length !== 1 || methodKeys[0] !== "") {
+    return undefined;
+  }
+  const entries = wc.methods[""];
+  if (!entries || entries.length !== 1 || entries[0].route !== "/**") {
+    return undefined;
+  }
+  return entries[0];
+}
+
 function compileRouteMatch(ctx: CompilerContext): string {
+  const singleWildcard = getSingleWildcardRoute(ctx.router);
+  if (singleWildcard) {
+    const dataSlot = serializeData(ctx, singleWildcard);
+    const normalizePathHelper = ctx.opts?.normalize
+      ? `if(p.includes("/.")){let _r=[],_v;for(_v of p.split("/")){if(_v===".")continue;if(_v==="..")_r.length>1&&_r.pop();else _r.push(_v)}if(_v==="."||_v==="..")_r.push("");p=_r.join("/")||"/"}`
+      : "";
+    const ret = `{data:${dataSlot},params:p?{"0":w,_:w}:{}}`;
+    return `${normalizePathHelper}if(p.charCodeAt(p.length-1)===47)p=p.slice(0,-1);const w=p.slice(1);return ${ctx.opts?.matchAll ? `[${ret}]` : ret};`;
+  }
+
   const matchAll = ctx.opts?.matchAll;
   ctx.rank = hasSuffixTrie(ctx.router.root);
   let code = compileStaticMatch(ctx);
