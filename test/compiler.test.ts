@@ -206,3 +206,51 @@ describe("compiled params (interpreter parity)", () => {
     );
   });
 });
+
+describe("compiler: single /** route optimization", () => {
+  it("emits optimized matcher for single /** route", () => {
+    const router = createRouter<string>();
+    addRoute(router, "", "/**", "handler");
+
+    const code = compileRouterToString(router);
+    expect(code).not.toContain('split("/")');
+    expect(code).toContain("const w=p.slice(1);");
+
+    const codeMatchAll = compileRouterToString(router, { matchAll: true });
+    expect(codeMatchAll).not.toContain('split("/")');
+    expect(codeMatchAll).toContain('[{data:$0,params:w?{"0":w,_:w}:{}}]');
+
+    const jit = compileRouter(router);
+    const aot = evalAOT(code);
+    const jitAll = compileRouter(router, { matchAll: true });
+    const aotAll = evalAOT(codeMatchAll);
+
+    const testPaths = ["/", "/foo", "/foo/", "/foo/bar", "/foo/bar/", ""];
+    for (const path of testPaths) {
+      const expected = findRoute(router, "GET", path);
+      expect(jit("GET", path)).toEqual({ data: expected!.data, params: expected!.params });
+      expect(aot("GET", path)).toEqual({ data: expected!.data, params: expected!.params });
+
+      const expectedAll = findAllRoutes(router, "GET", path);
+      expect(jitAll("GET", path)).toEqual(
+        expectedAll.map((r) => ({ data: r.data, params: r.params })),
+      );
+      expect(aotAll("GET", path)).toEqual(
+        expectedAll.map((r) => ({ data: r.data, params: r.params })),
+      );
+    }
+  });
+
+  it("does not optimize if multiple routes or method specified", () => {
+    const routerMethod = createRouter<string>();
+    addRoute(routerMethod, "GET", "/**", "get-only");
+    const codeMethod = compileRouterToString(routerMethod);
+    expect(codeMethod).toContain('split("/")');
+
+    const routerMultiple = createRouter<string>();
+    addRoute(routerMultiple, "", "/**", "all");
+    addRoute(routerMultiple, "GET", "/specific", "spec");
+    const codeMultiple = compileRouterToString(routerMultiple);
+    expect(codeMultiple).toContain('split("/")');
+  });
+});
