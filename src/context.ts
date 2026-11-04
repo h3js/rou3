@@ -1,3 +1,4 @@
+import { createNode } from "./node.ts";
 import { NullProtoObj } from "./object.ts";
 import type { RouterContext } from "./types.ts";
 
@@ -6,7 +7,7 @@ import type { RouterContext } from "./types.ts";
  */
 export function createRouter<T = unknown>(): RouterContext<T> {
   const ctx: RouterContext<T> = {
-    root: { key: "" },
+    root: createNode<T>(""),
     static: new NullProtoObj(),
   };
   return ctx;

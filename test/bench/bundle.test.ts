@@ -248,8 +248,11 @@ describe("benchmark", () => {
     // +0B raw / +12B gzip: `src/` regrouped by concept (`_pattern.ts`,
     // `_match.ts`, `_segment-regexp.ts`); the same code in another module
     // order.
-    expect(bytes).toBeLessThanOrEqual(15099); // <15.10kb
-    expect(gzipSize).toBeLessThanOrEqual(6501); // <6.51kb
+    // +441B raw / +180B gzip: interpreter perf pass (catch-all path slicing,
+    // `splitPath` without `shift`, stable node shapes, indexed params with a
+    // single-param fast path). Compiled lookup is unchanged.
+    expect(bytes).toBeLessThanOrEqual(15560); // <15.56kb
+    expect(gzipSize).toBeLessThanOrEqual(6700); // <6.70kb
   });
 
   it("unused exports of the single-file build leave no code behind", async () => {

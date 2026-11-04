@@ -19,6 +19,7 @@ import {
 } from "../_pattern.ts";
 import { getParamRegexp, linearRegExp } from "../_segment-regexp.ts";
 import { createRouter } from "../context.ts";
+import { createNode } from "../node.ts";
 import { NullProtoObj } from "../object.ts";
 import type { Node, RouterContext, ParamsIndexMap } from "../types.ts";
 
@@ -211,6 +212,9 @@ function _insert<T>(
   let wildcardIndex = -1;
   // Nodes on the way to the catch-all, flagged `hasSuffix` for a suffix route
   const trail: Node<T>[] | undefined = star ? [] : undefined;
+  // Catch-all value offset when its prefix is static (see `getMatchParams`)
+  let catchAllOffset = -1;
+  let prefixLength = 1;
 
   for (let i = 0; i < segments.length; i++) {
     let segment = segments[i];
@@ -223,7 +227,7 @@ function _insert<T>(
       }
       trail?.push(node);
       if (!node.wildcard) {
-        node.wildcard = { key: "**" };
+        node.wildcard = createNode<T>("**");
       }
       node = node.wildcard;
       // A `*` takes one segment or more (or, last, none: see `matchesZero`),
@@ -236,6 +240,9 @@ function _insert<T>(
       // `getMatchParams`), so that name is taken. The `**` of a split `*` is
       // part of its capture: its number (taken by the piece before it, if
       // any), no `_` alias.
+      if (join === -1 && i === segments.length - 1 && paramsMap.length === 0) {
+        catchAllOffset = prefixLength;
+      }
       paramsMap.push([
         -(i + 1),
         i === join
@@ -268,7 +275,7 @@ function _insert<T>(
       } else {
         trail?.push(node);
         if (!node.param) {
-          node.param = { key: "*" };
+          node.param = createNode<T>("*");
         }
         node = node.param;
       }
@@ -315,12 +322,13 @@ function _insert<T>(
       suffix.push(segment);
       continue;
     }
+    prefixLength += segment.length + 1;
     trail?.push(node);
     const child = node.static?.[segment];
     if (child) {
       node = child;
     } else {
-      const staticNode = { key: segment };
+      const staticNode = createNode<T>(segment);
       if (!node.static) {
         node.static = new NullProtoObj();
       }
@@ -333,13 +341,13 @@ function _insert<T>(
     for (const n of trail!) {
       n.hasSuffix = true;
     }
-    node = node.suffix ??= { key: "" };
+    node = node.suffix ??= createNode<T>("");
     for (let j = suffix.length - 1; j >= 0; j--) {
       const edge = suffix[j];
       if (edge === 1) {
-        node = node.param ??= { key: "*" };
+        node = node.param ??= createNode<T>("*");
       } else {
-        node = (node.static ??= new NullProtoObj())[edge] ??= { key: edge };
+        node = (node.static ??= new NullProtoObj())[edge] ??= createNode<T>(edge);
       }
     }
   }
@@ -354,6 +362,7 @@ function _insert<T>(
     paramsMap: hasParams ? paramsMap : undefined,
     route: route ?? key,
     suffix: suffix && [wildcardIndex, suffix.length],
+    catchAllOffset: catchAllOffset >= 0 ? catchAllOffset : undefined,
     variants,
     // Within half a weight point (`getParamRegexp` ranks a segment by
     // +-2^31 at most)

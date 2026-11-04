@@ -48,6 +48,11 @@ export type MethodData<T = unknown> = {
    */
   suffix?: [wildcard: number, length: number];
   /**
+   * Set on a trailing catch-all whose prefix is static: where its value starts
+   * in the lookup path (leading `/` included).
+   */
+  catchAllOffset?: number;
+  /**
    * Set on every entry (variant) of an `addRoute` call that registers several
    * (optional syntax, a `*` inside a segment): a token they share (identity
    * only, never data equality). One path may match several of them

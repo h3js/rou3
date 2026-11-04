@@ -49,7 +49,10 @@ export function findAllRoutes<T>(
   const params = opts?.params !== false;
   return matches.map((m) =>
     params && m.paramsMap
-      ? { data: m.data, params: getMatchParams(segments, m.paramsMap, m.suffix, slash) }
+      ? {
+          data: m.data,
+          params: getMatchParams(segments, m.paramsMap, m.suffix, slash, path, m.catchAllOffset),
+        }
       : { data: m.data },
   );
 }

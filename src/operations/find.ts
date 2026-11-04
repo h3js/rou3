@@ -72,7 +72,7 @@ export function findRoute<T = unknown>(
   return {
     data: match.data,
     params: match.paramsMap
-      ? getMatchParams(segments, match.paramsMap, match.suffix, slash)
+      ? getMatchParams(segments, match.paramsMap, match.suffix, slash, path, match.catchAllOffset)
       : undefined,
   };
 }
