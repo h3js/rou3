@@ -220,6 +220,20 @@ interface CompilerContext {
 }
 
 function compileRouteMatch(ctx: CompilerContext): string {
+  const singleWildcard = getSingleWildcardRoute(ctx.router);
+  if (singleWildcard) {
+    const data = serializeData(ctx, singleWildcard);
+    const normalizePathHelper = ctx.opts?.normalize
+      ? `if(p.includes("/.")){let _r=[],_v;for(_v of p.split("/")){if(_v===".")continue;if(_v==="..")_r.length>1&&_r.pop();else _r.push(_v)}if(_v==="."||_v==="..")_r.push("");p=_r.join("/")||"/"}`
+      : "";
+    const strip = `if(p.charCodeAt(p.length-1)===47)p=p.slice(0,-1);`;
+    let retCode = `{data:${data},params:w?{"0":w,_:w}:{}}`;
+    if (ctx.opts?.matchAll) {
+      retCode = `[${retCode}]`;
+    }
+    return `${normalizePathHelper}${strip}const w=p.slice(1);return ${retCode};`;
+  }
+
   const matchAll = ctx.opts?.matchAll;
   ctx.rank = hasSuffixTrie(ctx.router.root);
   let code = compileStaticMatch(ctx);
@@ -280,6 +294,52 @@ function compileRouteMatch(ctx: CompilerContext): string {
     ? `let t=p.charCodeAt(p.length-1)===47;if(t)p=p.slice(0,-1);`
     : `if(p.charCodeAt(p.length-1)===47)p=p.slice(0,-1);`;
   return `${matchAll ? collect : ""}${normalizeHelper}${normalizePathHelper}${strip}${code}${matchAll ? done : ""}`;
+}
+
+function getSingleWildcardRoute(router: RouterContext<any>): MethodData | undefined {
+  if (Object.keys(router.static).length > 0) {
+    return undefined;
+  }
+  const root = router.root;
+  if (root.static && Object.keys(root.static).length > 0) {
+    return undefined;
+  }
+  if (root.param) {
+    return undefined;
+  }
+  if (root.methods && Object.keys(root.methods).length > 0) {
+    return undefined;
+  }
+
+  const wc = root.wildcard;
+  if (!wc || wc.key !== "**") {
+    return undefined;
+  }
+  if (wc.static && Object.keys(wc.static).length > 0) {
+    return undefined;
+  }
+  if (wc.param || wc.wildcard || wc.suffix) {
+    return undefined;
+  }
+  if (!wc.methods) {
+    return undefined;
+  }
+
+  const methodKeys = Object.keys(wc.methods);
+  if (methodKeys.length !== 1 || methodKeys[0] !== "") {
+    return undefined;
+  }
+
+  const entries = wc.methods[""];
+  if (!entries || entries.length !== 1) {
+    return undefined;
+  }
+
+  const entry = entries[0];
+  if (entry.route !== "/**" || entry.suffix) {
+    return undefined;
+  }
+  return entry;
 }
 
 // Below this many static paths an `else if` chain of `p === "..."` compares
