@@ -60,9 +60,7 @@ export function normalizePath(path: string): string {
  * segments. Empty segments are kept: `/a/` is `["a", ""]` (#209).
  */
 export function splitPath(path: string): string[] {
-  const s = path.split("/");
-  s.shift();
-  return s;
+  return path.split("/").slice(1);
 }
 
 /**
@@ -120,18 +118,35 @@ export function getMatchParams(
   paramsMap: ParamsIndexMap,
   suffix?: [number, number],
   slash?: boolean,
+  path?: string,
+  catchAllOffset?: number,
 ): MatchedRoute["params"] {
   const params = new NullProtoObj();
+  if (paramsMap.length === 1 && !suffix) {
+    const map = paramsMap[0];
+    const index = map[0];
+    if (index >= 0 && typeof map[1] === "string" && !map[2] && !map[5]) {
+      params[map[1]] = segments[index];
+      return params;
+    }
+  }
   // Segments after a `**` are counted from the end of the path
   const end = suffix ? segments.length - suffix[1] : segments.length;
-  for (const [index, name, optional, , , join] of paramsMap) {
+  for (let p = 0; p < paramsMap.length; p++) {
+    const map = paramsMap[p];
+    const index = map[0];
+    const name = map[1];
+    const optional = map[2];
+    const join = map[5];
     // A bare `**` (`~index` is where it starts; negative for the other
     // params) over zero segments is unset; a trailing `*` there too, unless
     // the lookup path had a trailing slash (`slash`): `""`
     if (~index >= end && (optional || !slash)) continue;
     const segment =
       index < 0
-        ? segments.slice(~index, end).join("/")
+        ? catchAllOffset !== undefined && path !== undefined
+          ? path.slice(catchAllOffset)
+          : segments.slice(~index, end).join("/")
         : segments[suffix && index > suffix[0] ? index - suffix[0] - 1 + end : index];
     if (typeof name === "string") {
       setParam(params, name, segment, join);
